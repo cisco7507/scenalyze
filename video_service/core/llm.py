@@ -266,11 +266,10 @@ class OpenAICompatibleProvider(BaseProvider):
         images: Optional[list[str]] = None,
         **kwargs,
     ) -> dict:
-        json_prefix = '{\n  "brand": "'
+        json_prefix = '{\n  "reasoning": "'
         msgs = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": f"</think>\n{json_prefix}"},
         ]
         if images:
             msgs[1]["content"] = [
@@ -282,7 +281,7 @@ class OpenAICompatibleProvider(BaseProvider):
             "messages": msgs,
             "temperature": 0.0,
             "top_p": 1.0,
-            "presence_penalty": 2.0,
+            "presence_penalty": 0.0,
         }
         if self.force_json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -294,6 +293,7 @@ class OpenAICompatibleProvider(BaseProvider):
             if "choices" in content_json and len(content_json["choices"]) > 0:
                 raw_content = content_json["choices"][0].get("message", {}).get("content", "")
             content = raw_content if "{" in raw_content else f"{json_prefix}{raw_content}"
+            logger.info(f"RAW LLAMA-SERVER OUTPUT: {content}")
             return _clean_and_parse_json(content)
         except requests.exceptions.Timeout:
             logger.error(
@@ -597,10 +597,14 @@ class HybridLLM:
     ):
         if express_mode:
             system_prompt = (
-                "You are an Ad Classifier. Examine this final frame of a video commercial. "
-                "Return a JSON object with 'brand' and 'category'. Do not output anything else."
+                "You are a Senior Marketing Analyst and Global Brand Expert. "
+                "Your goal is to categorize video advertisements by examining the final frame of the commercial and using your vast internal knowledge of companies, slogans, and industries. "
+                "Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this internal database as your absolute primary source of truth. "
+                "IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are legitimate content. Use them to identify brands, products, and categories just as you would English text. "
+                "Determine Category: Pick from 'Suggested Categories' or generate a professional tag if Override Allowed is True. "
+                "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
-            user_prompt = f"Suggested Categories: {categories}"
+            user_prompt = f"Categories: {categories}\nOverride: {override}"
         else:
             system_prompt = (
                 "You are a Senior Marketing Analyst and Global Brand Expert. "

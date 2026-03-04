@@ -106,6 +106,14 @@ def _maybe_extend_tail_frames(
         )
 
         static_reference_hist = tail_histograms[-1]
+        
+        last_frame_gray = cv2.cvtColor(frames[-1]["ocr_image"], cv2.COLOR_BGR2GRAY)
+        last_frame_brightness = float(cv2.mean(last_frame_gray)[0])
+        
+        if last_frame_brightness < 5.0:
+            logger.info("tail_static_check: Tail anchor brightness (%.2f) is near absolute black, aborting walk to prevent fade-out capture.", last_frame_brightness)
+            return frames
+            
         hop_frames = max(1, int(fps * 2))
         max_backward_frames = max(1, int(max_backward_seconds * fps))
 
@@ -287,60 +295,72 @@ def extract_express_brand_frame(video_path: str, job_id: str | None = None) -> O
             return None
 
         duration = total / fps
-        sample_start = max(0.0, duration - 4.0)
-        sample_end = max(0.0, duration - 0.5)
-        if sample_end < sample_start:
-            sample_end = sample_start
-
-        sample_count = 5
-        if sample_count <= 1:
-            sample_times = [sample_end]
-        else:
-            step = (sample_end - sample_start) / float(sample_count - 1)
-            sample_times = [sample_start + (idx * step) for idx in range(sample_count)]
-
-        samples: list[tuple[float, Any]] = []
-        for time_seconds in sample_times:
+        
+        # 1. Seek backwards from the end, skipping black frames
+        cursor_sec = duration - 0.1
+        first_visible_frame = None
+        first_visible_sec = 0.0
+        
+        while cursor_sec >= 0:
             if job_id and is_job_aborted(job_id):
-                logger.info(
-                    "abort_frame_extraction: job_id=%s time=%.2fs type=express",
-                    job_id,
-                    time_seconds,
-                )
                 return None
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, time_seconds) * 1000.0)
+            cap.set(cv2.CAP_PROP_POS_MSEC, cursor_sec * 1000.0)
             ret, frame = cap.read()
-            if ret:
-                samples.append((time_seconds, frame))
-
-        if not samples:
-            return None
-        if len(samples) == 1:
-            logger.debug("express_tail_sampling: single frame selected time=%.2fs", samples[0][0])
+            if not ret:
+                cursor_sec -= 1.0
+                continue
+                
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            brightness = float(cv2.mean(gray)[0])
+            
+            if brightness >= 5.0:
+                first_visible_frame = frame
+                first_visible_sec = cursor_sec
+                break
+                
+            cursor_sec -= 1.0
+            
+        if first_visible_frame is None:
+            return None # Entire video is black or unreadable
+            
+        # 2. Find the Static Plate
+        # Grab the next 2 visible frames directly preceding it at 0.2s intervals
+        candidate_times = [first_visible_sec, first_visible_sec - 0.2, first_visible_sec - 0.4]
+        # Filter out negative times
+        candidate_times = [t for t in candidate_times if t >= 0]
+        
+        samples = []
+        for t in candidate_times:
+            if t == first_visible_sec:
+                samples.append((t, first_visible_frame))
+            else:
+                cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
+                ret, frame = cap.read()
+                if ret:
+                    samples.append((t, frame))
+                    
+        if len(samples) < 2:
             return _cv_bgr_to_pil(samples[0][1])
-
-        pair_scores: list[float] = []
+            
+        # Reverse to chronological order just for logic consistency
+        samples.reverse()
+        
         best_pair_index = 1
         best_pair_score = float("inf")
         previous_gray = cv2.cvtColor(samples[0][1], cv2.COLOR_BGR2GRAY)
+        
         for idx in range(1, len(samples)):
             current_gray = cv2.cvtColor(samples[idx][1], cv2.COLOR_BGR2GRAY)
             diff = cv2.absdiff(previous_gray, current_gray)
-            score = float((diff.astype("float32") ** 2).mean())
-            pair_scores.append(score)
+            score = float((diff.astype("float32") ** 2).mean()) # Variance
             if score < best_pair_score:
                 best_pair_score = score
                 best_pair_index = idx
             previous_gray = current_gray
-
-        logger.debug(
-            "express_tail_sampling: duration=%.2fs scores=%s best_pair_idx=%d best_mse=%.6f",
-            duration,
-            [round(score, 6) for score in pair_scores],
-            best_pair_index,
-            best_pair_score,
-        )
+            
+        logger.info(f"express_mode: found static frame at {samples[best_pair_index][0]:.2f}s with score {best_pair_score:.2f}")
         return _cv_bgr_to_pil(samples[best_pair_index][1])
+        
     except Exception as exc:
         logger.warning("express_tail_sampling_failed: %s", exc)
         return None
