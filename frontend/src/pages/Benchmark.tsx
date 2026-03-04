@@ -66,14 +66,14 @@ interface ModalShellProps {
 function ModalShell({ title, open, onClose, children }: ModalShellProps) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-4 text-gray-900 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold">{title}</h3>
+          <h3 className="text-base font-semibold text-gray-900">{title}</h3>
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-900"
+            className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
           >
             Close
           </button>
@@ -208,14 +208,14 @@ export function Benchmark() {
   const scatterOption: EChartsOption = useMemo(() => {
     const points: BenchmarkPoint[] = suiteResults?.points || [];
     return {
-      backgroundColor: 'transparent',
+      backgroundColor: '#f8fafc',
       animationDuration: 600,
       grid: { left: 48, right: 24, top: 30, bottom: 42, containLabel: true },
       tooltip: {
         trigger: 'item',
-        backgroundColor: 'rgba(2,6,23,0.95)',
-        borderColor: 'rgba(56,189,248,0.4)',
-        textStyle: { color: '#e2e8f0' },
+        backgroundColor: 'rgba(255,255,255,0.97)',
+        borderColor: 'rgba(99,102,241,0.4)',
+        textStyle: { color: '#1e293b' },
         formatter: (params: any) => {
           const point = params?.data?.meta as BenchmarkPoint | undefined;
           if (!point) return 'No data';
@@ -233,9 +233,9 @@ export function Benchmark() {
         nameLocation: 'middle',
         nameGap: 28,
         type: 'value',
-        axisLabel: { color: '#94a3b8' },
-        axisLine: { lineStyle: { color: '#334155' } },
-        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.16)' } },
+        axisLabel: { color: '#6b7280' },
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        splitLine: { lineStyle: { color: 'rgba(107,114,128,0.15)' } },
       },
       yAxis: {
         name: 'Composite Accuracy %',
@@ -244,20 +244,20 @@ export function Benchmark() {
         type: 'value',
         min: 0,
         max: 100,
-        axisLabel: { color: '#94a3b8' },
-        axisLine: { lineStyle: { color: '#334155' } },
-        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.16)' } },
+        axisLabel: { color: '#6b7280' },
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        splitLine: { lineStyle: { color: 'rgba(107,114,128,0.15)' } },
       },
       series: [
         {
           type: 'scatter',
           symbolSize: 10,
           itemStyle: {
-            color: '#22d3ee',
-            borderColor: '#7dd3fc',
+            color: '#6366f1',
+            borderColor: '#a5b4fc',
             borderWidth: 1,
             shadowBlur: 8,
-            shadowColor: 'rgba(34, 211, 238, 0.45)',
+            shadowColor: 'rgba(99, 102, 241, 0.35)',
           },
           data: points.map((point) => ({
             value: [point.x_duration_seconds, point.y_composite_accuracy_pct],
@@ -437,34 +437,34 @@ export function Benchmark() {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center gap-2">
-        <RocketIcon className="h-6 w-6 text-cyan-500" />
-        <h2 className="text-3xl font-bold tracking-tight text-slate-100">Benchmarking</h2>
+        <RocketIcon className="h-6 w-6 text-primary-600" />
+        <h2 className="text-3xl font-bold tracking-tight text-gray-900">Benchmarking</h2>
       </div>
 
       {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-300">
+        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
           <ExclamationTriangleIcon className="h-4 w-4" />
           <span className="text-sm">{error}</span>
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-slate-100">
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Host Hardware Profile</h3>
-          <span className="text-[11px] text-slate-400">Detected at {profile?.timestamp || '—'}</span>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Host Hardware Profile</h3>
+          <span className="text-[11px] text-gray-400">Detected at {profile?.timestamp || '—'}</span>
         </div>
         <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-          <div className="rounded border border-slate-800 bg-slate-900 p-2">CPU (logical): {profile?.hardware.cpu_count_logical ?? '—'}</div>
-          <div className="rounded border border-slate-800 bg-slate-900 p-2">RAM: {formatGbFromMb(profile?.hardware.total_ram_mb)}</div>
-          <div className="rounded border border-slate-800 bg-slate-900 p-2">Accelerator: {profile?.hardware.accelerator || 'cpu'}</div>
-          <div className="rounded border border-slate-800 bg-slate-900 p-2">VRAM: {profile?.hardware.total_vram_mb ?? '—'} MB</div>
+          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">CPU (logical): {profile?.hardware.cpu_count_logical ?? '—'}</div>
+          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">RAM: {formatGbFromMb(profile?.hardware.total_ram_mb)}</div>
+          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">Accelerator: {profile?.hardware.accelerator || 'cpu'}</div>
+          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">VRAM: {profile?.hardware.total_vram_mb ?? '—'} MB</div>
         </div>
         {(profile?.warnings || []).length > 0 && (
           <div className="mt-3 space-y-2">
             {profile!.warnings.map((warning, idx) => (
               <div
                 key={`${warning.model}-${idx}`}
-                className="rounded border border-amber-700/40 bg-amber-900/20 p-2 text-xs text-amber-200"
+                className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700"
               >
                 {warning.message}
               </div>
@@ -474,74 +474,74 @@ export function Benchmark() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-100">Create Golden Video Truth</h3>
+        <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-900">Create Golden Video Truth</h3>
           <input
             value={truthName}
             onChange={(event) => setTruthName(event.target.value)}
             placeholder="Truth set name"
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <input
             value={truthVideoUrl}
             onChange={(event) => setTruthVideoUrl(event.target.value)}
             placeholder="Video URL or absolute server path"
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <input
               value={truthExpectedBrand}
               onChange={(event) => setTruthExpectedBrand(event.target.value)}
               placeholder="Expected brand"
-              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+              className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
             />
             <input
               value={truthExpectedCategory}
               onChange={(event) => setTruthExpectedCategory(event.target.value)}
               placeholder="Expected category"
-              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+              className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
             />
           </div>
           <input
             value={truthExpectedConfidence}
             onChange={(event) => setTruthExpectedConfidence(event.target.value)}
             placeholder="Expected confidence (0..1)"
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <textarea
             value={truthCategories}
             onChange={(event) => setTruthCategories(event.target.value)}
             placeholder="Expected categories (comma separated)"
-            className="h-20 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+            className="h-20 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <textarea
             value={truthExpectedOcr}
             onChange={(event) => setTruthExpectedOcr(event.target.value)}
             placeholder="Expected OCR corpus"
-            className="h-20 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+            className="h-20 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <textarea
             value={truthExpectedReasoning}
             onChange={(event) => setTruthExpectedReasoning(event.target.value)}
             placeholder="Expected reasoning"
-            className="h-20 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+            className="h-20 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <button
             type="button"
             disabled={createTruthDisabled}
             onClick={handleCreateTruth}
-            className="h-10 rounded bg-cyan-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="h-10 rounded bg-primary-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
           >
             Create Truth
           </button>
         </div>
 
-        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-100">Run Benchmark Suite</h3>
+        <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-900">Run Benchmark Suite</h3>
           <select
             value={runTruthId}
             onChange={(event) => setRunTruthId(event.target.value)}
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           >
             <option value="">Select Golden Truth</option>
             {truths.map((truth) => (
@@ -554,7 +554,7 @@ export function Benchmark() {
             value={runCategories}
             onChange={(event) => setRunCategories(event.target.value)}
             placeholder="Optional categories override"
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <button
             type="button"
@@ -564,19 +564,19 @@ export function Benchmark() {
           >
             Launch Cartesian Benchmark
           </button>
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-gray-500">
             Benchmarks enqueue permutations across scan strategy, OCR engine/mode, and provider-model combinations.
           </div>
         </div>
       </div>
 
-      <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
+      <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-100">Benchmark Suites</h3>
+          <h3 className="text-sm font-semibold text-gray-900">Benchmark Suites</h3>
           <select
             value={selectedSuiteId}
             onChange={(event) => setSelectedSuiteId(event.target.value)}
-            className="h-9 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+            className="h-9 rounded border border-gray-300 bg-white px-2 text-xs text-gray-900 focus:border-primary-500 focus:outline-none"
           >
             <option value="">Select suite</option>
             {suites.map((suite) => (
@@ -587,9 +587,9 @@ export function Benchmark() {
           </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-xs text-slate-200">
-            <thead className="text-slate-400">
-              <tr>
+          <table className="w-full min-w-[980px] text-left text-xs text-gray-700">
+            <thead className="text-gray-500">
+              <tr className="border-b border-gray-200">
                 <th className="px-2 py-2">Suite</th>
                 <th className="px-2 py-2">Description</th>
                 <th className="px-2 py-2">Status</th>
@@ -605,37 +605,37 @@ export function Benchmark() {
                 return (
                   <tr
                     key={suite.suite_id}
-                    className={`border-t border-slate-800 ${active ? 'bg-cyan-900/20' : 'bg-transparent'}`}
+                    className={`border-t border-gray-100 ${active ? 'bg-primary-50' : 'bg-transparent hover:bg-gray-50'}`}
                   >
                     <td className="px-2 py-2">
                       <button
                         type="button"
                         onClick={() => setSelectedSuiteId(suite.suite_id)}
-                        className="text-left text-cyan-300 hover:underline"
+                        className="text-left text-primary-600 hover:underline font-medium"
                       >
                         {suite.name || suite.suite_id}
                       </button>
                     </td>
-                    <td className="px-2 py-2 text-slate-400" title={suite.description || ''}>
+                    <td className="px-2 py-2 text-gray-500" title={suite.description || ''}>
                       {truncate(suite.description, 70)}
                     </td>
                     <td className="px-2 py-2">{suite.status}</td>
                     <td className="px-2 py-2">{suite.test_count ?? 0}</td>
                     <td className="px-2 py-2">{suite.completed_jobs}/{suite.total_jobs}</td>
-                    <td className="px-2 py-2 text-slate-400">{truncate(suite.updated_at, 22)}</td>
+                    <td className="px-2 py-2 text-gray-400">{truncate(suite.updated_at, 22)}</td>
                     <td className="px-2 py-2">
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => handleOpenSuiteModal(suite)}
-                          className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-900"
+                          className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-100"
                         >
                           <Pencil2Icon /> Edit
                         </button>
                         <button
                           type="button"
                           onClick={() => void handleDeleteSuite(suite)}
-                          className="inline-flex items-center gap-1 rounded border border-red-800 px-2 py-1 text-[11px] text-red-300 hover:bg-red-900/30"
+                          className="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-1 text-[11px] text-red-600 hover:bg-red-50"
                         >
                           <TrashIcon /> Delete
                         </button>
@@ -646,7 +646,7 @@ export function Benchmark() {
               })}
               {suites.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-2 py-3 text-slate-500">No benchmark suites available.</td>
+                  <td colSpan={7} className="px-2 py-3 text-gray-400">No benchmark suites available.</td>
                 </tr>
               )}
             </tbody>
@@ -654,21 +654,21 @@ export function Benchmark() {
         </div>
       </div>
 
-      <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
-        <h3 className="text-sm font-semibold text-slate-100">Suite Detail</h3>
+      <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-semibold text-gray-900">Suite Detail</h3>
         {suiteDetail ? (
           <>
-            <div className="grid grid-cols-2 gap-3 text-sm text-slate-200 md:grid-cols-4">
-              <div className="rounded border border-slate-800 bg-slate-900 p-2">Status: {suiteDetail.status}</div>
-              <div className="rounded border border-slate-800 bg-slate-900 p-2">Total: {suiteDetail.total_jobs}</div>
-              <div className="rounded border border-slate-800 bg-slate-900 p-2">Completed: {suiteDetail.completed_jobs}</div>
-              <div className="rounded border border-slate-800 bg-slate-900 p-2">Failed: {suiteDetail.failed_jobs}</div>
+            <div className="grid grid-cols-2 gap-3 text-sm text-gray-700 md:grid-cols-4">
+              <div className="rounded border border-gray-200 bg-gray-50 p-2">Status: {suiteDetail.status}</div>
+              <div className="rounded border border-gray-200 bg-gray-50 p-2">Total: {suiteDetail.total_jobs}</div>
+              <div className="rounded border border-gray-200 bg-gray-50 p-2">Completed: {suiteDetail.completed_jobs}</div>
+              <div className="rounded border border-gray-200 bg-gray-50 p-2">Failed: {suiteDetail.failed_jobs}</div>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] text-left text-xs text-slate-200">
-                <thead className="text-slate-400">
-                  <tr>
+              <table className="w-full min-w-[1000px] text-left text-xs text-gray-700">
+                <thead className="text-gray-500">
+                  <tr className="border-b border-gray-200">
                     <th className="px-2 py-2">Test ID</th>
                     <th className="px-2 py-2">Source URL</th>
                     <th className="px-2 py-2">Expected Category</th>
@@ -682,9 +682,9 @@ export function Benchmark() {
                   {(suiteDetail.tests || []).map((test) => {
                     const id = test.test_id || test.truth_id;
                     return (
-                      <tr key={id} className="border-t border-slate-800">
+                      <tr key={id} className="border-t border-gray-100 hover:bg-gray-50">
                         <td className="px-2 py-2">{id}</td>
-                        <td className="px-2 py-2 text-slate-400" title={test.source_url || test.video_url}>
+                        <td className="px-2 py-2 text-gray-500" title={test.source_url || test.video_url}>
                           {truncate(test.source_url || test.video_url, 54)}
                         </td>
                         <td className="px-2 py-2" title={test.expected_category || test.expected_categories?.join(', ')}>
@@ -700,14 +700,14 @@ export function Benchmark() {
                             <button
                               type="button"
                               onClick={() => handleOpenTestModal(test)}
-                              className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-900"
+                              className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-100"
                             >
                               <Pencil2Icon /> Edit
                             </button>
                             <button
                               type="button"
                               onClick={() => void handleDeleteTest(test)}
-                              className="inline-flex items-center gap-1 rounded border border-red-800 px-2 py-1 text-[11px] text-red-300 hover:bg-red-900/30"
+                              className="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-1 text-[11px] text-red-600 hover:bg-red-50"
                             >
                               <TrashIcon /> Delete
                             </button>
@@ -718,7 +718,7 @@ export function Benchmark() {
                   })}
                   {(suiteDetail.tests || []).length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-2 py-3 text-slate-500">No benchmark tests assigned to this suite.</td>
+                      <td colSpan={7} className="px-2 py-3 text-gray-400">No benchmark tests assigned to this suite.</td>
                     </tr>
                   )}
                 </tbody>
@@ -726,16 +726,16 @@ export function Benchmark() {
             </div>
           </>
         ) : (
-          <div className="text-sm text-slate-500">Select a suite to inspect its golden tests.</div>
+          <div className="text-sm text-gray-400">Select a suite to inspect its golden tests.</div>
         )}
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-2xl">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
             Duration vs Composite Accuracy
           </h3>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-gray-400">
             Each dot is a benchmark permutation. Lower X and higher Y is better (Pareto frontier).
           </p>
         </div>
@@ -748,19 +748,19 @@ export function Benchmark() {
             value={suiteModalName}
             onChange={(event) => setSuiteModalName(event.target.value)}
             placeholder="Suite title"
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <textarea
             value={suiteModalDescription}
             onChange={(event) => setSuiteModalDescription(event.target.value)}
             placeholder="Suite description"
-            className="h-24 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+            className="h-24 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <div className="flex justify-end">
             <button
               type="button"
               onClick={() => void handleSaveSuite()}
-              className="h-9 rounded bg-cyan-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+              className="h-9 rounded bg-primary-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
             >
               Save Suite
             </button>

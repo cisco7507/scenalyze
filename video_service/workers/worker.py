@@ -156,15 +156,18 @@ def _save_gallery_frames(job_id: str, gallery: list) -> list[dict]:
 
 
 def _vision_board_from_scores(scores: dict) -> dict:
+    from video_service.core.categories import category_mapper  # avoid circular at module level
     top_matches = []
     for label, score in (scores or {}).items():
-        top_matches.append({"label": str(label), "score": float(score)})
+        cat_id = category_mapper.cat_to_id.get(str(label))
+        top_matches.append({"label": str(label), "score": float(score), "category_id": cat_id})
     return {
         "image_url": None,
         "plot_url": None,
         "top_matches": top_matches,
         "metadata": {"source": "pipeline_scores", "count": len(top_matches)},
     }
+
 
 
 def _vision_board_from_nebula(job_id: str, nebula) -> dict:

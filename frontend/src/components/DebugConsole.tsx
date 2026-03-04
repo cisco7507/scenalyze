@@ -338,9 +338,12 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
         open ? 'translate-y-0' : 'translate-y-full'
       )}
     >
-      <div className="mx-3 mb-3 rounded-xl border border-slate-700 bg-slate-950/95 shadow-2xl backdrop-blur lg:mx-6">
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3">
-          <div className="text-sm font-semibold tracking-wide text-slate-100">Server Logs</div>
+      <div className="mx-3 mb-3 rounded-xl border border-primary-600/30 bg-slate-800/96 shadow-2xl backdrop-blur-sm lg:mx-6">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-700/60 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-1.5 rounded-full bg-primary-400 animate-pulse" />
+            <div className="text-sm font-semibold tracking-wide text-slate-100">Server Logs</div>
+          </div>
           <div className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase', connectionClass)}>
             {connectionLabel}
           </div>
@@ -350,7 +353,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter logs (job_id, error, timeout...)"
-              className="h-8 w-full rounded-md border border-slate-700 bg-slate-900 pl-8 pr-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+              className="h-8 w-full rounded-md border border-slate-600 bg-slate-700/80 pl-8 pr-2 text-xs text-slate-100 placeholder:text-slate-400 focus:border-primary-500 focus:outline-none"
             />
           </div>
           <label className="flex items-center gap-1 text-xs text-slate-300">
@@ -358,7 +361,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
               type="checkbox"
               checked={hideInfo}
               onChange={(event) => setHideInfo(event.target.checked)}
-              className="h-3.5 w-3.5 accent-sky-500"
+              className="h-3.5 w-3.5 accent-primary-500"
             />
             hide INFO
           </label>
@@ -367,7 +370,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
               type="checkbox"
               checked={hideDebug}
               onChange={(event) => setHideDebug(event.target.checked)}
-              className="h-3.5 w-3.5 accent-sky-500"
+              className="h-3.5 w-3.5 accent-primary-500"
             />
             hide DEBUG
           </label>
@@ -379,7 +382,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
               setStickToBottom(true);
               setReconnectTrigger((x) => x + 1);
             }}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-600 bg-slate-700/80 px-2 text-xs font-semibold text-slate-200 hover:bg-slate-600/80"
           >
             <TrashIcon className="h-3.5 w-3.5" />
             Clear
@@ -387,7 +390,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-600 bg-slate-700/80 px-2 text-xs font-semibold text-slate-200 hover:bg-slate-600/80"
           >
             <Cross2Icon className="h-3.5 w-3.5" />
             Close

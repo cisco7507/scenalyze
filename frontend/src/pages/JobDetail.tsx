@@ -1,24 +1,44 @@
-import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import type { ReactElement } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getJob, getJobResult, getJobEvents, getJobArtifacts, getJobVideoUrl, exportResultsCSV, copyToClipboard } from '../lib/api';
-import type { JobStatus, ResultRow, JobArtifacts } from '../lib/api';
 import {
-  ArrowLeftIcon, FileTextIcon, MagicWandIcon, DownloadIcon,
-  CheckCircledIcon, ExclamationTriangleIcon, CopyIcon,
-} from '@radix-ui/react-icons';
+  Fragment,
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
+import type { ReactElement } from "react";
+import { useParams, Link } from "react-router-dom";
+import {
+  getJob,
+  getJobResult,
+  getJobEvents,
+  getJobArtifacts,
+  getJobVideoUrl,
+  exportResultsCSV,
+  copyToClipboard,
+} from "../lib/api";
+import type { JobStatus, ResultRow, JobArtifacts } from "../lib/api";
+import {
+  ArrowLeftIcon,
+  FileTextIcon,
+  MagicWandIcon,
+  DownloadIcon,
+  CheckCircledIcon,
+  ExclamationTriangleIcon,
+  CopyIcon,
+} from "@radix-ui/react-icons";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 function toApiUrl(url?: string | null): string {
-  if (!url) return '';
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
   return `${API_BASE}${url}`;
 }
 
 function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
     const parsed = Number.parseFloat(value);
     if (Number.isFinite(parsed)) return parsed;
   }
@@ -26,32 +46,34 @@ function toNumber(value: unknown): number | null {
 }
 
 function formatMatchMethod(value: unknown): string {
-  if (typeof value !== 'string') return '';
+  if (typeof value !== "string") return "";
   const trimmed = value.trim();
-  if (!trimmed) return '';
+  if (!trimmed) return "";
   const normalized = trimmed.toLowerCase();
-  if (normalized === 'none' || normalized === 'pending') return '';
+  if (normalized === "none" || normalized === "pending") return "";
   return normalized
     .split(/[_\s]+/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+    .join(" ");
 }
 
 function formatSummaryMatch(method: unknown, score: unknown): string {
-  if (typeof method !== 'string') return '—';
+  if (typeof method !== "string") return "—";
   const normalized = method.trim().toLowerCase();
-  if (!normalized || normalized === 'none' || normalized === 'pending') return '—';
+  if (!normalized || normalized === "none" || normalized === "pending")
+    return "—";
 
-  const label = normalized === 'semantic'
-    ? 'Semantic'
-    : normalized === 'exact'
-      ? 'Exact'
-      : normalized === 'embeddings'
-        ? 'Embed.'
-        : normalized === 'vision'
-          ? 'Vision'
-          : formatMatchMethod(method) || '—';
+  const label =
+    normalized === "semantic"
+      ? "Semantic"
+      : normalized === "exact"
+        ? "Exact"
+        : normalized === "embeddings"
+          ? "Embed."
+          : normalized === "vision"
+            ? "Vision"
+            : formatMatchMethod(method) || "—";
 
   const scoreValue = toNumber(score);
   if (scoreValue === null) return label;
@@ -72,38 +94,121 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200 hover:text-gray-900 active:scale-95"
     >
       <CopyIcon className="w-3 h-3" />
-      {copied ? 'Copied!' : label}
+      {copied ? "Copied!" : label}
     </button>
   );
 }
 
-type ArtifactTab = 'video' | 'vision' | 'ocr' | 'frames';
-type VideoSource = { type: 'local' | 'youtube' | 'remote'; url: string };
-type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
-type ReasoningTermType = 'brand' | 'url' | 'evidence';
+type ArtifactTab = "video" | "vision" | "ocr" | "frames";
+type VideoSource = { type: "local" | "youtube" | "remote"; url: string };
+type ScratchTool = "OCR" | "SEARCH" | "VISION" | "FINAL" | "ERROR";
+type ReasoningTermType = "brand" | "url" | "evidence";
 type ReasoningTerm = { text: string; type: ReasoningTermType };
-type HighlightedReasoningPart = string | { text: string; type: ReasoningTermType };
+type HighlightedReasoningPart =
+  | string
+  | { text: string; type: ReasoningTermType };
 type FrameConfidenceTone = {
   stripClass: string;
   badgeClass: string;
   textLabel: string;
 };
 
-const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
-const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
+const PIPELINE_STAGES = [
+  "claim",
+  "ingest",
+  "frame_extract",
+  "ocr",
+  "vision",
+  "llm",
+  "persist",
+  "completed",
+] as const;
+const AGENT_STAGES = [
+  "claim",
+  "ingest",
+  "frame_extract",
+  "ocr",
+  "vision",
+  "llm",
+  "persist",
+  "completed",
+] as const;
 const COMMON_SIGNAL_WORDS = new Set([
-  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have', 'he', 'her', 'his',
-  'in', 'is', 'it', 'its', 'of', 'on', 'or', 'she', 'so', 'the', 'their', 'them', 'then', 'there',
-  'they', 'this', 'to', 'too', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'who', 'will',
-  'with', 'would', 'but', 'if', 'not', 'no', 'yes', 'that', 'than', 'also', 'been', 'being', 'both',
-  'each', 'had', 'may', 'most', 'must', 'likely', 'likely meant', 'however', 'therefore', 'thus',
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "has",
+  "have",
+  "he",
+  "her",
+  "his",
+  "in",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "she",
+  "so",
+  "the",
+  "their",
+  "them",
+  "then",
+  "there",
+  "they",
+  "this",
+  "to",
+  "too",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "will",
+  "with",
+  "would",
+  "but",
+  "if",
+  "not",
+  "no",
+  "yes",
+  "that",
+  "than",
+  "also",
+  "been",
+  "being",
+  "both",
+  "each",
+  "had",
+  "may",
+  "most",
+  "must",
+  "likely",
+  "likely meant",
+  "however",
+  "therefore",
+  "thus",
 ]);
 
-function extractFrameTimestampKey(frame: { timestamp?: number | null; label?: string }): string | null {
-  if (typeof frame.timestamp === 'number' && Number.isFinite(frame.timestamp)) {
+function extractFrameTimestampKey(frame: {
+  timestamp?: number | null;
+  label?: string;
+}): string | null {
+  if (typeof frame.timestamp === "number" && Number.isFinite(frame.timestamp)) {
     return frame.timestamp.toFixed(1);
   }
-  if (typeof frame.label === 'string') {
+  if (typeof frame.label === "string") {
     const match = frame.label.match(/([\d.]+)\s*s/i);
     if (match) {
       const parsed = Number.parseFloat(match[1]);
@@ -114,16 +219,17 @@ function extractFrameTimestampKey(frame: { timestamp?: number | null; label?: st
 }
 
 function formatStageName(stage: string): string {
-  return stage.replace(/_/g, ' ');
+  return stage.replace(/_/g, " ");
 }
 
 function classifyReasoningTerm(term: string, brandText: string): ReasoningTerm {
   const cleanTerm = term.trim();
   const termLower = cleanTerm.toLowerCase();
   const brandLower = brandText.trim().toLowerCase();
-  if (brandLower && termLower === brandLower) return { text: cleanTerm, type: 'brand' };
-  if (/\.\w{2,4}$/i.test(cleanTerm)) return { text: cleanTerm, type: 'url' };
-  return { text: cleanTerm, type: 'evidence' };
+  if (brandLower && termLower === brandLower)
+    return { text: cleanTerm, type: "brand" };
+  if (/\.\w{2,4}$/i.test(cleanTerm)) return { text: cleanTerm, type: "url" };
+  return { text: cleanTerm, type: "evidence" };
 }
 
 function isValidSignalPill(text: string): boolean {
@@ -140,8 +246,10 @@ function isValidSignalPill(text: string): boolean {
 }
 
 function normalizeSignalPillText(text: string): string {
-  const trimmed = text.trim().replace(/\s+/g, ' ');
-  const spacedDomain = trimmed.match(/^([a-z0-9-]+)\s+(com|net|org|co|io|ai|ca|us|uk|edu|gov)$/i);
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  const spacedDomain = trimmed.match(
+    /^([a-z0-9-]+)\s+(com|net|org|co|io|ai|ca|us|uk|edu|gov)$/i,
+  );
   if (spacedDomain) {
     return `${spacedDomain[1].toLowerCase()}.${spacedDomain[2].toLowerCase()}`;
   }
@@ -150,42 +258,42 @@ function normalizeSignalPillText(text: string): string {
 
 function sanitizeInlineReasoningFragment(text: string): string {
   return text
-    .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, '')
-    .replace(/\s{2,}/g, ' ')
+    .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, "")
+    .replace(/\s{2,}/g, " ")
     .trim();
 }
 
 function getFrameConfidenceTone(score: number | null): FrameConfidenceTone {
   if (score == null) {
     return {
-      stripClass: 'bg-gray-300',
-      badgeClass: 'bg-gray-100 text-gray-700 border border-gray-300',
-      textLabel: 'Unknown',
+      stripClass: "bg-gray-300",
+      badgeClass: "bg-gray-100 text-gray-700 border border-gray-300",
+      textLabel: "Unknown",
     };
   }
   if (score >= 0.7) {
     return {
-      stripClass: 'bg-emerald-500',
-      badgeClass: 'bg-emerald-100 text-emerald-800 border border-emerald-300',
-      textLabel: 'High',
+      stripClass: "bg-emerald-500",
+      badgeClass: "bg-emerald-100 text-emerald-800 border border-emerald-300",
+      textLabel: "High",
     };
   }
   if (score >= 0.4) {
     return {
-      stripClass: 'bg-amber-500',
-      badgeClass: 'bg-amber-100 text-amber-800 border border-amber-300',
-      textLabel: 'Medium',
+      stripClass: "bg-amber-500",
+      badgeClass: "bg-amber-100 text-amber-800 border border-amber-300",
+      textLabel: "Medium",
     };
   }
   return {
-    stripClass: 'bg-red-400',
-    badgeClass: 'bg-red-100 text-red-800 border border-red-300',
-    textLabel: 'Low',
+    stripClass: "bg-red-400",
+    badgeClass: "bg-red-100 text-red-800 border border-red-300",
+    textLabel: "Low",
   };
 }
 
 function truncateCategory(value: string, max = 20): string {
-  const normalized = (value || '').trim();
+  const normalized = (value || "").trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max - 1)}…`;
 }
@@ -193,36 +301,45 @@ function truncateCategory(value: string, max = 20): string {
 function normalizeStage(raw: string): string {
   const lower = raw.toLowerCase().trim();
   const aliases: Record<string, string> = {
-    frameextract: 'frame_extract',
-    'frame extract': 'frame_extract',
-    complete: 'completed',
-    done: 'completed',
+    frameextract: "frame_extract",
+    "frame extract": "frame_extract",
+    complete: "completed",
+    done: "completed",
   };
   return aliases[lower] || lower;
 }
 
 function reasoningPillClass(type: ReasoningTermType): string {
-  if (type === 'brand') return 'bg-gray-200 text-gray-900 font-semibold px-2.5 py-1 rounded-full text-xs';
-  if (type === 'url') return 'bg-cyan-50 text-cyan-700 border border-cyan-200 px-2.5 py-1 rounded-full text-xs font-mono';
-  return 'bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-xs';
+  if (type === "brand")
+    return "bg-gray-200 text-gray-900 font-semibold px-2.5 py-1 rounded-full text-xs";
+  if (type === "url")
+    return "bg-cyan-50 text-cyan-700 border border-cyan-200 px-2.5 py-1 rounded-full text-xs font-mono";
+  return "bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-xs";
 }
 
 function reasoningInlineClass(type: ReasoningTermType): string {
-  if (type === 'brand') return 'bg-gray-200 text-gray-900 font-semibold px-1 rounded';
-  if (type === 'url') return 'bg-cyan-50 text-cyan-700 px-1 rounded font-mono';
-  return 'bg-amber-50 text-amber-700 px-1 rounded';
+  if (type === "brand")
+    return "bg-gray-200 text-gray-900 font-semibold px-1 rounded";
+  if (type === "url") return "bg-cyan-50 text-cyan-700 px-1 rounded font-mono";
+  return "bg-amber-50 text-amber-700 px-1 rounded";
 }
 
-function parseToolSegment(line: string): { tool: ScratchTool | null; query: string; finalFields: Record<string, string> } {
-  const toolMatch = line.match(/\[TOOL:\s*(OCR|SEARCH|VISION|FINAL|ERROR)\b([^\]]*)\]/i);
-  if (!toolMatch) return { tool: null, query: '', finalFields: {} };
+function parseToolSegment(line: string): {
+  tool: ScratchTool | null;
+  query: string;
+  finalFields: Record<string, string>;
+} {
+  const toolMatch = line.match(
+    /\[TOOL:\s*(OCR|SEARCH|VISION|FINAL|ERROR)\b([^\]]*)\]/i,
+  );
+  if (!toolMatch) return { tool: null, query: "", finalFields: {} };
 
   const tool = toolMatch[1].toUpperCase() as ScratchTool;
   const segment = toolMatch[0];
   const queryMatch = segment.match(/query\s*=\s*["']([^"']+)["']/i);
 
   const finalFields: Record<string, string> = {};
-  if (tool === 'FINAL') {
+  if (tool === "FINAL") {
     const quoted = /(\w+)\s*=\s*"([^"]*)"/g;
     let match = quoted.exec(segment);
     while (match) {
@@ -238,28 +355,63 @@ function parseToolSegment(line: string): { tool: ScratchTool | null; query: stri
     }
   }
 
-  return { tool, query: queryMatch?.[1]?.trim() || '', finalFields };
+  return { tool, query: queryMatch?.[1]?.trim() || "", finalFields };
 }
 
-function toolTone(tool: ScratchTool | null): { icon: string; badge: string; border: string; text: string } {
+function toolTone(tool: ScratchTool | null): {
+  icon: string;
+  badge: string;
+  border: string;
+  text: string;
+} {
   switch (tool) {
-    case 'OCR':
-      return { icon: '📝', badge: 'bg-cyan-50 border-cyan-200 text-cyan-700', border: 'border-cyan-300', text: 'text-cyan-700' };
-    case 'SEARCH':
-      return { icon: '🔍', badge: 'bg-amber-50 border-amber-200 text-amber-700', border: 'border-amber-300', text: 'text-amber-700' };
-    case 'VISION':
-      return { icon: '👁️', badge: 'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700', border: 'border-fuchsia-300', text: 'text-fuchsia-700' };
-    case 'FINAL':
-      return { icon: '✅', badge: 'bg-emerald-50 border-emerald-200 text-emerald-700', border: 'border-emerald-300', text: 'text-emerald-700' };
-    case 'ERROR':
-      return { icon: '❌', badge: 'bg-red-50 border-red-200 text-red-700', border: 'border-red-300', text: 'text-red-700' };
+    case "OCR":
+      return {
+        icon: "📝",
+        badge: "bg-cyan-50 border-cyan-200 text-cyan-700",
+        border: "border-cyan-300",
+        text: "text-cyan-700",
+      };
+    case "SEARCH":
+      return {
+        icon: "🔍",
+        badge: "bg-amber-50 border-amber-200 text-amber-700",
+        border: "border-amber-300",
+        text: "text-amber-700",
+      };
+    case "VISION":
+      return {
+        icon: "👁️",
+        badge: "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700",
+        border: "border-fuchsia-300",
+        text: "text-fuchsia-700",
+      };
+    case "FINAL":
+      return {
+        icon: "✅",
+        badge: "bg-emerald-50 border-emerald-200 text-emerald-700",
+        border: "border-emerald-300",
+        text: "text-emerald-700",
+      };
+    case "ERROR":
+      return {
+        icon: "❌",
+        badge: "bg-red-50 border-red-200 text-red-700",
+        border: "border-red-300",
+        text: "text-red-700",
+      };
     default:
-      return { icon: '•', badge: 'bg-gray-100 border-gray-300 text-gray-700', border: 'border-gray-300', text: 'text-gray-700' };
+      return {
+        icon: "•",
+        badge: "bg-gray-100 border-gray-300 text-gray-700",
+        border: "border-gray-300",
+        text: "text-gray-700",
+      };
   }
 }
 
 function renderScratchboardEvent(event: string, index: number): ReactElement {
-  const lines = event.split('\n');
+  const lines = event.split("\n");
   let currentTool: ScratchTool | null = null;
   const renderedLines: ReactElement[] = [];
 
@@ -274,16 +426,22 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
 
     if (/^---\s*Step\s+\d+\s*---/i.test(trimmed)) {
       renderedLines.push(
-        <div key={key} className="text-gray-400 uppercase tracking-wider text-[10px] border-b border-gray-200 pb-1 mb-2 mt-4">
+        <div
+          key={key}
+          className="text-gray-400 uppercase tracking-wider text-[10px] border-b border-gray-200 pb-1 mb-2 mt-4"
+        >
           {trimmed}
         </div>,
       );
       return;
     }
 
-    if (trimmed.includes('✅ FINAL CONCLUSION')) {
+    if (trimmed.includes("✅ FINAL CONCLUSION")) {
       renderedLines.push(
-        <div key={key} className="bg-emerald-50 border border-emerald-200 rounded px-3 py-2 text-emerald-700 font-semibold">
+        <div
+          key={key}
+          className="bg-emerald-50 border border-emerald-200 rounded px-3 py-2 text-emerald-700 font-semibold"
+        >
           {trimmed}
         </div>,
       );
@@ -300,38 +458,62 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
     }
 
     if (/^Action:/i.test(trimmed)) {
-      const actionText = trimmed.replace(/^Action:\s*/i, '');
+      const actionText = trimmed.replace(/^Action:\s*/i, "");
       const parsed = parseToolSegment(actionText);
       if (parsed.tool) currentTool = parsed.tool;
       const tone = toolTone(parsed.tool);
-      const trailingText = actionText.replace(/\[TOOL:[^\]]+\]/i, '').trim();
+      const trailingText = actionText.replace(/\[TOOL:[^\]]+\]/i, "").trim();
 
       renderedLines.push(
         <div key={key} className="text-gray-700 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-gray-800">Action:</span>
             {parsed.tool ? (
-              <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}>
+              <span
+                className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}
+              >
                 <span>{tone.icon}</span>
                 <span>{parsed.tool}</span>
               </span>
             ) : (
               <span className="text-gray-700">{actionText}</span>
             )}
-            {trailingText && <span className="text-gray-500">{trailingText}</span>}
-            {parsed.tool === 'SEARCH' && parsed.query && (
+            {trailingText && (
+              <span className="text-gray-500">{trailingText}</span>
+            )}
+            {parsed.tool === "SEARCH" && parsed.query && (
               <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-mono">
                 {parsed.query}
               </span>
             )}
           </div>
-          {parsed.tool === 'FINAL' && Object.keys(parsed.finalFields).length > 0 && (
-            <div className="ml-6 grid gap-1 text-[10px] text-emerald-700">
-              {parsed.finalFields.brand && <div><span className="text-gray-400 uppercase mr-1">Brand:</span>{parsed.finalFields.brand}</div>}
-              {parsed.finalFields.category && <div><span className="text-gray-400 uppercase mr-1">Category:</span>{parsed.finalFields.category}</div>}
-              {parsed.finalFields.reason && <div><span className="text-gray-400 uppercase mr-1">Reason:</span>{parsed.finalFields.reason}</div>}
-            </div>
-          )}
+          {parsed.tool === "FINAL" &&
+            Object.keys(parsed.finalFields).length > 0 && (
+              <div className="ml-6 grid gap-1 text-[10px] text-emerald-700">
+                {parsed.finalFields.brand && (
+                  <div>
+                    <span className="text-gray-400 uppercase mr-1">Brand:</span>
+                    {parsed.finalFields.brand}
+                  </div>
+                )}
+                {parsed.finalFields.category && (
+                  <div>
+                    <span className="text-gray-400 uppercase mr-1">
+                      Category:
+                    </span>
+                    {parsed.finalFields.category}
+                  </div>
+                )}
+                {parsed.finalFields.reason && (
+                  <div>
+                    <span className="text-gray-400 uppercase mr-1">
+                      Reason:
+                    </span>
+                    {parsed.finalFields.reason}
+                  </div>
+                )}
+              </div>
+            )}
         </div>,
       );
       return;
@@ -341,7 +523,10 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
       const parsed = parseToolSegment(trimmed);
       const tone = toolTone(parsed.tool || currentTool);
       renderedLines.push(
-        <div key={key} className={`ml-2 pl-3 border-l-2 ${tone.border} text-gray-500 whitespace-pre-wrap`}>
+        <div
+          key={key}
+          className={`ml-2 pl-3 border-l-2 ${tone.border} text-gray-500 whitespace-pre-wrap`}
+        >
           {trimmed}
         </div>,
       );
@@ -369,11 +554,11 @@ export function JobDetail() {
   const [events, setEvents] = useState<string[]>([]);
   const [artifacts, setArtifacts] = useState<JobArtifacts | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>('');
-  const [artifactTab, setArtifactTab] = useState<ArtifactTab>('vision');
+  const [error, setError] = useState<string>("");
+  const [artifactTab, setArtifactTab] = useState<ArtifactTab>("vision");
   const [videoSource, setVideoSource] = useState<VideoSource | null>(null);
   const [videoAvailable, setVideoAvailable] = useState(false);
-  const [videoError, setVideoError] = useState('');
+  const [videoError, setVideoError] = useState("");
   const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
 
@@ -381,14 +566,20 @@ export function JobDetail() {
   const historyRef = useRef<HTMLDivElement>(null);
   const autoSelectVideoRef = useRef(false);
   const firstRow = result?.[0];
-  const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
+  const brandText =
+    typeof firstRow?.Brand === "string" ? firstRow.Brand.trim() : "";
   const reasoningRaw = firstRow
-    ? (firstRow.Reasoning ?? (firstRow as any).reasoning ?? firstRow['Reasoning'])
-    : '';
-  const reasoningText = typeof reasoningRaw === 'string' ? reasoningRaw.trim() : '';
-  const isRecoveredReasoning = reasoningText.toLowerCase().startsWith('(recovered)');
+    ? (firstRow.Reasoning ??
+      (firstRow as any).reasoning ??
+      firstRow["Reasoning"])
+    : "";
+  const reasoningText =
+    typeof reasoningRaw === "string" ? reasoningRaw.trim() : "";
+  const isRecoveredReasoning = reasoningText
+    .toLowerCase()
+    .startsWith("(recovered)");
   const reasoningDisplayText = useMemo(() => {
-    if (!reasoningText) return '';
+    if (!reasoningText) return "";
     if (showFullReasoning || reasoningText.length <= 500) return reasoningText;
     return `${reasoningText.slice(0, 220).trimEnd()}...`;
   }, [reasoningText, showFullReasoning]);
@@ -408,30 +599,40 @@ export function JobDetail() {
       match = regex.exec(reasoningText);
     }
     const canonicalMap = new Map<string, string>();
-    orderedTerms
-      .filter(isValidSignalPill)
-      .forEach((term) => {
-        const normalized = normalizeSignalPillText(term);
-        const key = normalized.toLowerCase();
-        const existing = canonicalMap.get(key);
-        if (!existing) {
-          canonicalMap.set(key, normalized);
-          return;
-        }
-        if (existing === existing.toUpperCase() && normalized !== normalized.toUpperCase()) {
-          canonicalMap.set(key, normalized);
-        }
-      });
+    orderedTerms.filter(isValidSignalPill).forEach((term) => {
+      const normalized = normalizeSignalPillText(term);
+      const key = normalized.toLowerCase();
+      const existing = canonicalMap.get(key);
+      if (!existing) {
+        canonicalMap.set(key, normalized);
+        return;
+      }
+      if (
+        existing === existing.toUpperCase() &&
+        normalized !== normalized.toUpperCase()
+      ) {
+        canonicalMap.set(key, normalized);
+      }
+    });
 
-    return Array.from(canonicalMap.values()).map((term) => classifyReasoningTerm(term, brandText));
+    return Array.from(canonicalMap.values()).map((term) =>
+      classifyReasoningTerm(term, brandText),
+    );
   }, [reasoningText, brandText]);
-  const visibleQuotedTerms = showAllReasoningTerms ? quotedTermsAll : quotedTermsAll.slice(0, 6);
-  const hiddenQuotedTermsCount = Math.max(0, quotedTermsAll.length - visibleQuotedTerms.length);
+  const visibleQuotedTerms = showAllReasoningTerms
+    ? quotedTermsAll
+    : quotedTermsAll.slice(0, 6);
+  const hiddenQuotedTermsCount = Math.max(
+    0,
+    quotedTermsAll.length - visibleQuotedTerms.length,
+  );
   const highlightedReasoning = useMemo<HighlightedReasoningPart[]>(() => {
     if (!reasoningDisplayText) return [];
     if (quotedTermsAll.length === 0) return [reasoningDisplayText];
     const termType = new Map<string, ReasoningTermType>();
-    quotedTermsAll.forEach((term) => termType.set(term.text.toLowerCase(), term.type));
+    quotedTermsAll.forEach((term) =>
+      termType.set(term.text.toLowerCase(), term.type),
+    );
 
     const parts: HighlightedReasoningPart[] = [];
     const regex = /'([^']+)'/g;
@@ -458,38 +659,49 @@ export function JobDetail() {
     }
     return parts;
   }, [reasoningDisplayText, quotedTermsAll]);
-  const ocrText = artifacts?.ocr_text?.text || '';
+  const ocrText = artifacts?.ocr_text?.text || "";
   const agentScratchboardEvents = useMemo(
-    () => events
-      .filter((evt) => evt.includes(' agent:\n') || evt.includes(' agent: '))
-      .map((evt) => {
-        if (evt.includes(' agent:\n')) return evt.split(' agent:\n')[1] ?? evt;
-        if (evt.includes(' agent: ')) return evt.split(' agent: ')[1] ?? evt;
-        return evt;
-      }),
+    () =>
+      events
+        .filter((evt) => evt.includes(" agent:\n") || evt.includes(" agent: "))
+        .map((evt) => {
+          if (evt.includes(" agent:\n"))
+            return evt.split(" agent:\n")[1] ?? evt;
+          if (evt.includes(" agent: ")) return evt.split(" agent: ")[1] ?? evt;
+          return evt;
+        }),
     [events],
   );
   const ocrByTimestamp = useMemo(() => {
     const map = new Map<string, string>();
-    for (const line of (ocrText || '').split('\n')) {
+    for (const line of (ocrText || "").split("\n")) {
       const match = line.match(/^\[([\d.]+)s\]\s*(.*)$/);
       if (!match) continue;
       const ts = Number.parseFloat(match[1]);
       if (!Number.isFinite(ts)) continue;
-      map.set(ts.toFixed(1), match[2] || '');
+      map.set(ts.toFixed(1), match[2] || "");
     }
     return map;
   }, [ocrText]);
-  const stageSequenceForEvents = job?.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
+  const stageSequenceForEvents =
+    job?.mode === "agent" ? AGENT_STAGES : PIPELINE_STAGES;
   const stageMessages = useMemo(() => {
     const map = new Map<string, string>();
     for (const evt of events) {
-      const withoutTimestamp = evt.replace(/^\d{4}-\d{2}-\d{2}T[\d:.+\-]+Z?\s*/, '');
-      const colonIdx = withoutTimestamp.indexOf(':');
+      const withoutTimestamp = evt.replace(
+        /^\d{4}-\d{2}-\d{2}T[\d:.+\-]+Z?\s*/,
+        "",
+      );
+      const colonIdx = withoutTimestamp.indexOf(":");
       if (colonIdx <= 0) continue;
       const stageRaw = withoutTimestamp.slice(0, colonIdx).trim();
       const stage = normalizeStage(stageRaw);
-      if (!stageSequenceForEvents.includes(stage as (typeof stageSequenceForEvents)[number])) continue;
+      if (
+        !stageSequenceForEvents.includes(
+          stage as (typeof stageSequenceForEvents)[number],
+        )
+      )
+        continue;
       const detail = withoutTimestamp.slice(colonIdx + 1).trim();
       if (!detail) continue;
       map.set(stage, detail);
@@ -498,7 +710,7 @@ export function JobDetail() {
   }, [events, stageSequenceForEvents]);
 
   const updateVideoSource = useCallback((currentJob: JobStatus) => {
-    const rawUrl = (currentJob.url || '').trim();
+    const rawUrl = (currentJob.url || "").trim();
     if (!rawUrl) {
       setVideoSource(null);
       setVideoAvailable(false);
@@ -510,61 +722,69 @@ export function JobDetail() {
     );
     if (youtubeMatch?.[1]) {
       setVideoSource({
-        type: 'youtube',
+        type: "youtube",
         url: `https://www.youtube.com/embed/${youtubeMatch[1]}`,
       });
       setVideoAvailable(true);
       return;
     }
 
-    if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
-      setVideoSource({ type: 'remote', url: rawUrl });
+    if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
+      setVideoSource({ type: "remote", url: rawUrl });
       setVideoAvailable(true);
       return;
     }
 
-    setVideoSource({ type: 'local', url: getJobVideoUrl(currentJob.job_id) });
+    setVideoSource({ type: "local", url: getJobVideoUrl(currentJob.job_id) });
     setVideoAvailable(true);
   }, []);
 
-  const refreshJobSnapshot = useCallback(async (forceTerminalFetch = false) => {
-    if (!id) return null;
+  const refreshJobSnapshot = useCallback(
+    async (forceTerminalFetch = false) => {
+      if (!id) return null;
 
-    const currentJob = await getJob(id);
-    setJob(currentJob);
-    setError('');
-    setVideoError('');
-    updateVideoSource(currentJob);
+      const currentJob = await getJob(id);
+      setJob(currentJob);
+      setError("");
+      setVideoError("");
+      updateVideoSource(currentJob);
 
-    const isTerminal = currentJob.status === 'completed' || currentJob.status === 'failed';
+      const isTerminal =
+        currentJob.status === "completed" || currentJob.status === "failed";
 
-    if (isTerminal || forceTerminalFetch) {
+      if (isTerminal || forceTerminalFetch) {
+        try {
+          const resultPayload = await getJobResult(id);
+          setResult(resultPayload.result || null);
+        } catch {
+          // no-op
+        }
+      }
+
       try {
-        const resultPayload = await getJobResult(id);
-        setResult(resultPayload.result || null);
+        const artifactsPayload = await getJobArtifacts(id);
+        setArtifacts(artifactsPayload.artifacts || null);
       } catch {
         // no-op
       }
-    }
 
-    try {
-      const artifactsPayload = await getJobArtifacts(id);
-      setArtifacts(artifactsPayload.artifacts || null);
-    } catch {
-      // no-op
-    }
-
-    if (currentJob.status === 'processing' || isTerminal || forceTerminalFetch) {
-      try {
-        const eventsPayload = await getJobEvents(id);
-        setEvents(eventsPayload.events || []);
-      } catch {
-        // no-op
+      if (
+        currentJob.status === "processing" ||
+        isTerminal ||
+        forceTerminalFetch
+      ) {
+        try {
+          const eventsPayload = await getJobEvents(id);
+          setEvents(eventsPayload.events || []);
+        } catch {
+          // no-op
+        }
       }
-    }
 
-    return currentJob;
-  }, [id, updateVideoSource]);
+      return currentJob;
+    },
+    [id, updateVideoSource],
+  );
 
   useEffect(() => {
     setShowAllReasoningTerms(false);
@@ -573,14 +793,14 @@ export function JobDetail() {
 
   useEffect(() => {
     if (videoAvailable && !autoSelectVideoRef.current) {
-      setArtifactTab('video');
+      setArtifactTab("video");
       autoSelectVideoRef.current = true;
     }
   }, [videoAvailable]);
 
   useEffect(() => {
     autoSelectVideoRef.current = false;
-    setArtifactTab('vision');
+    setArtifactTab("vision");
   }, [id]);
 
   useEffect(() => {
@@ -607,7 +827,7 @@ export function JobDetail() {
     refreshJobSnapshot(true)
       .catch((err: any) => {
         if (cancelled) return;
-        setError(err.message || 'Failed to load job');
+        setError(err.message || "Failed to load job");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -620,13 +840,13 @@ export function JobDetail() {
 
   useEffect(() => {
     if (!id || !job) return;
-    if (job.status === 'completed' || job.status === 'failed') return;
+    if (job.status === "completed" || job.status === "failed") return;
 
     const streamUrl = `${API_BASE}/jobs/${id}/stream`;
     const eventSource = new EventSource(streamUrl);
     let closed = false;
 
-    eventSource.addEventListener('update', (evt) => {
+    eventSource.addEventListener("update", (evt) => {
       try {
         const parsed = JSON.parse((evt as MessageEvent).data);
         setJob((prev) => {
@@ -636,7 +856,10 @@ export function JobDetail() {
             status: parsed.status ?? prev.status,
             stage: parsed.stage ?? prev.stage,
             stage_detail: parsed.stage_detail ?? prev.stage_detail,
-            progress: typeof parsed.progress === 'number' ? parsed.progress : prev.progress,
+            progress:
+              typeof parsed.progress === "number"
+                ? parsed.progress
+                : prev.progress,
             error: parsed.error ?? prev.error,
             updated_at: parsed.updated_at ?? prev.updated_at,
           };
@@ -649,7 +872,7 @@ export function JobDetail() {
       }
     });
 
-    eventSource.addEventListener('complete', () => {
+    eventSource.addEventListener("complete", () => {
       if (closed) return;
       closed = true;
       eventSource.close();
@@ -675,7 +898,11 @@ export function JobDetail() {
   }, [result, id]);
 
   if (loading && !job) {
-    return <div className="p-8 text-gray-500 flex items-center gap-2 animate-pulse">Loading job…</div>;
+    return (
+      <div className="p-8 text-gray-500 flex items-center gap-2 animate-pulse">
+        Loading job…
+      </div>
+    );
   }
 
   if (error && !job) {
@@ -684,7 +911,10 @@ export function JobDetail() {
         <ExclamationTriangleIcon className="w-12 h-12 mb-4" />
         <h2 className="text-xl font-bold mb-2">Could Not Load Job</h2>
         <p className="text-red-600 mb-6 text-sm text-center">{error}</p>
-        <Link to="/jobs" className="text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded transition-colors flex items-center gap-2">
+        <Link
+          to="/jobs"
+          className="text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded transition-colors flex items-center gap-2"
+        >
           <ArrowLeftIcon /> Back to Jobs
         </Link>
       </div>
@@ -696,15 +926,20 @@ export function JobDetail() {
   const progressPercent = Math.round(job.progress ?? 0);
 
   const frameItems = artifacts?.latest_frames || [];
-  const perFrameVision = Array.isArray(artifacts?.per_frame_vision) ? artifacts.per_frame_vision : [];
+  const perFrameVision = Array.isArray(artifacts?.per_frame_vision)
+    ? artifacts.per_frame_vision
+    : [];
   const visionBoard = artifacts?.vision_board;
   const frameCount = frameItems.length;
-  const frameVisionByIndex = new Map<number, { frame_index: number; top_category: string; top_score: number }>();
+  const frameVisionByIndex = new Map<
+    number,
+    { frame_index: number; top_category: string; top_score: number }
+  >();
   for (const item of perFrameVision) {
     const index = Number(item?.frame_index);
     const score = toNumber(item?.top_score);
     if (!Number.isFinite(index) || score == null) continue;
-    if (!item?.top_category || typeof item.top_category !== 'string') continue;
+    if (!item?.top_category || typeof item.top_category !== "string") continue;
     frameVisionByIndex.set(index, {
       frame_index: index,
       top_category: item.top_category,
@@ -719,77 +954,106 @@ export function JobDetail() {
       bestFrameIndex = index;
     }
   });
-  const stages = job.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
-  const currentStage = (job.stage || '').trim();
+  const stages = job.mode === "agent" ? AGENT_STAGES : PIPELINE_STAGES;
+  const currentStage = (job.stage || "").trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
 
-  const categoryText = typeof firstRow?.Category === 'string' ? firstRow.Category.trim() : '';
-  const categoryIdRaw = firstRow?.['Category ID'] ?? (firstRow as any)?.category_id;
-  const categoryIdText = typeof categoryIdRaw === 'string' ? categoryIdRaw.trim() : String(categoryIdRaw ?? '').trim();
+  const categoryText =
+    typeof firstRow?.Category === "string" ? firstRow.Category.trim() : "";
+  const categoryIdRaw =
+    firstRow?.["Category ID"] ?? (firstRow as any)?.category_id;
+  const categoryIdText =
+    typeof categoryIdRaw === "string"
+      ? categoryIdRaw.trim()
+      : String(categoryIdRaw ?? "").trim();
 
   const confidenceValue = toNumber(firstRow?.Confidence);
-  const confidenceSummaryDisplay = confidenceValue === null ? '—' : confidenceValue.toFixed(2);
-  const confidenceSummaryTextColor = confidenceValue === null
-    ? 'text-gray-500'
-    : confidenceValue >= 0.8
-      ? 'text-emerald-700'
-      : confidenceValue >= 0.5
-        ? 'text-amber-700'
-        : 'text-red-700';
-  const confidenceSummaryDotColor = confidenceValue === null
-    ? 'bg-gray-400'
-    : confidenceValue >= 0.8
-      ? 'bg-emerald-500'
-      : confidenceValue >= 0.5
-        ? 'bg-amber-500'
-        : 'bg-red-500';
+  const confidenceSummaryDisplay =
+    confidenceValue === null ? "—" : confidenceValue.toFixed(2);
+  const confidenceSummaryTextColor =
+    confidenceValue === null
+      ? "text-gray-500"
+      : confidenceValue >= 0.8
+        ? "text-emerald-700"
+        : confidenceValue >= 0.5
+          ? "text-amber-700"
+          : "text-red-700";
+  const confidenceSummaryDotColor =
+    confidenceValue === null
+      ? "bg-gray-400"
+      : confidenceValue >= 0.8
+        ? "bg-emerald-500"
+        : confidenceValue >= 0.5
+          ? "bg-amber-500"
+          : "bg-red-500";
 
-  const matchMethodRaw = firstRow ? (firstRow as any).category_match_method : '';
+  const matchMethodRaw = firstRow
+    ? (firstRow as any).category_match_method
+    : "";
   const summaryMatchDisplay = formatSummaryMatch(
     matchMethodRaw,
     firstRow ? (firstRow as any).category_match_score : null,
   );
-  const summaryFrameDisplay = artifacts ? String(frameCount) : '—';
+  const summaryFrameDisplay = artifacts ? String(frameCount) : "—";
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
       <div className="flex items-center gap-4 text-sm text-gray-500 mb-2">
-        <Link to="/jobs" className="hover:text-primary-600 flex items-center gap-1 transition-colors">
+        <Link
+          to="/jobs"
+          className="hover:text-primary-600 flex items-center gap-1 transition-colors"
+        >
           <ArrowLeftIcon /> Jobs
         </Link>
         <span>/</span>
-        <span className="font-mono text-gray-700 truncate max-w-sm">{job.job_id}</span>
+        <span className="font-mono text-gray-700 truncate max-w-sm">
+          {job.job_id}
+        </span>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-8 shadow-sm flex flex-col gap-6 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1 bg-gray-100">
-          <div className="h-full bg-gradient-to-r from-primary-500 to-primary-400 transition-all duration-1000 ease-in-out" style={{ width: `${progressPercent}%` }} />
+          <div
+            className="h-full bg-gradient-to-r from-primary-500 to-primary-400 transition-all duration-1000 ease-in-out"
+            style={{ width: `${progressPercent}%` }}
+          />
         </div>
 
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
-                {job.mode === 'agent' ? <MagicWandIcon className="text-primary-500" /> : <FileTextIcon className="text-primary-500" />}
+                {job.mode === "agent" ? (
+                  <MagicWandIcon className="text-primary-500" />
+                ) : (
+                  <FileTextIcon className="text-primary-500" />
+                )}
                 {job.mode.charAt(0).toUpperCase() + job.mode.slice(1)} Job
               </h1>
               {(() => {
-                const statusClass = job.status === 'completed'
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : job.status === 'failed'
-                    ? 'bg-red-50 text-red-700 border-red-200'
-                    : job.status === 'processing'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse'
-                      : job.status === 're-queued'
-                        ? 'bg-orange-50 text-orange-700 border-orange-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200';
-                const statusLabel = job.status === 're-queued' ? 'waiting (recovered)' : job.status;
+                const statusClass =
+                  job.status === "completed"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : job.status === "failed"
+                      ? "bg-red-50 text-red-700 border-red-200"
+                      : job.status === "processing"
+                        ? "bg-blue-50 text-blue-700 border-blue-200 animate-pulse"
+                        : job.status === "re-queued"
+                          ? "bg-orange-50 text-orange-700 border-orange-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200";
+                const statusLabel =
+                  job.status === "re-queued"
+                    ? "waiting (recovered)"
+                    : job.status;
                 return (
-              <span className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border backdrop-blur-md ${
-                statusClass
-              }`}>
-                {statusLabel} {job.status === 'processing' && `${progressPercent}%`}
-              </span>
+                  <span
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border backdrop-blur-md ${
+                      statusClass
+                    }`}
+                  >
+                    {statusLabel}{" "}
+                    {job.status === "processing" && `${progressPercent}%`}
+                  </span>
                 );
               })()}
             </div>
@@ -798,60 +1062,88 @@ export function JobDetail() {
               <CopyButton text={job.job_id} label="Copy Job ID" />
               {result && (
                 <>
-                  <CopyButton text={JSON.stringify(result, null, 2)} label="Copy JSON" />
-                  <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 active:scale-95">
+                  <CopyButton
+                    text={JSON.stringify(result, null, 2)}
+                    label="Copy JSON"
+                  />
+                  <button
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 active:scale-95"
+                  >
                     <DownloadIcon className="w-3 h-3" /> Export CSV
                   </button>
                 </>
               )}
             </div>
 
-            <div className="text-sm text-gray-500 break-all max-w-3xl font-mono opacity-80 bg-gray-50/80 p-2 rounded border border-gray-200">{job.url}</div>
+            <div className="text-sm text-gray-500 break-all max-w-3xl font-mono opacity-80 bg-gray-50/80 p-2 rounded border border-gray-200">
+              {job.url}
+            </div>
 
-            {job.status !== 'completed' && job.status !== 'failed' && (
+            {job.status !== "completed" && job.status !== "failed" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 <div className="bg-gray-100 border border-gray-200 rounded p-3">
-                  <div className="uppercase tracking-wider text-gray-400 mb-1">Current Stage</div>
-                  <div className="text-gray-800 font-mono">{job.stage || 'unknown'}</div>
+                  <div className="uppercase tracking-wider text-gray-400 mb-1">
+                    Current Stage
+                  </div>
+                  <div className="text-gray-800 font-mono">
+                    {job.stage || "unknown"}
+                  </div>
                 </div>
                 <div className="bg-gray-100 border border-gray-200 rounded p-3">
-                  <div className="uppercase tracking-wider text-gray-400 mb-1">Stage Detail</div>
-                  <div className="text-gray-700">{job.stage_detail || '—'}</div>
+                  <div className="uppercase tracking-wider text-gray-400 mb-1">
+                    Stage Detail
+                  </div>
+                  <div className="text-gray-700">{job.stage_detail || "—"}</div>
                 </div>
               </div>
             )}
           </div>
 
           <div className="flex flex-col items-end gap-1 text-sm text-gray-400 shrink-0">
-            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">Created: <span className="text-gray-700 font-mono text-xs">{job.created_at}</span></span>
-            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">Updated: <span className="text-gray-700 font-mono text-xs">{job.updated_at}</span></span>
+            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">
+              Created:{" "}
+              <span className="text-gray-700 font-mono text-xs">
+                {job.created_at}
+              </span>
+            </span>
+            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">
+              Updated:{" "}
+              <span className="text-gray-700 font-mono text-xs">
+                {job.updated_at}
+              </span>
+            </span>
           </div>
         </div>
 
         {job.error && (
           <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg text-sm shadow-inner flex flex-col gap-2">
-            <div className="flex items-center gap-2 font-bold"><ExclamationTriangleIcon /> Execution Failure</div>
-            <pre className="font-mono text-xs whitespace-pre-wrap px-2 opacity-80">{job.error}</pre>
+            <div className="flex items-center gap-2 font-bold">
+              <ExclamationTriangleIcon /> Execution Failure
+            </div>
+            <pre className="font-mono text-xs whitespace-pre-wrap px-2 opacity-80">
+              {job.error}
+            </pre>
           </div>
         )}
       </div>
 
-      {job.status === 'completed' && firstRow && firstRow.Brand !== 'Err' && (
+      {job.status === "completed" && firstRow && firstRow.Brand !== "Err" && (
         <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
           <div className="flex items-center gap-3 min-w-0">
             <CheckCircledIcon className="w-5 h-5 text-emerald-600 shrink-0" />
             <span
-              title={brandText || 'Unknown Brand'}
+              title={brandText || "Unknown Brand"}
               className="text-lg md:text-xl font-bold text-gray-900 max-w-[14rem] md:max-w-xs truncate"
             >
-              {brandText || 'Unknown Brand'}
+              {brandText || "Unknown Brand"}
             </span>
             <span className="text-gray-400 shrink-0">→</span>
             <span
-              title={categoryText || 'Unknown Category'}
+              title={categoryText || "Unknown Category"}
               className="text-lg md:text-xl font-bold text-emerald-700 max-w-[14rem] md:max-w-sm truncate"
             >
-              {categoryText || 'Unknown Category'}
+              {categoryText || "Unknown Category"}
             </span>
             {categoryIdText && (
               <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-2 py-0.5 rounded shrink-0">
@@ -862,30 +1154,50 @@ export function JobDetail() {
 
           <div className="flex items-stretch self-stretch md:self-auto shrink-0">
             <div className="px-3 md:px-4 border-l border-gray-300/70 text-center">
-              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">Confidence</div>
-              <div className={`inline-flex items-center justify-center gap-1 text-sm font-bold ${confidenceSummaryTextColor}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${confidenceSummaryDotColor}`} aria-hidden />
+              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">
+                Confidence
+              </div>
+              <div
+                className={`inline-flex items-center justify-center gap-1 text-sm font-bold ${confidenceSummaryTextColor}`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${confidenceSummaryDotColor}`}
+                  aria-hidden
+                />
                 <span>{confidenceSummaryDisplay}</span>
               </div>
             </div>
             <div className="px-3 md:px-4 border-l border-gray-300/70 text-center">
-              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">Match</div>
-              <div className="text-sm font-mono text-cyan-700">{summaryMatchDisplay}</div>
+              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">
+                Match
+              </div>
+              <div className="text-sm font-mono text-cyan-700">
+                {summaryMatchDisplay}
+              </div>
             </div>
             <div className="px-3 md:px-4 border-l border-gray-300/70 text-center">
-              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">Frames</div>
-              <div className="text-sm font-mono text-gray-700">{summaryFrameDisplay}</div>
+              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">
+                Frames
+              </div>
+              <div className="text-sm font-mono text-gray-700">
+                {summaryFrameDisplay}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {firstRow && firstRow.Brand !== 'Err' && (
+      {firstRow && firstRow.Brand !== "Err" && (
         <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
           <div className="bg-white border border-gray-200 border-l-[3px] border-l-primary-500 rounded-xl p-6">
             <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-xs uppercase tracking-wider text-gray-400 font-bold">💡 LLM Reasoning</h3>
-              <CopyButton text={reasoningText || 'No reasoning provided by the LLM.'} label="Copy Reasoning" />
+              <h3 className="text-xs uppercase tracking-wider text-gray-400 font-bold">
+                💡 LLM Reasoning
+              </h3>
+              <CopyButton
+                text={reasoningText || "No reasoning provided by the LLM."}
+                label="Copy Reasoning"
+              />
             </div>
 
             {isRecoveredReasoning && (
@@ -932,18 +1244,20 @@ export function JobDetail() {
 
             {reasoningText ? (
               <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {highlightedReasoning.map((part, idx) => (
-                  typeof part === 'string' ? (
+                {highlightedReasoning.map((part, idx) =>
+                  typeof part === "string" ? (
                     <span key={idx}>{part}</span>
                   ) : (
                     <span key={idx} className={reasoningInlineClass(part.type)}>
                       {part.text}
                     </span>
-                  )
-                ))}
+                  ),
+                )}
               </p>
             ) : (
-              <p className="text-gray-400 italic text-sm">No reasoning provided by the LLM.</p>
+              <p className="text-gray-400 italic text-sm">
+                No reasoning provided by the LLM.
+              </p>
             )}
 
             {reasoningText.length > 500 && (
@@ -952,7 +1266,7 @@ export function JobDetail() {
                 onClick={() => setShowFullReasoning((current) => !current)}
                 className="mt-3 text-xs text-cyan-700 hover:text-cyan-800 underline underline-offset-2"
               >
-                {showFullReasoning ? 'Show less' : 'Show more'}
+                {showFullReasoning ? "Show less" : "Show more"}
               </button>
             )}
           </div>
@@ -962,22 +1276,50 @@ export function JobDetail() {
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
           {videoAvailable && videoSource && (
-            <button type="button" onClick={() => setArtifactTab('video')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'video' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-white border-gray-300 text-gray-700'}`}>▶ Video</button>
+            <button
+              type="button"
+              onClick={() => setArtifactTab("video")}
+              className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "video" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-gray-300 text-gray-700"}`}
+            >
+              ▶ Video
+            </button>
           )}
-          <button type="button" onClick={() => setArtifactTab('vision')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'vision' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>Vision Board</button>
-          <button type="button" onClick={() => setArtifactTab('ocr')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'ocr' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>OCR Output</button>
-          <button type="button" onClick={() => setArtifactTab('frames')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'frames' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>Latest Frames</button>
+          <button
+            type="button"
+            onClick={() => setArtifactTab("vision")}
+            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "vision" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+          >
+            Vision Board
+          </button>
+          <button
+            type="button"
+            onClick={() => setArtifactTab("ocr")}
+            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "ocr" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+          >
+            OCR Output
+          </button>
+          <button
+            type="button"
+            onClick={() => setArtifactTab("frames")}
+            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "frames" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+          >
+            Latest Frames
+          </button>
         </div>
 
-        {artifactTab === 'video' && videoSource && (
+        {artifactTab === "video" && videoSource && (
           <div className="p-4">
-            {videoSource.type === 'local' && (
+            {videoSource.type === "local" && (
               <div className="space-y-3">
                 <video
                   controls
                   preload="metadata"
                   className="w-full max-h-[500px] rounded-lg border border-gray-300 bg-black"
-                  onError={() => setVideoError('Source video could not be streamed (missing file or unavailable).')}
+                  onError={() =>
+                    setVideoError(
+                      "Source video could not be streamed (missing file or unavailable).",
+                    )
+                  }
                 >
                   <source src={videoSource.url} />
                   Your browser does not support the video element.
@@ -989,7 +1331,7 @@ export function JobDetail() {
                 )}
               </div>
             )}
-            {videoSource.type === 'youtube' && (
+            {videoSource.type === "youtube" && (
               <iframe
                 src={videoSource.url}
                 className="w-full aspect-video rounded-lg border border-gray-300"
@@ -998,7 +1340,7 @@ export function JobDetail() {
                 title="Source video"
               />
             )}
-            {videoSource.type === 'remote' && (
+            {videoSource.type === "remote" && (
               <div className="text-center py-12 text-gray-500">
                 <p className="mb-3">Video is hosted externally.</p>
                 <a
@@ -1014,58 +1356,106 @@ export function JobDetail() {
           </div>
         )}
 
-        {artifactTab === 'vision' && (
+        {artifactTab === "vision" && (
           <div className="p-4 space-y-4">
-            {visionBoard?.image_url && <img src={toApiUrl(visionBoard.image_url)} alt="Vision board" className="max-h-96 rounded border border-gray-300" />}
+            {visionBoard?.image_url && (
+              <img
+                src={toApiUrl(visionBoard.image_url)}
+                alt="Vision board"
+                className="max-h-96 rounded border border-gray-300"
+              />
+            )}
             {visionBoard?.plot_url && (
-              <a href={toApiUrl(visionBoard.plot_url)} target="_blank" rel="noreferrer" className="text-xs text-primary-600 underline">Open vision board metadata</a>
+              <a
+                href={toApiUrl(visionBoard.plot_url)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-primary-600 underline"
+              >
+                Open vision board metadata
+              </a>
             )}
             {(visionBoard?.top_matches || []).length > 0 ? (
               <div className="grid gap-2">
                 {(visionBoard?.top_matches || []).map((m, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded px-3 py-2">
-                    <span className="text-gray-800">{m.label}</span>
-                    <span className="font-mono text-cyan-700">{Number(m.score).toFixed(4)}</span>
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded px-3 py-2"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-gray-800 truncate">{m.label}</span>
+                      {m.category_id != null && (
+                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[10px] font-mono font-semibold leading-none">
+                          #{m.category_id}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono text-cyan-700 ml-3 shrink-0">
+                      {Number(m.score).toFixed(4)}
+                    </span>
                   </div>
                 ))}
               </div>
-            ) : <div className="text-xs text-gray-500">No vision board matches available.</div>}
+            ) : (
+              <div className="text-xs text-gray-500">
+                No vision board matches available.
+              </div>
+            )}
           </div>
         )}
 
-        {artifactTab === 'ocr' && (
+        {artifactTab === "ocr" && (
           <div className="p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-xs text-gray-500">OCR output</div>
               <CopyButton text={ocrText} label="Copy OCR" />
             </div>
             <div className="max-h-80 overflow-auto text-xs font-mono whitespace-pre-wrap text-gray-700 bg-gray-50 border border-gray-200 rounded p-3">
-              {ocrText || 'No OCR text available.'}
+              {ocrText || "No OCR text available."}
             </div>
           </div>
         )}
 
-        {artifactTab === 'frames' && (
+        {artifactTab === "frames" && (
           <div className="p-4">
             {frameItems.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                 {frameItems.map((frame, idx) => {
-                  const frameLabel = frame.label || (typeof frame.timestamp === 'number' ? `${frame.timestamp.toFixed(1)}s` : `Frame ${idx + 1}`);
+                  const frameLabel =
+                    frame.label ||
+                    (typeof frame.timestamp === "number"
+                      ? `${frame.timestamp.toFixed(1)}s`
+                      : `Frame ${idx + 1}`);
                   const frameTsKey = extractFrameTimestampKey(frame);
-                  const frameOcrText = frameTsKey ? ocrByTimestamp.get(frameTsKey) : '';
+                  const frameOcrText = frameTsKey
+                    ? ocrByTimestamp.get(frameTsKey)
+                    : "";
                   const frameVision = frameVisionByIndex.get(idx);
-                  const frameScore = frameVision ? toNumber(frameVision.top_score) : null;
+                  const frameScore = frameVision
+                    ? toNumber(frameVision.top_score)
+                    : null;
                   const frameTone = getFrameConfidenceTone(frameScore);
-                  const frameCategory = frameVision?.top_category || '';
-                  const isBestFrame = bestFrameIndex === idx && frameVision != null;
+                  const frameCategory = frameVision?.top_category || "";
+                  const isBestFrame =
+                    bestFrameIndex === idx && frameVision != null;
                   const frameTooltip = frameVision
                     ? `Frame ${idx + 1}: ${frameCategory} (${(frameScore ?? 0).toFixed(2)})`
                     : undefined;
                   return (
-                    <div key={idx} className="aspect-video bg-gray-50 rounded border border-gray-200 overflow-hidden relative group">
-                      <img src={toApiUrl(frame.url)} alt={frameLabel} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                    <div
+                      key={idx}
+                      className="aspect-video bg-gray-50 rounded border border-gray-200 overflow-hidden relative group"
+                    >
+                      <img
+                        src={toApiUrl(frame.url)}
+                        alt={frameLabel}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                      />
                       {frameVision && (
-                        <div className={`absolute inset-y-0 left-0 w-1 ${frameTone.stripClass}`} aria-hidden />
+                        <div
+                          className={`absolute inset-y-0 left-0 w-1 ${frameTone.stripClass}`}
+                          aria-hidden
+                        />
                       )}
                       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
                         {frameLabel}
@@ -1075,7 +1465,9 @@ export function JobDetail() {
                           className={`absolute bottom-1 left-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${frameTone.badgeClass}`}
                           title={frameTooltip}
                         >
-                          {(frameScore ?? 0).toFixed(2)} · {truncateCategory(frameCategory)} · {frameTone.textLabel}
+                          {(frameScore ?? 0).toFixed(2)} ·{" "}
+                          {truncateCategory(frameCategory)} ·{" "}
+                          {frameTone.textLabel}
                         </div>
                       )}
                       {isBestFrame && (
@@ -1094,17 +1486,24 @@ export function JobDetail() {
                   );
                 })}
               </div>
-            ) : <div className="text-xs text-gray-500">No latest frames available.</div>}
+            ) : (
+              <div className="text-xs text-gray-500">
+                No latest frames available.
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {job.mode === 'agent' && agentScratchboardEvents.length > 0 && (
+      {job.mode === "agent" && agentScratchboardEvents.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
           <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 font-semibold text-fuchsia-700 flex items-center gap-2">
             <MagicWandIcon className="text-fuchsia-600" /> Agent Scratchboard
           </div>
-          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-gray-700" ref={scratchboardRef}>
+          <div
+            className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-gray-700"
+            ref={scratchboardRef}
+          >
             {agentScratchboardEvents.map((evt, i) => (
               <Fragment key={i}>{renderScratchboardEvent(evt, i)}</Fragment>
             ))}
@@ -1118,28 +1517,36 @@ export function JobDetail() {
             <div className="min-w-[680px] w-full px-1">
               <div className="flex items-center w-full mb-2">
                 {stages.map((stage, idx) => {
-                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
-                  const isCurrent = currentIdx === idx && job.status === 'processing';
-                  const isFailed = job.status === 'failed' && currentIdx === idx;
+                  const isDone =
+                    currentIdx > idx ||
+                    job.status === "completed" ||
+                    (job.status === "failed" && currentIdx > idx);
+                  const isCurrent =
+                    currentIdx === idx && job.status === "processing";
+                  const isFailed =
+                    job.status === "failed" && currentIdx === idx;
                   const stageLabel = formatStageName(stage);
-                  const dotTitle = isCurrent && job.stage_detail ? `${stageLabel}: ${job.stage_detail}` : stageLabel;
+                  const dotTitle =
+                    isCurrent && job.stage_detail
+                      ? `${stageLabel}: ${job.stage_detail}`
+                      : stageLabel;
                   return (
                     <Fragment key={stage}>
                       {idx > 0 && (
                         <div
-                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? 'bg-emerald-500' : 'bg-gray-100'}`}
+                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? "bg-emerald-500" : "bg-gray-100"}`}
                         />
                       )}
                       <div
                         title={dotTitle}
                         className={`w-3 h-3 rounded-full border-2 shrink-0 transition-colors duration-500 ${
                           isDone
-                            ? 'bg-emerald-500 border-emerald-400'
+                            ? "bg-emerald-500 border-emerald-400"
                             : isCurrent
-                              ? 'bg-blue-500 border-blue-400 animate-pulse'
+                              ? "bg-blue-500 border-blue-400 animate-pulse"
                               : isFailed
-                                ? 'bg-red-500 border-red-400'
-                                : 'bg-gray-100 border-gray-300'
+                                ? "bg-red-500 border-red-400"
+                                : "bg-gray-100 border-gray-300"
                         }`}
                       />
                     </Fragment>
@@ -1149,25 +1556,30 @@ export function JobDetail() {
 
               <div className="flex w-full mb-3">
                 {stages.map((stage, idx) => {
-                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
-                  const isCurrent = currentIdx === idx && job.status === 'processing';
-                  const isFailed = job.status === 'failed' && currentIdx === idx;
+                  const isDone =
+                    currentIdx > idx ||
+                    job.status === "completed" ||
+                    (job.status === "failed" && currentIdx > idx);
+                  const isCurrent =
+                    currentIdx === idx && job.status === "processing";
+                  const isFailed =
+                    job.status === "failed" && currentIdx === idx;
                   return (
                     <div
                       key={stage}
                       className={`text-[9px] uppercase tracking-wider text-center transition-colors duration-500 px-1 ${
-                        idx === 0 ? 'w-3 shrink-0' : 'flex-1 min-w-0'
+                        idx === 0 ? "w-3 shrink-0" : "flex-1 min-w-0"
                       } ${
                         isDone
-                          ? 'text-emerald-500'
+                          ? "text-emerald-500"
                           : isCurrent
-                            ? 'text-blue-400'
+                            ? "text-blue-400"
                             : isFailed
-                              ? 'text-red-400'
-                              : 'text-gray-400'
+                              ? "text-red-400"
+                              : "text-gray-400"
                       }`}
                     >
-                      {stage.replace('_', ' ')}
+                      {stage.replace("_", " ")}
                     </div>
                   );
                 })}
@@ -1176,21 +1588,25 @@ export function JobDetail() {
               <div className="flex w-full border-t border-gray-200 pt-3">
                 {stages.map((stage, idx) => {
                   const message = stageMessages.get(stage);
-                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
-                  const isCurrent = currentIdx === idx && job.status === 'processing';
+                  const isDone =
+                    currentIdx > idx ||
+                    job.status === "completed" ||
+                    (job.status === "failed" && currentIdx > idx);
+                  const isCurrent =
+                    currentIdx === idx && job.status === "processing";
                   return (
                     <div
                       key={stage}
-                      className={`text-center px-1 ${idx === 0 ? 'w-3 shrink-0' : 'flex-1 min-w-0'}`}
+                      className={`text-center px-1 ${idx === 0 ? "w-3 shrink-0" : "flex-1 min-w-0"}`}
                     >
                       {message && (
                         <div
                           className={`text-[10px] leading-tight truncate transition-all duration-300 ${
                             isCurrent
-                              ? 'text-blue-700 font-medium'
+                              ? "text-blue-700 font-medium"
                               : isDone
-                                ? 'text-gray-400'
-                                : 'text-gray-400'
+                                ? "text-gray-400"
+                                : "text-gray-400"
                           }`}
                           title={message}
                         >
@@ -1203,22 +1619,32 @@ export function JobDetail() {
               </div>
             </div>
           </div>
-          <details
-            className="bg-gray-50 border-t border-gray-200 overflow-hidden shadow-sm group"
-          >
+          <details className="bg-gray-50 border-t border-gray-200 overflow-hidden shadow-sm group">
             <summary className="px-6 py-4 font-semibold text-gray-500 group-hover:bg-gray-100/50 transition-colors list-none flex items-center gap-2 cursor-pointer">
               <MagicWandIcon className="text-fuchsia-400" />
               <span>Event History</span>
-              <span className="text-xs text-gray-400 font-normal ml-2">({events.length} events)</span>
+              <span className="text-xs text-gray-400 font-normal ml-2">
+                ({events.length} events)
+              </span>
             </summary>
             {events.length > 0 ? (
-              <div className="p-4 max-h-96 overflow-y-auto space-y-2 font-mono text-xs text-gray-500 border-t border-gray-200" ref={historyRef}>
+              <div
+                className="p-4 max-h-96 overflow-y-auto space-y-2 font-mono text-xs text-gray-500 border-t border-gray-200"
+                ref={historyRef}
+              >
                 {events.map((evt, i) => (
-                  <div key={i} className="border-b border-gray-200 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+                  <div
+                    key={i}
+                    className="border-b border-gray-200 pb-2 mb-2 last:border-0 whitespace-pre-wrap"
+                  >
+                    {evt}
+                  </div>
                 ))}
               </div>
             ) : (
-              <div className="p-4 text-xs text-gray-400 border-t border-gray-200">No events yet.</div>
+              <div className="p-4 text-xs text-gray-400 border-t border-gray-200">
+                No events yet.
+              </div>
             )}
           </details>
         </div>
@@ -1229,7 +1655,13 @@ export function JobDetail() {
           <DownloadIcon /> Raw JSON Context
         </summary>
         <div className="p-6 bg-gray-50 border-t border-gray-200 font-mono text-xs text-emerald-400/70 overflow-x-auto">
-          <pre>{JSON.stringify({ settings: job.settings, result, artifacts }, null, 2)}</pre>
+          <pre>
+            {JSON.stringify(
+              { settings: job.settings, result, artifacts },
+              null,
+              2,
+            )}
+          </pre>
         </div>
       </details>
     </div>

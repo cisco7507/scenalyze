@@ -68,6 +68,7 @@ export interface ArtifactOCR {
 export interface ArtifactVisionMatch {
   label: string;
   score: number;
+  category_id?: number | null;
 }
 
 export interface ArtifactVisionBoard {
