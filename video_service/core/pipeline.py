@@ -3,11 +3,18 @@ import os
 import re
 import torch
 import cv2
+import numpy as np
 import pandas as pd
 import concurrent.futures
 from contextvars import copy_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
-from video_service.core.video_io import extract_frames_for_pipeline, resolve_urls, get_pil_image
+from video_service.core.video_io import (
+    extract_express_brand_frame,
+    extract_frames_for_pipeline,
+    extract_middle_frame,
+    get_pil_image,
+    resolve_urls,
+)
 from video_service.core import categories as categories_runtime
 from video_service.core.categories import category_mapper, normalize_feature_tensor
 from video_service.core.ocr import ocr_manager
@@ -66,6 +73,7 @@ def process_single_video(
     enable_vision_board=None,
     enable_llm_frame=None,
     ctx=8192,
+    express_mode=False,
     job_id=None,
     stage_callback=None,
     enable_vision=None,  # Deprecated alias
@@ -84,15 +92,40 @@ def process_single_video(
         if stage_callback:
             stage_callback("ingest", "validating and preparing input")
         logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
-        frames, cap = extract_frames_for_pipeline(url, scan_mode=sm, job_id=job_id)
-        if cap and cap.isOpened():
-            cap.release()
+        express_mode = bool(express_mode)
+        if express_mode:
+            if stage_callback:
+                stage_callback("frame_extract", "express mode enabled; extracting static tail frame")
+            logger.info("[%s] express mode enabled: bypassing OCR extraction", url)
+            express_frame = extract_express_brand_frame(url, job_id=job_id)
+            frame_type = "express_tail"
+            if express_frame is None:
+                logger.warning("[%s] express frame extraction failed; falling back to middle frame", url)
+                express_frame = extract_middle_frame(url, job_id=job_id)
+                frame_type = "middle_fallback"
+            if express_frame is None:
+                logger.warning("[%s] express mode failed to extract any frame", url)
+                return {}, [], "Err", "No frames", [], [url, "Err", "", "Err", 0, "Empty", "none", None]
+            express_bgr = cv2.cvtColor(np.array(express_frame), cv2.COLOR_RGB2BGR)
+            frames = [
+                {
+                    "image": express_frame,
+                    "_pil_cache": express_frame,
+                    "ocr_image": express_bgr,
+                    "time": 0.0,
+                    "type": frame_type,
+                }
+            ]
+        else:
+            frames, cap = extract_frames_for_pipeline(url, scan_mode=sm, job_id=job_id)
+            if cap and cap.isOpened():
+                cap.release()
         
         if not frames: 
             logger.warning(f"[{url}] Extraction yielded no frames.")
             return {}, [], "Err", "No frames", [], [url, "Err", "", "Err", 0, "Empty", "none", None]
 
-        if stage_callback:
+        if stage_callback and not express_mode:
             extracted_mode = "full video" if frames[0].get("type") == "scene" else "tail only"
             stage_callback("frame_extract", f"extracted {len(frames)} frames ({extracted_mode})")
         
@@ -203,19 +236,27 @@ def process_single_video(
 
         sorted_vision: dict[str, float] = {}
         per_frame_vision: list[dict[str, object]] = []
-        if enable_vision_board:
-            parallel_t0 = time.time()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                vision_future = pool.submit(_do_vision)
-                ocr_future = pool.submit(_do_ocr)
-                ocr_text = ocr_future.result()
-                sorted_vision, per_frame_vision = vision_future.result()
-            logger.info("parallel_ocr_vision: completed in %.2fs", time.time() - parallel_t0)
+        if express_mode:
+            if stage_callback:
+                stage_callback("ocr", "express mode enabled; OCR bypassed")
+            ocr_text = ""
+            if enable_vision_board:
+                sorted_vision, per_frame_vision = _do_vision()
         else:
-            ocr_text = _do_ocr()
+            if enable_vision_board:
+                parallel_t0 = time.time()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    vision_future = pool.submit(_do_vision)
+                    ocr_future = pool.submit(_do_ocr)
+                    ocr_text = ocr_future.result()
+                    sorted_vision, per_frame_vision = vision_future.result()
+                logger.info("parallel_ocr_vision: completed in %.2fs", time.time() - parallel_t0)
+            else:
+                ocr_text = _do_ocr()
         if stage_callback:
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
-        tail_image = get_pil_image(frames[-1]) if enable_llm_frame else None
+        send_llm_frame = bool(enable_llm_frame or express_mode)
+        tail_image = get_pil_image(frames[-1]) if send_llm_frame else None
         res = llm_engine.query_pipeline(
             p,
             m,
@@ -224,8 +265,9 @@ def process_single_video(
             tail_image,
             override,
             enable_search,
-            enable_llm_frame,
+            send_llm_frame,
             ctx,
+            express_mode=express_mode,
         )
         
         category_match = category_mapper.map_category(
@@ -270,6 +312,7 @@ def run_pipeline_job(
     enable_llm_frame=None,
     ctx=8192,
     workers=1,
+    express_mode=False,
     job_id=None,
     stage_callback=None,
     enable_vision=None,  # Deprecated alias
@@ -308,6 +351,7 @@ def run_pipeline_job(
                 enable_vision_board,
                 enable_llm_frame,
                 ctx,
+                express_mode,
                 job_id,
                 stage_callback,
             ): u

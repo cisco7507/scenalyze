@@ -1706,6 +1706,7 @@ def _parse_settings(
     ocr_engine: str = Form("EasyOCR"),
     ocr_mode: str = Form("🚀 Fast"),
     scan_mode: str = Form("Tail Only"),
+    express_mode: bool = Form(False),
     override: bool = Form(False),
     enable_search: bool = Form(False),
     enable_web_search: Optional[bool] = Form(None),
@@ -1728,6 +1729,7 @@ def _parse_settings(
     return JobSettings(
         categories=categories, provider=provider, model_name=model_name,
         ocr_engine=ocr_engine, ocr_mode=ocr_mode, scan_mode=scan_mode,
+        express_mode=express_mode,
         override=override,
         enable_search=resolved_search,
         enable_web_search=resolved_search,

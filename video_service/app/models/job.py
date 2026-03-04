@@ -14,6 +14,7 @@ class JobSettings(BaseModel):
     ocr_engine: str = "EasyOCR"
     ocr_mode: str = "🚀 Fast"
     scan_mode: str = "Tail Only"
+    express_mode: bool = False
     override: bool = False
     enable_search: bool = True
     enable_web_search: Optional[bool] = None

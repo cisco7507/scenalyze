@@ -24,6 +24,7 @@ export interface JobSettings {
   ocr_engine:    string;
   ocr_mode:      string;
   scan_mode:     string;
+  express_mode?: boolean;
   override:      boolean;
   enable_search: boolean;
   enable_web_search?: boolean;

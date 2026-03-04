@@ -1,7 +1,7 @@
 import os
 import cv2
 import yt_dlp
-from typing import Any
+from typing import Any, Optional
 from PIL import Image
 from video_service.core.utils import logger
 from video_service.core.abort import is_job_aborted
@@ -246,6 +246,106 @@ def extract_frames_for_agent(url: str, job_id: str | None = None) -> tuple[list[
             })
     
     return frames, cap
+
+
+def _cv_bgr_to_pil(frame_bgr: Any) -> Image.Image:
+    return Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+
+
+def extract_middle_frame(video_path: str, job_id: str | None = None) -> Optional[Image.Image]:
+    cap = cv2.VideoCapture(get_stream_url(video_path))
+    try:
+        if not cap.isOpened():
+            return None
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total <= 0:
+            return None
+        middle = max(0, total // 2)
+        if job_id and is_job_aborted(job_id):
+            return None
+        cap.set(cv2.CAP_PROP_POS_FRAMES, middle)
+        ret, frame = cap.read()
+        if not ret:
+            return None
+        return _cv_bgr_to_pil(frame)
+    except Exception as exc:
+        logger.warning("express_middle_frame_failed: %s", exc)
+        return None
+    finally:
+        cap.release()
+
+
+def extract_express_brand_frame(video_path: str, job_id: str | None = None) -> Optional[Image.Image]:
+    cap = cv2.VideoCapture(get_stream_url(video_path))
+    try:
+        if not cap.isOpened():
+            return None
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if fps <= 0 or total <= 0:
+            return None
+
+        duration = total / fps
+        sample_start = max(0.0, duration - 4.0)
+        sample_end = max(0.0, duration - 0.5)
+        if sample_end < sample_start:
+            sample_end = sample_start
+
+        sample_count = 5
+        if sample_count <= 1:
+            sample_times = [sample_end]
+        else:
+            step = (sample_end - sample_start) / float(sample_count - 1)
+            sample_times = [sample_start + (idx * step) for idx in range(sample_count)]
+
+        samples: list[tuple[float, Any]] = []
+        for time_seconds in sample_times:
+            if job_id and is_job_aborted(job_id):
+                logger.info(
+                    "abort_frame_extraction: job_id=%s time=%.2fs type=express",
+                    job_id,
+                    time_seconds,
+                )
+                return None
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, time_seconds) * 1000.0)
+            ret, frame = cap.read()
+            if ret:
+                samples.append((time_seconds, frame))
+
+        if not samples:
+            return None
+        if len(samples) == 1:
+            logger.debug("express_tail_sampling: single frame selected time=%.2fs", samples[0][0])
+            return _cv_bgr_to_pil(samples[0][1])
+
+        pair_scores: list[float] = []
+        best_pair_index = 1
+        best_pair_score = float("inf")
+        previous_gray = cv2.cvtColor(samples[0][1], cv2.COLOR_BGR2GRAY)
+        for idx in range(1, len(samples)):
+            current_gray = cv2.cvtColor(samples[idx][1], cv2.COLOR_BGR2GRAY)
+            diff = cv2.absdiff(previous_gray, current_gray)
+            score = float((diff.astype("float32") ** 2).mean())
+            pair_scores.append(score)
+            if score < best_pair_score:
+                best_pair_score = score
+                best_pair_index = idx
+            previous_gray = current_gray
+
+        logger.debug(
+            "express_tail_sampling: duration=%.2fs scores=%s best_pair_idx=%d best_mse=%.6f",
+            duration,
+            [round(score, 6) for score in pair_scores],
+            best_pair_index,
+            best_pair_score,
+        )
+        return _cv_bgr_to_pil(samples[best_pair_index][1])
+    except Exception as exc:
+        logger.warning("express_tail_sampling_failed: %s", exc)
+        return None
+    finally:
+        cap.release()
 
 def resolve_urls(src: str, urls: str, fldr: str) -> list[str]:
     if src == "Web URLs":

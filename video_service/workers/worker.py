@@ -624,6 +624,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     enable_web_search = _resolve_enable_web_search(settings)
     enable_vision_board = _resolve_enable_vision_board(settings)
     enable_llm_frame = _resolve_enable_llm_frame(settings)
+    express_mode = bool(settings.get("express_mode", False))
     pipeline_threads = get_pipeline_threads_per_job()
     generator = run_pipeline_job(
         job_id=job_id,
@@ -642,6 +643,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         enable_llm_frame=enable_llm_frame,
         ctx=settings.get("context_size", 8192),
         workers=pipeline_threads,
+        express_mode=express_mode,
         stage_callback=stage_cb,
     )
     final_df = None

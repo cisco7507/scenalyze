@@ -30,6 +30,7 @@ export function Jobs() {
   const [ocrEngine, setOcrEngine] = useState('EasyOCR');
   const [ocrMode, setOcrMode] = useState('🚀 Fast');
   const [scanMode, setScanMode] = useState('Tail Only');
+  const [expressMode, setExpressMode] = useState(false);
   const [enableVisionBoard, setEnableVisionBoard] = useState(true);
   const [enableLlmFrame, setEnableLlmFrame] = useState(true);
   const [enableWebSearch, setEnableWebSearch] = useState(true);
@@ -106,6 +107,7 @@ export function Jobs() {
       ocr_engine: ocrEngine,
       ocr_mode: ocrMode,
       scan_mode: scanMode,
+      express_mode: expressMode,
       override: false,
       enable_search: enableWebSearch,
       enable_web_search: enableWebSearch,
@@ -120,6 +122,7 @@ export function Jobs() {
       ocrEngine,
       ocrMode,
       scanMode,
+      expressMode,
       enableWebSearch,
       enableVisionBoard,
       enableLlmFrame,
@@ -309,6 +312,17 @@ export function Jobs() {
               <select value={scanMode} onChange={(e) => setScanMode(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="Tail Only">Tail Only</option>
                 <option value="Full Video">Full Video</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Express Mode</label>
+              <select
+                value={expressMode ? 'true' : 'false'}
+                onChange={(e) => setExpressMode(e.target.value === 'true')}
+                className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700"
+              >
+                <option value="false">Disabled</option>
+                <option value="true">Enabled (Vision only)</option>
               </select>
             </div>
             <div className="space-y-1">
