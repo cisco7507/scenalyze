@@ -218,6 +218,13 @@ export function Benchmark() {
   const [availableModels, setAvailableModels] = useState<ModelCombo[]>([]);
   const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set());
 
+  // Manual model entry (for llama-server etc.)
+  const [manualProvider, setManualProvider] = useState<string>('Llama Server');
+  const [manualModelName, setManualModelName] = useState<string>('');
+
+  // Express mode
+  const [expressMode, setExpressMode] = useState(false);
+
   const [suiteModalOpen, setSuiteModalOpen] = useState(false);
   const [suiteModalId, setSuiteModalId] = useState('');
   const [suiteModalName, setSuiteModalName] = useState('');
@@ -431,6 +438,7 @@ export function Benchmark() {
       const result = await runBenchmarkSuite({
         truth_id: runTruthId,
         categories: runCategories,
+        express_mode: expressMode,
         ...(selectedCombos.length > 0 ? { model_combos: selectedCombos } : {}),
       });
       const suiteId = String(result?.suite_id || '');
@@ -584,6 +592,26 @@ export function Benchmark() {
       }
       return next;
     });
+  };
+
+  const addManualModel = () => {
+    const name = manualModelName.trim();
+    if (!name) return;
+    const key = `${manualProvider}::${name}`;
+    if (availableModels.some((m) => m.key === key)) {
+      // Already exists — just make sure it's selected
+      setSelectedModelKeys((prev) => new Set([...prev, key]));
+    } else {
+      const combo: ModelCombo = { provider: manualProvider, model: name, key };
+      setAvailableModels((prev) => [...prev, combo]);
+      setSelectedModelKeys((prev) => new Set([...prev, key]));
+    }
+    setManualModelName('');
+  };
+
+  const removeModel = (key: string) => {
+    setAvailableModels((prev) => prev.filter((m) => m.key !== key));
+    setSelectedModelKeys((prev) => { const next = new Set(prev); next.delete(key); return next; });
   };
 
   const selectAllModels = () => setSelectedModelKeys(new Set(availableModels.map((m) => m.key)));
@@ -785,7 +813,7 @@ export function Benchmark() {
             </div>
             {availableModels.length === 0 ? (
               <div className="rounded border border-dashed border-gray-300 py-3 text-center text-xs text-gray-400">
-                No models detected — all available will be used.
+                No models detected — add manually below or all available will be used.
               </div>
             ) : (
               <div className="flex flex-wrap gap-1.5">
@@ -807,11 +835,50 @@ export function Benchmark() {
                       />
                       <span className="font-normal text-gray-500">{combo.provider}</span>
                       <span className="font-semibold">{combo.model}</span>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); removeModel(combo.key); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); removeModel(combo.key); } }}
+                        className="ml-0.5 text-gray-400 hover:text-red-500"
+                        title="Remove"
+                      >
+                        ×
+                      </span>
                     </button>
                   );
                 })}
               </div>
             )}
+            {/* Manual model entry row */}
+            <div className="mt-2 flex items-center gap-1.5">
+              <select
+                value={manualProvider}
+                onChange={(e) => setManualProvider(e.target.value)}
+                className="h-8 rounded border border-gray-300 bg-white px-2 text-xs text-gray-700 focus:border-primary-500 focus:outline-none"
+              >
+                <option>Llama Server</option>
+                <option>Ollama</option>
+                <option>OpenAI</option>
+                <option>Anthropic</option>
+                <option>Groq</option>
+              </select>
+              <input
+                value={manualModelName}
+                onChange={(e) => setManualModelName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addManualModel(); }}
+                placeholder="model name (e.g. llama3.3:70b)"
+                className="h-8 flex-1 rounded border border-gray-300 bg-white px-2 text-xs text-gray-700 focus:border-primary-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={addManualModel}
+                disabled={!manualModelName.trim()}
+                className="h-8 rounded border border-primary-400 bg-primary-50 px-2.5 text-xs font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
+              >
+                + Add
+              </button>
+            </div>
             {availableModels.length > 0 && (
               <p className="mt-1.5 text-[11px] text-gray-400">
                 {selectedModelKeys.size} of {availableModels.length} selected — only these will run
@@ -825,6 +892,27 @@ export function Benchmark() {
             placeholder="Optional categories override"
             className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
+
+          {/* Express mode toggle */}
+          <label className="flex cursor-pointer items-center gap-2.5 select-none">
+            <div
+              onClick={() => setExpressMode((v) => !v)}
+              className={`relative h-5 w-9 rounded-full transition-colors ${
+                expressMode ? 'bg-emerald-500' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                  expressMode ? 'translate-x-4' : 'translate-x-0.5'
+                }`}
+              />
+            </div>
+            <span className="text-sm text-gray-700 font-medium">
+              Express mode
+            </span>
+            <span className="text-xs text-gray-400">(faster scan, fewer frames)</span>
+          </label>
+
           <button
             type="button"
             disabled={runDisabled}

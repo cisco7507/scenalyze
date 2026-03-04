@@ -121,6 +121,8 @@ class BenchmarkRunRequest(BaseModel):
     models: Optional[List[str]] = None
     # Explicit (provider, model) pairs — bypasses Cartesian auto-resolve when set
     model_combos: Optional[List[dict]] = None
+    # Run each benchmark job in express (fast) mode
+    express_mode: bool = False
 
 
 class BenchmarkSuiteUpdateRequest(BaseModel):

@@ -1092,6 +1092,7 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
             ocr_mode=normalize_ocr_mode(permutation["ocr_mode"]),
             scan_mode=normalize_scan_mode(permutation["scan_strategy"]),
             override=False,
+            express_mode=body.express_mode,
             enable_search=True,
             enable_web_search=True,
             enable_agentic_search=True,
