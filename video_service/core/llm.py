@@ -246,6 +246,15 @@ class OllamaProvider(BaseProvider):
 
 
 class OpenAICompatibleProvider(BaseProvider):
+    def __init__(
+        self,
+        backend_model: str,
+        context_size: int = 8192,
+        force_json_mode: bool = False,
+    ) -> None:
+        super().__init__(backend_model=backend_model, context_size=context_size)
+        self.force_json_mode = bool(force_json_mode)
+
     @property
     def supports_vision(self) -> bool:
         return True
@@ -275,6 +284,8 @@ class OpenAICompatibleProvider(BaseProvider):
             "top_p": 1.0,
             "presence_penalty": 2.0,
         }
+        if self.force_json_mode:
+            payload["response_format"] = {"type": "json_object"}
         try:
             resp = requests.post(OPENAI_COMPAT_URL, json=payload, timeout=LLM_TIMEOUT_SECONDS)
             resp.raise_for_status()
@@ -432,8 +443,18 @@ def create_provider(provider: str, backend_model: str, context_size: int = 8192)
         if "qwen" in model_name:
             return OllamaQwenProvider(backend_model=backend_model, context_size=context_size)
         return OllamaProvider(backend_model=backend_model, context_size=context_size)
+    if provider_name in {"llama-server", "llama server"}:
+        return OpenAICompatibleProvider(
+            backend_model=backend_model,
+            context_size=context_size,
+            force_json_mode=True,
+        )
     if provider_name in {"lm studio", "openai compatible", "openai-compatible"}:
-        return OpenAICompatibleProvider(backend_model=backend_model, context_size=context_size)
+        return OpenAICompatibleProvider(
+            backend_model=backend_model,
+            context_size=context_size,
+            force_json_mode=True,
+        )
     raise ValueError(f"Unsupported provider: {provider}")
 
 

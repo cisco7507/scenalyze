@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { deleteJobsBulk, getClusterJobs, getOllamaModels, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
+import { deleteJobsBulk, getClusterJobs, getProviderModels, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
 import type { JobStatus, JobSettings } from '../lib/api';
 import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
 import { formatDistanceToNow } from 'date-fns';
 
 type InputMode = 'urls' | 'filepath' | 'dirpath';
+const PROVIDER_OPTIONS = ['Ollama', 'LM Studio', 'Llama Server', 'Gemini CLI'] as const;
 
 export function Jobs() {
   const [jobs, setJobs] = useState<JobStatus[]>([]);
@@ -24,8 +25,8 @@ export function Jobs() {
   const [categories, setCategories] = useState('');
   const [provider, setProvider] = useState('Ollama');
   const [modelName, setModelName] = useState('qwen3-vl:8b-instruct');
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [ollamaModelsLoading, setOllamaModelsLoading] = useState(false);
+  const [providerModels, setProviderModels] = useState<string[]>([]);
+  const [providerModelsLoading, setProviderModelsLoading] = useState(false);
   const [ocrEngine, setOcrEngine] = useState('EasyOCR');
   const [ocrMode, setOcrMode] = useState('🚀 Fast');
   const [scanMode, setScanMode] = useState('Tail Only');
@@ -59,32 +60,43 @@ export function Jobs() {
   }, []);
 
   useEffect(() => {
+    const providerName = provider.trim().toLowerCase();
+    if (providerName !== 'ollama' && providerName !== 'llama-server' && providerName !== 'llama server') {
+      setProviderModels([]);
+      setProviderModelsLoading(false);
+      return;
+    }
+
+    const modelProvider = providerName === 'ollama' ? 'ollama' : 'llama-server';
     let active = true;
-    setOllamaModelsLoading(true);
-    getOllamaModels()
+    setProviderModelsLoading(true);
+    getProviderModels(modelProvider)
       .then((models) => {
         if (!active) return;
         const names = models.map((m) => m.name).filter(Boolean);
-        setOllamaModels(names);
+        setProviderModels(names);
         if (names.length > 0) {
           setModelName((current) => (names.includes(current) ? current : names[0]));
         }
       })
       .catch(() => {
         if (!active) return;
-        setOllamaModels([]);
+        setProviderModels([]);
       })
       .finally(() => {
         if (!active) return;
-        setOllamaModelsLoading(false);
+        setProviderModelsLoading(false);
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [provider]);
 
-  const showOllamaModelPicker = provider.trim().toLowerCase() === 'ollama' && ollamaModels.length > 0;
-  const modelInOllamaList = showOllamaModelPicker && ollamaModels.includes(modelName);
+  const providerName = provider.trim().toLowerCase();
+  const showProviderModelPicker =
+    (providerName === 'ollama' || providerName === 'llama-server' || providerName === 'llama server') &&
+    providerModels.length > 0;
+  const modelInProviderList = showProviderModelPicker && providerModels.includes(modelName);
 
   const settingsPayload: JobSettings = useMemo(
     () => ({
@@ -333,29 +345,33 @@ export function Jobs() {
             </div>
             <div className="space-y-1">
               <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Provider</label>
-              <input value={provider} onChange={(e) => setProvider(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700" />
+              <select value={provider} onChange={(e) => setProvider(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
+                {PROVIDER_OPTIONS.map((providerOption) => (
+                  <option key={providerOption} value={providerOption}>{providerOption}</option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1 md:col-span-2">
               <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Model</label>
-              {showOllamaModelPicker ? (
+              {showProviderModelPicker ? (
                 <div className="space-y-2">
                   <select
-                    value={modelInOllamaList ? modelName : '__custom__'}
+                    value={modelInProviderList ? modelName : '__custom__'}
                     onChange={(e) => {
                       if (e.target.value === '__custom__') {
-                        if (modelInOllamaList) setModelName('');
+                        if (modelInProviderList) setModelName('');
                         return;
                       }
                       setModelName(e.target.value);
                     }}
                     className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700"
                   >
-                    {ollamaModels.map((name) => (
+                    {providerModels.map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
                     <option value="__custom__">Custom model...</option>
                   </select>
-                  {!modelInOllamaList && (
+                  {!modelInProviderList && (
                     <input
                       value={modelName}
                       onChange={(e) => setModelName(e.target.value)}
@@ -367,8 +383,10 @@ export function Jobs() {
               ) : (
                 <input value={modelName} onChange={(e) => setModelName(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700" />
               )}
-              {provider.trim().toLowerCase() === 'ollama' && ollamaModelsLoading && (
-                <div className="text-[10px] text-gray-400">Loading available Ollama models...</div>
+              {(providerName === 'ollama' || providerName === 'llama-server' || providerName === 'llama server') && providerModelsLoading && (
+                <div className="text-[10px] text-gray-400">
+                  Loading available {providerName === 'ollama' ? 'Ollama' : 'Llama Server'} models...
+                </div>
               )}
             </div>
             <div className="space-y-1 md:col-span-4">

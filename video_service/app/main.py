@@ -449,6 +449,55 @@ async def list_ollama_models():
     return []
 
 
+def _openai_compat_models_url() -> str:
+    compat_url = os.environ.get(
+        "OPENAI_COMPAT_URL", "http://localhost:1234/v1/chat/completions"
+    ).rstrip("/")
+    if compat_url.endswith("/v1/chat/completions"):
+        base = compat_url[: -len("/v1/chat/completions")]
+    elif compat_url.endswith("/chat/completions"):
+        base = compat_url[: -len("/chat/completions")]
+    elif "/v1/" in compat_url:
+        base = compat_url.split("/v1/")[0]
+    else:
+        base = compat_url
+    return f"{base}/v1/models"
+
+
+@app.get("/llama-server/models", tags=["ops"])
+async def list_llama_server_models():
+    """Return models from OpenAI-compatible llama-server /v1/models endpoint."""
+    models_url = _openai_compat_models_url()
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(models_url, timeout=5.0)
+            if res.status_code == 200:
+                payload = res.json()
+                data = payload.get("data", []) if isinstance(payload, dict) else []
+                return [
+                    {
+                        "name": model.get("id", ""),
+                        "size": model.get("owned_by"),
+                        "modified_at": model.get("created"),
+                    }
+                    for model in data
+                    if isinstance(model, dict) and model.get("id")
+                ]
+    except Exception as exc:
+        logger.warning("llama_server_models: unreachable: %s", exc)
+    return []
+
+
+@app.get("/api/v1/models", tags=["ops"])
+async def list_provider_models(provider: str = "ollama"):
+    provider_name = (provider or "").strip().lower()
+    if provider_name == "ollama":
+        return await list_ollama_models()
+    if provider_name in {"llama-server", "llama server"}:
+        return await list_llama_server_models()
+    return []
+
+
 @app.get("/cluster/jobs", tags=["ops"])
 async def cluster_jobs():
     """Fan out /admin/jobs to all healthy nodes and merge."""
@@ -729,6 +778,26 @@ async def _resolve_benchmark_provider_models(
 
     if use_provider("LM Studio"):
         pairs.append(("LM Studio", os.environ.get("BENCHMARK_LM_STUDIO_MODEL", "local-model")))
+
+    if use_provider("Llama Server"):
+        try:
+            llama_models = await list_llama_server_models()
+        except Exception:
+            llama_models = []
+        llama_names = [
+            m.get("name")
+            for m in llama_models
+            if isinstance(m, dict) and m.get("name")
+        ]
+        if not llama_names:
+            llama_names = [
+                os.environ.get(
+                    "BENCHMARK_LLAMA_SERVER_MODEL",
+                    os.environ.get("BENCHMARK_LM_STUDIO_MODEL", "local-model"),
+                )
+            ]
+        for model in llama_names[:3]:
+            pairs.append(("Llama Server", str(model)))
 
     if use_provider("Gemini CLI"):
         pairs.append(("Gemini CLI", os.environ.get("BENCHMARK_GEMINI_MODEL", "Gemini CLI Default")))

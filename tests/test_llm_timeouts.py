@@ -10,7 +10,12 @@ if "ddgs" not in sys.modules:
     ddgs_stub.DDGS = object
     sys.modules["ddgs"] = ddgs_stub
 
-from video_service.core.llm import HybridLLM, create_provider, OllamaQwenProvider
+from video_service.core.llm import (
+    HybridLLM,
+    OpenAICompatibleProvider,
+    OllamaQwenProvider,
+    create_provider,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -129,6 +134,12 @@ def test_create_provider_routes_qwen_models_to_qwen_plugin():
     assert isinstance(provider, OllamaQwenProvider)
 
 
+def test_create_provider_routes_llama_server_to_openai_compat_json_mode():
+    provider = create_provider("llama-server", "unsloth/Qwen3.5-4B-GGUF", context_size=8192)
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.force_json_mode is True
+
+
 def test_qwen_ollama_agent_uses_chat_endpoint_and_qwen_options(monkeypatch):
     calls: list[dict] = []
 
@@ -197,3 +208,4 @@ def test_lm_studio_pipeline_uses_assistant_prefill_and_reconstructs_json(monkeyp
     assert call["json"]["temperature"] == 0.0
     assert call["json"]["top_p"] == 1.0
     assert call["json"]["presence_penalty"] == 2.0
+    assert call["json"]["response_format"] == {"type": "json_object"}
