@@ -32,6 +32,7 @@ export interface JobSettings {
   enable_vision_board: boolean;
   enable_llm_frame: boolean;
   enable_vision?: boolean;
+  siglip_variant?: string;
   context_size:  number;
 }
 

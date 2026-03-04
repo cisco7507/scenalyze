@@ -22,6 +22,7 @@ class JobSettings(BaseModel):
     enable_vision_board: bool = True
     enable_llm_frame: bool = True
     context_size: int = 8192
+    siglip_variant: str = "v1"  # "v1" = siglip-so400m-patch14-384, "v2" = siglip2-so400m-patch14-384
 
     @model_validator(mode="before")
     @classmethod

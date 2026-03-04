@@ -35,6 +35,7 @@ export function Jobs() {
   const [enableLlmFrame, setEnableLlmFrame] = useState(true);
   const [enableWebSearch, setEnableWebSearch] = useState(true);
   const [contextSize, setContextSize] = useState(8192);
+  const [siglipVariant, setSiglipVariant] = useState<'v1' | 'v2'>('v1');
 
   // Filtering
   const [search, setSearch] = useState('');
@@ -114,6 +115,7 @@ export function Jobs() {
       enable_vision_board: enableVisionBoard,
       enable_llm_frame: enableLlmFrame,
       context_size: contextSize,
+      siglip_variant: siglipVariant,
     }),
     [
       categories,
@@ -127,6 +129,7 @@ export function Jobs() {
       enableVisionBoard,
       enableLlmFrame,
       contextSize,
+      siglipVariant,
     ]
   );
 
@@ -332,6 +335,19 @@ export function Jobs() {
                 <option value="false">Disabled</option>
               </select>
             </div>
+            {enableVisionBoard && (
+              <div className="space-y-1">
+                <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">🔬 Vision Model</label>
+                <select
+                  value={siglipVariant}
+                  onChange={(e) => setSiglipVariant(e.target.value as 'v1' | 'v2')}
+                  className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700"
+                >
+                  <option value="v1">SigLIP v1 (so400m-patch14-384)</option>
+                  <option value="v2">SigLIP v2 (siglip2-so400m-patch14-384)</option>
+                </select>
+              </div>
+            )}
             <div className="space-y-1">
               <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">LLM Keyframe</label>
               <select value={enableLlmFrame ? 'true' : 'false'} onChange={(e) => setEnableLlmFrame(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">

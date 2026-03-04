@@ -90,6 +90,7 @@ class AdClassifierAgent:
         ocr_summary="",
         stage_callback=None,
         enable_vision=None,  # Deprecated alias
+        siglip_variant="v1",
     ):
         if enable_vision is not None:
             if enable_vision_board is None:
@@ -218,19 +219,23 @@ Current Memory:
                     if not enable_vision_board:
                         observation = "Observation: Formatting ERROR. The VISION tool is disabled by user settings. Proceed without it."
                     elif _ensure_react_vision_ready():
-                        siglip_model, siglip_processor = _get_siglip_handles()
+                        variant_result = categories_runtime._ensure_siglip_variant_loaded(siglip_variant)
+                        if variant_result is not None:
+                            _siglip_model, _siglip_processor = variant_result
+                        else:
+                            _siglip_model, _siglip_processor = _get_siglip_handles()
                         with torch.no_grad():
-                            image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
+                            image_inputs = _siglip_processor(images=pil_images, return_tensors="pt").to(device)
                             if TORCH_DTYPE != torch.float32:
                                 image_inputs = {k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v for k, v in image_inputs.items()}
-                            image_features = siglip_model.get_image_features(**image_inputs)
+                            image_features = _siglip_model.get_image_features(**image_inputs)
                             image_features = normalize_feature_tensor(
                                 image_features,
                                 source="SigLIP.get_image_features",
                             )
                             
-                            logit_scale = siglip_model.logit_scale.exp()
-                            logit_bias = siglip_model.logit_bias
+                            logit_scale = _siglip_model.logit_scale.exp()
+                            logit_bias = _siglip_model.logit_bias
                             logits_per_image = (image_features @ category_mapper.vision_text_features.t()) * logit_scale + logit_bias
                             probs = torch.sigmoid(logits_per_image)
                             
@@ -290,6 +295,7 @@ def run_agent_job(
     job_id=None,
     stage_callback=None,
     enable_vision=None,  # Deprecated alias
+    siglip_variant="v1",
 ):
     if enable_vision is not None:
         if enable_vision_board is None:
@@ -345,6 +351,7 @@ def run_agent_job(
                 job_id=job_id,
                 ocr_summary=ocr_summary,
                 stage_callback=stage_callback,
+                siglip_variant=siglip_variant,
             ):
                 if len(agent_output) == 8:
                     log, b, c, cid, conf, r, match_method, match_score = agent_output

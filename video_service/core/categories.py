@@ -17,13 +17,18 @@ except Exception as exc:
     go = None
     logger.warning("Plotly unavailable; Nebula plot disabled: %s", exc)
 
-siglip_model = None
-siglip_processor = None
-siglip_last_error = None
-_siglip_lock = threading.Lock()
-_siglip_error_logged = None
+import os
 
-SIGLIP_ID = "google/siglip-so400m-patch14-384"
+SIGLIP_VARIANTS: dict[str, str] = {
+    "v1": "google/siglip-so400m-patch14-384",
+    "v2": "google/siglip2-so400m-patch14-384",
+}
+DEFAULT_SIGLIP_VARIANT: str = os.environ.get("SIGLIP_VARIANT", "v1")
+SIGLIP_ID = SIGLIP_VARIANTS[DEFAULT_SIGLIP_VARIANT]  # kept for backward-compat
+
+# Per-variant cache: {variant_key -> (model, processor)}
+_siglip_cache: dict[str, tuple] = {}
+_siglip_cache_lock = threading.Lock()
 
 
 def _as_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
@@ -62,62 +67,95 @@ def normalize_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
     return tensor / norms
 
 
-def _load_siglip_explicit():
-    # Fallback path when Auto* loaders fail in some transformers/hub combinations.
-    from transformers import SiglipModel, SiglipProcessor, SiglipImageProcessor, SiglipTokenizer
-
-    model = SiglipModel.from_pretrained(SIGLIP_ID, torch_dtype=TORCH_DTYPE).to(device)
+def _load_siglip_for_id(model_id: str):
+    """Load SigLIP model + processor for an explicit HF model ID."""
     try:
-        processor = SiglipProcessor.from_pretrained(SIGLIP_ID)
+        model = AutoModel.from_pretrained(model_id, torch_dtype=TORCH_DTYPE).to(device)
+        try:
+            processor = AutoProcessor.from_pretrained(model_id)
+        except Exception as primary_exc:
+            logger.warning(
+                "SigLIP processor init failed (default path), retrying with use_fast=False: %s",
+                primary_exc,
+            )
+            processor = AutoProcessor.from_pretrained(model_id, use_fast=False)
+        return model, processor
+    except Exception as auto_exc:
+        logger.warning(
+            "SigLIP auto loader failed for %s, retrying explicit SigLIP loader: %s",
+            model_id,
+            auto_exc,
+        )
+        return _load_siglip_explicit_for_id(model_id)
+
+
+def _load_siglip_explicit_for_id(model_id: str):
+    """Fallback explicit loader when AutoModel fails."""
+    from transformers import SiglipModel, SiglipProcessor, SiglipImageProcessor, SiglipTokenizer
+    model = SiglipModel.from_pretrained(model_id, torch_dtype=TORCH_DTYPE).to(device)
+    try:
+        processor = SiglipProcessor.from_pretrained(model_id)
     except Exception:
-        image_processor = SiglipImageProcessor.from_pretrained(SIGLIP_ID)
-        tokenizer = SiglipTokenizer.from_pretrained(SIGLIP_ID)
+        image_processor = SiglipImageProcessor.from_pretrained(model_id)
+        tokenizer = SiglipTokenizer.from_pretrained(model_id)
         processor = SiglipProcessor(image_processor=image_processor, tokenizer=tokenizer)
     return model, processor
 
 
+# Keep legacy names as aliases for backward compatibility
+def _load_siglip_explicit():
+    return _load_siglip_explicit_for_id(SIGLIP_ID)
+
+
+# Module-level globals – point to the default variant (backward compat).
+siglip_model = None
+siglip_processor = None
+siglip_last_error = None
+_siglip_lock = threading.Lock()
+_siglip_error_logged = None
+
+
+def _ensure_siglip_variant_loaded(variant: str = DEFAULT_SIGLIP_VARIANT) -> tuple | None:
+    """
+    Return (model, processor) for the requested variant key ('v1' or 'v2').
+    Results are cached; first call per variant triggers a download. Returns None on error.
+    """
+    variant = variant if variant in SIGLIP_VARIANTS else DEFAULT_SIGLIP_VARIANT
+    with _siglip_cache_lock:
+        if variant in _siglip_cache:
+            return _siglip_cache[variant]
+        model_id = SIGLIP_VARIANTS[variant]
+        logger.info("Loading SigLIP variant=%s (%s) on %s with dtype %s", variant, model_id, device, TORCH_DTYPE)
+        try:
+            model, processor = _load_siglip_for_id(model_id)
+            _siglip_cache[variant] = (model, processor)
+            logger.info("SigLIP variant=%s loaded successfully", variant)
+            return model, processor
+        except Exception as exc:
+            logger.exception("SigLIP variant=%s load failed: %s", variant, exc)
+            return None
+
+
 def _ensure_siglip_loaded() -> bool:
+    """Legacy helper — loads the default variant and populates module-level globals."""
     global siglip_model, siglip_processor, siglip_last_error, _siglip_error_logged
     if siglip_model is not None and siglip_processor is not None:
         return True
-
     with _siglip_lock:
         if siglip_model is not None and siglip_processor is not None:
             return True
-        try:
-            logger.info(f"Initializing SigLIP on {device} with dtype {TORCH_DTYPE}")
-            try:
-                model = AutoModel.from_pretrained(SIGLIP_ID, torch_dtype=TORCH_DTYPE).to(device)
-                try:
-                    processor = AutoProcessor.from_pretrained(SIGLIP_ID)
-                except Exception as primary_exc:
-                    logger.warning(
-                        "SigLIP processor init failed (default path), retrying with use_fast=False: %s",
-                        primary_exc,
-                    )
-                    processor = AutoProcessor.from_pretrained(SIGLIP_ID, use_fast=False)
-            except Exception as auto_exc:
-                logger.warning(
-                    "SigLIP auto loader failed, retrying explicit SigLIP loader: %s",
-                    auto_exc,
-                )
-                model, processor = _load_siglip_explicit()
-            if processor is None:
-                raise RuntimeError("AutoProcessor returned None")
-            siglip_model = model
-            siglip_processor = processor
-            siglip_last_error = None
-            return True
-        except Exception as exc:
-            siglip_last_error = f"{type(exc).__name__}: {exc}"
+        result = _ensure_siglip_variant_loaded(DEFAULT_SIGLIP_VARIANT)
+        if result is None:
+            siglip_last_error = f"Failed to load default SigLIP variant ({DEFAULT_SIGLIP_VARIANT})"
             if _siglip_error_logged != siglip_last_error:
-                logger.exception("SigLIP unavailable: %s", exc)
+                logger.error("SigLIP unavailable: %s", siglip_last_error)
                 _siglip_error_logged = siglip_last_error
-            else:
-                logger.warning("SigLIP unavailable: %s", exc)
             siglip_model = None
             siglip_processor = None
             return False
+        siglip_model, siglip_processor = result
+        siglip_last_error = None
+        return True
 
 
 _ensure_siglip_loaded()
