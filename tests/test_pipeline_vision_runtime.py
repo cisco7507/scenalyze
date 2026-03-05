@@ -1,6 +1,7 @@
 import sys
 import types
 
+import numpy as np
 import pytest
 import torch
 
@@ -175,3 +176,67 @@ def test_pipeline_passes_canonical_fallback_categories_to_llm(monkeypatch):
     assert len(llm_calls) == 1
     assert llm_calls[0]["args"][2] == "sample ocr"
     assert len(llm_calls[0]["args"]) == 8
+
+
+def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    ocr_calls: list[float] = []
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            ocr_calls.append(float(image[0, 0, 0]))
+            return "same endcard text"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Brand X",
+                "category": "Raw Category",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    identical_frame = np.full((48, 64, 3), 200, dtype=np.uint8)
+    frames = [
+        {"image": object(), "ocr_image": identical_frame.copy(), "time": 27.0 + (i * 0.6), "type": "tail"}
+        for i in range(5)
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-ocr-prefilter-1",
+    )
+
+    assert len(ocr_calls) == 2

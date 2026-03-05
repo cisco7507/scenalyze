@@ -60,6 +60,80 @@ def _resolve_ocr_dedup_threshold() -> float:
     return max(0.0, min(1.0, value))
 
 
+def _resolve_ocr_frame_similarity_threshold() -> float:
+    raw = os.environ.get("OCR_FRAME_SIMILARITY_THRESHOLD", "0.985")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_frame_similarity_threshold value=%r fallback=0.985", raw)
+        return 0.985
+    return max(0.0, min(1.0, value))
+
+
+def _frame_hist_signature(frame_bgr: np.ndarray) -> np.ndarray:
+    thumbnail = cv2.resize(frame_bgr, (96, 54), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [24, 24], [0, 180, 0, 256])
+    return cv2.normalize(hist, None).flatten()
+
+
+def _frames_visually_similar(a_bgr: np.ndarray, b_bgr: np.ndarray, threshold: float) -> bool:
+    score = float(
+        cv2.compareHist(
+            _frame_hist_signature(a_bgr),
+            _frame_hist_signature(b_bgr),
+            cv2.HISTCMP_CORREL,
+        )
+    )
+    return score >= threshold
+
+
+def _select_frames_for_ocr(frames: list[dict[str, object]]) -> tuple[list[dict[str, object]], int]:
+    if len(frames) <= 2:
+        return list(frames), 0
+
+    similarity_threshold = _resolve_ocr_frame_similarity_threshold()
+    selected: list[dict[str, object]] = [frames[0]]
+    skipped = 0
+    last_selected = frames[0]
+    last_index = len(frames) - 1
+
+    for idx, frame in enumerate(frames[1:], start=1):
+        is_last_frame = idx == last_index
+        if is_last_frame:
+            if frame is not selected[-1]:
+                selected.append(frame)
+            continue
+
+        current_image = frame.get("ocr_image")
+        last_image = last_selected.get("ocr_image")
+        if not isinstance(current_image, np.ndarray) or not isinstance(last_image, np.ndarray):
+            selected.append(frame)
+            last_selected = frame
+            continue
+
+        if _frames_visually_similar(last_image, current_image, similarity_threshold):
+            skipped += 1
+            logger.debug(
+                "ocr_frame_prefilter_skip: frame at %.1fs similar to previous threshold=%.3f",
+                float(frame.get("time", 0.0)),
+                similarity_threshold,
+            )
+            continue
+
+        selected.append(frame)
+        last_selected = frame
+
+    logger.info(
+        "ocr_frame_prefilter: selected=%d skipped=%d total_frames=%d threshold=%.3f",
+        len(selected),
+        skipped,
+        len(frames),
+        similarity_threshold,
+    )
+    return selected, skipped
+
+
 def process_single_video(
     url,
     categories,
@@ -198,11 +272,12 @@ def process_single_video(
                 if stage_callback:
                     stage_callback("ocr", f"ocr engine={oe.lower()}")
                 dedup_threshold = _resolve_ocr_dedup_threshold()
+                ocr_frames, visually_skipped_count = _select_frames_for_ocr(frames)
                 ocr_lines: list[str] = []
                 prev_normalized: str | None = None
                 skipped_count = 0
-                last_index = len(frames) - 1
-                for idx, frame in enumerate(frames):
+                last_index = len(ocr_frames) - 1
+                for idx, frame in enumerate(ocr_frames):
                     raw_text = ocr_manager.extract_text(oe, frame["ocr_image"], om)
                     normalized = _normalize_ocr(raw_text)
                     is_last_frame = idx == last_index
@@ -222,9 +297,11 @@ def process_single_video(
                     ocr_lines.append(raw_text)
                     prev_normalized = normalized
                 logger.info(
-                    "ocr_dedup: processed=%d skipped=%d total_frames=%d threshold=%.2f",
+                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d ocr_frames=%d total_frames=%d threshold=%.2f",
                     len(ocr_lines),
                     skipped_count,
+                    visually_skipped_count,
+                    len(ocr_frames),
                     len(frames),
                     dedup_threshold,
                 )
