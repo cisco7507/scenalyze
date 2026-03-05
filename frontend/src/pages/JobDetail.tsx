@@ -99,7 +99,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-type ArtifactTab = "video" | "vision" | "ocr" | "frames";
+type ArtifactTab = "video" | "signals" | "ocr" | "frames";
 type VideoSource = { type: "local" | "youtube" | "remote"; url: string };
 type ScratchTool = "OCR" | "SEARCH" | "VISION" | "FINAL" | "ERROR";
 type ReasoningTermType = "brand" | "url" | "evidence";
@@ -555,7 +555,7 @@ export function JobDetail() {
   const [artifacts, setArtifacts] = useState<JobArtifacts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
-  const [artifactTab, setArtifactTab] = useState<ArtifactTab>("vision");
+  const [artifactTab, setArtifactTab] = useState<ArtifactTab>("signals");
   const [videoSource, setVideoSource] = useState<VideoSource | null>(null);
   const [videoAvailable, setVideoAvailable] = useState(false);
   const [videoError, setVideoError] = useState("");
@@ -800,7 +800,7 @@ export function JobDetail() {
 
   useEffect(() => {
     autoSelectVideoRef.current = false;
-    setArtifactTab("vision");
+    setArtifactTab("signals");
   }, [id]);
 
   useEffect(() => {
@@ -930,6 +930,10 @@ export function JobDetail() {
     ? artifacts.per_frame_vision
     : [];
   const visionBoard = artifacts?.vision_board;
+  const mapperArtifact =
+    artifacts && typeof artifacts.category_mapper === "object"
+      ? artifacts.category_mapper
+      : null;
   const frameCount = frameItems.length;
   const frameVisionByIndex = new Map<
     number,
@@ -994,6 +998,27 @@ export function JobDetail() {
     matchMethodRaw,
     firstRow ? (firstRow as any).category_match_score : null,
   );
+  const mapperCategoryText =
+    typeof mapperArtifact?.category === "string" && mapperArtifact.category.trim()
+      ? mapperArtifact.category.trim()
+      : categoryText;
+  const mapperCategoryIdText =
+    typeof mapperArtifact?.category_id === "string" &&
+    mapperArtifact.category_id.trim()
+      ? mapperArtifact.category_id.trim()
+      : categoryIdText;
+  const mapperMethodDisplay =
+    formatMatchMethod(mapperArtifact?.method || matchMethodRaw) || "—";
+  const mapperScoreValue = toNumber(
+    mapperArtifact?.score ?? (firstRow ? (firstRow as any).category_match_score : null),
+  );
+  const mapperScoreDisplay =
+    mapperScoreValue === null ? "—" : mapperScoreValue.toFixed(4);
+  const mapperConfidenceValue = toNumber(
+    mapperArtifact?.confidence ?? firstRow?.Confidence,
+  );
+  const mapperConfidenceDisplay =
+    mapperConfidenceValue === null ? "—" : mapperConfidenceValue.toFixed(2);
   const summaryFrameDisplay = artifacts ? String(frameCount) : "—";
 
   return (
@@ -1286,10 +1311,10 @@ export function JobDetail() {
           )}
           <button
             type="button"
-            onClick={() => setArtifactTab("vision")}
-            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "vision" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+            onClick={() => setArtifactTab("signals")}
+            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "signals" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
           >
-            Vision Board
+            Signals
           </button>
           <button
             type="button"
@@ -1356,8 +1381,94 @@ export function JobDetail() {
           </div>
         )}
 
-        {artifactTab === "vision" && (
+        {artifactTab === "signals" && (
           <div className="p-4 space-y-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)]">
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold">
+                      Final Mapper Output
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Canonical taxonomy category selected after mapping.
+                    </div>
+                  </div>
+                  {mapperCategoryIdText && (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[11px] font-mono font-semibold leading-none">
+                      ID {mapperCategoryIdText}
+                    </span>
+                  )}
+                </div>
+                <div className="text-lg font-semibold text-gray-900 break-words">
+                  {mapperCategoryText || "No mapped category available."}
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
+                    <div className="uppercase tracking-wider text-gray-400 mb-1">
+                      Method
+                    </div>
+                    <div className="font-medium text-gray-800">
+                      {mapperMethodDisplay}
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
+                    <div className="uppercase tracking-wider text-gray-400 mb-1">
+                      Mapper Score
+                    </div>
+                    <div className="font-mono text-cyan-700">
+                      {mapperScoreDisplay}
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
+                    <div className="uppercase tracking-wider text-gray-400 mb-1">
+                      LLM Confidence
+                    </div>
+                    <div className="font-mono text-gray-800">
+                      {mapperConfidenceDisplay}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold">
+                    Vision Matches
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Raw visual category scores used as supporting evidence.
+                  </div>
+                </div>
+                {(visionBoard?.top_matches || []).length > 0 ? (
+                  <div className="grid gap-2">
+                    {(visionBoard?.top_matches || []).map((m, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between text-xs bg-white border border-gray-200 rounded px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-gray-800 truncate">{m.label}</span>
+                          {m.category_id != null && (
+                            <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[10px] font-mono font-semibold leading-none">
+                              #{m.category_id}
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono text-cyan-700 ml-3 shrink-0">
+                          {Number(m.score).toFixed(4)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500">
+                    No vision matches available.
+                  </div>
+                )}
+              </div>
+            </div>
+
             {visionBoard?.image_url && (
               <img
                 src={toApiUrl(visionBoard.image_url)}
@@ -1374,32 +1485,6 @@ export function JobDetail() {
               >
                 Open vision board metadata
               </a>
-            )}
-            {(visionBoard?.top_matches || []).length > 0 ? (
-              <div className="grid gap-2">
-                {(visionBoard?.top_matches || []).map((m, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-gray-800 truncate">{m.label}</span>
-                      {m.category_id != null && (
-                        <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[10px] font-mono font-semibold leading-none">
-                          #{m.category_id}
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-mono text-cyan-700 ml-3 shrink-0">
-                      {Number(m.score).toFixed(4)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-xs text-gray-500">
-                No vision board matches available.
-              </div>
             )}
           </div>
         )}

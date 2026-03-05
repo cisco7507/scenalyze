@@ -1518,6 +1518,13 @@ def _default_job_artifacts(job_id: str) -> dict:
             "top_matches": [],
             "metadata": {},
         },
+        "category_mapper": {
+            "category": "",
+            "category_id": "",
+            "method": "",
+            "score": None,
+            "confidence": None,
+        },
         "extras": {
             "events_url": f"/jobs/{job_id}/events",
         },
@@ -1548,6 +1555,16 @@ def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
         payload["vision_board"]["plot_url"] = vision_payload.get("plot_url")
         payload["vision_board"]["top_matches"] = vision_payload.get("top_matches") or []
         payload["vision_board"]["metadata"] = vision_payload.get("metadata") or {}
+
+    mapper_payload = artifacts.get("category_mapper")
+    if isinstance(mapper_payload, dict):
+        payload["category_mapper"]["category"] = mapper_payload.get("category") or ""
+        payload["category_mapper"]["category_id"] = (
+            str(mapper_payload.get("category_id") or "")
+        )
+        payload["category_mapper"]["method"] = mapper_payload.get("method") or ""
+        payload["category_mapper"]["score"] = mapper_payload.get("score")
+        payload["category_mapper"]["confidence"] = mapper_payload.get("confidence")
 
     extras = artifacts.get("extras")
     if isinstance(extras, dict):

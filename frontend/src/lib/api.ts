@@ -78,6 +78,14 @@ export interface ArtifactVisionBoard {
   metadata?: Record<string, unknown>;
 }
 
+export interface ArtifactCategoryMapper {
+  category?: string;
+  category_id?: string | null;
+  method?: string;
+  score?: number | null;
+  confidence?: number | null;
+}
+
 export interface PerFrameVision {
   frame_index: number;
   top_category: string;
@@ -89,6 +97,7 @@ export interface JobArtifacts {
   per_frame_vision: PerFrameVision[];
   ocr_text: ArtifactOCR;
   vision_board: ArtifactVisionBoard;
+  category_mapper: ArtifactCategoryMapper;
   extras?: Record<string, unknown>;
   [key: string]: unknown;
 }
