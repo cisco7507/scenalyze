@@ -1,5 +1,6 @@
 import sys
 import types
+import logging
 
 import cv2
 import numpy as np
@@ -465,3 +466,74 @@ def test_pipeline_tail_easyocr_skips_nonfinal_frame_when_no_text_roi(monkeypatch
 
     assert len(ocr_calls) == 1
     assert ocr_calls[0] > 0
+
+
+def test_pipeline_logs_ocr_call_metrics(monkeypatch, caplog):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return f"text-{int(image[0, 0, 0])}"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Brand X",
+                "category": "Raw Category",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    frames = [
+        {"image": object(), "ocr_image": np.full((32, 32, 3), fill_value=v, dtype=np.uint8), "time": 27.0 + i, "type": "tail"}
+        for i, v in enumerate((10, 20))
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+    monkeypatch.setattr(
+        pipeline_module,
+        "_select_frames_for_ocr",
+        lambda incoming_frames: (incoming_frames, 0),
+    )
+
+    caplog.set_level(logging.INFO, logger="video_service.core")
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-ocr-metrics-1",
+    )
+
+    summary_logs = [record.getMessage() for record in caplog.records if "ocr_dedup:" in record.getMessage()]
+    assert summary_logs
+    assert "ocr_calls=2" in summary_logs[-1]
+    assert "ocr_elapsed_ms=" in summary_logs[-1]
+    assert "avg_ocr_ms=" in summary_logs[-1]

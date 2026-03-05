@@ -404,9 +404,21 @@ def process_single_video(
                 roi_fallbacks = 0
                 early_stop_skipped = 0
                 no_roi_skipped = 0
+                ocr_call_count = 0
+                ocr_elapsed_seconds = 0.0
                 early_stop_active = _ocr_early_stop_enabled(sm)
                 last_index = len(ocr_frames) - 1
                 idx = 0
+
+                def _run_ocr(target_image: np.ndarray) -> str:
+                    nonlocal ocr_call_count, ocr_elapsed_seconds
+                    started_at = time.perf_counter()
+                    try:
+                        return ocr_manager.extract_text(oe, target_image, om)
+                    finally:
+                        ocr_call_count += 1
+                        ocr_elapsed_seconds += time.perf_counter() - started_at
+
                 while idx < len(ocr_frames):
                     frame = ocr_frames[idx]
                     ocr_image = frame["ocr_image"]
@@ -446,18 +458,18 @@ def process_single_video(
                                 tuple(roi_image.shape[:2]),
                                 tuple(ocr_image.shape[:2]),
                             )
-                            raw_text = ocr_manager.extract_text(oe, roi_image, om)
+                            raw_text = _run_ocr(roi_image)
                             if not _ocr_text_has_signal(raw_text):
                                 roi_fallbacks += 1
                                 logger.debug(
                                     "ocr_roi_fallback: frame at %.1fs weak roi text, retrying full frame",
                                     frame["time"],
                                 )
-                                raw_text = ocr_manager.extract_text(oe, ocr_image, om)
+                                raw_text = _run_ocr(ocr_image)
                         else:
-                            raw_text = ocr_manager.extract_text(oe, ocr_image, om)
+                            raw_text = _run_ocr(ocr_image)
                     else:
-                        raw_text = ocr_manager.extract_text(oe, ocr_image, om)
+                        raw_text = _run_ocr(ocr_image)
                     normalized = _normalize_ocr(raw_text)
                     if (
                         prev_normalized is not None
@@ -491,7 +503,7 @@ def process_single_video(
                         continue
                     idx += 1
                 logger.info(
-                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d no_roi_skipped=%d early_stop_skipped=%d roi_hits=%d roi_fallbacks=%d ocr_frames=%d total_frames=%d threshold=%.2f",
+                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d no_roi_skipped=%d early_stop_skipped=%d roi_hits=%d roi_fallbacks=%d ocr_calls=%d ocr_elapsed_ms=%.1f avg_ocr_ms=%.1f ocr_frames=%d total_frames=%d threshold=%.2f",
                     len(ocr_lines),
                     skipped_count,
                     visually_skipped_count,
@@ -499,6 +511,9 @@ def process_single_video(
                     early_stop_skipped,
                     roi_hits,
                     roi_fallbacks,
+                    ocr_call_count,
+                    ocr_elapsed_seconds * 1000.0,
+                    (ocr_elapsed_seconds * 1000.0 / ocr_call_count) if ocr_call_count else 0.0,
                     len(ocr_frames),
                     len(frames),
                     dedup_threshold,
