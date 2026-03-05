@@ -2,6 +2,7 @@ import os
 import sys
 import torch
 import easyocr
+import cv2
 import threading
 import time
 from contextlib import contextmanager
@@ -114,7 +115,7 @@ class OCRManager:
         mode_lower = (mode or "").lower()
         if "fast" in mode_lower:
             return {
-                "detail": 1,
+                "detail": 0,
                 "paragraph": False,
                 "min_size": 20,
                 "text_threshold": 0.8,
@@ -127,6 +128,46 @@ class OCRManager:
             "text_threshold": 0.6,
             "width_ths": 0.5,
         }
+
+    @staticmethod
+    def _resolve_easyocr_max_dimension(mode: str) -> int:
+        mode_lower = (mode or "").lower()
+        if "fast" in mode_lower:
+            raw = os.environ.get("EASYOCR_MAX_DIMENSION_FAST", "960")
+        else:
+            raw = os.environ.get("EASYOCR_MAX_DIMENSION_DETAILED", "0")
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError):
+            logger.warning("invalid_easyocr_max_dimension mode=%s value=%r fallback=0", mode, raw)
+            return 0
+
+    def _prepare_easyocr_image(self, image_rgb: Any, mode: str) -> Any:
+        max_dimension = self._resolve_easyocr_max_dimension(mode)
+        if max_dimension <= 0 or not hasattr(image_rgb, "shape"):
+            return image_rgb
+
+        height, width = image_rgb.shape[:2]
+        current_max = max(height, width)
+        if current_max <= max_dimension:
+            return image_rgb
+
+        scale = max_dimension / float(current_max)
+        resized = cv2.resize(
+            image_rgb,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+        logger.debug(
+            "easyocr_resize mode=%s original=%dx%d resized=%dx%d max_dimension=%d",
+            mode,
+            width,
+            height,
+            resized.shape[1],
+            resized.shape[0],
+            max_dimension,
+        )
+        return resized
 
     def _build_florence_engine(self):
         def fixed_get_imports(filename):
@@ -246,6 +287,7 @@ class OCRManager:
                 return ""
             if hasattr(engine, "readtext"):
                 easyocr_kwargs = self._resolve_easyocr_readtext_kwargs(mode)
+                prepared_image = self._prepare_easyocr_image(image_rgb, mode)
                 profile = "fast" if "fast" in (mode or "").lower() else "detailed"
                 logger.debug(
                     "easyocr_mode profile=%s mode=%s kwargs=%s",
@@ -254,15 +296,20 @@ class OCRManager:
                     easyocr_kwargs,
                 )
                 try:
-                    results = engine.readtext(image_rgb, **easyocr_kwargs)
+                    results = engine.readtext(prepared_image, **easyocr_kwargs)
                 except TypeError as exc:
                     logger.warning(
                         "easyocr_mode_kwargs_unsupported mode=%s error=%s; falling back to defaults",
                         mode,
                         exc,
                     )
-                    results = engine.readtext(image_rgb, detail=1)
-                annotated = [f"{'[HUGE] ' if (max(p[1] for p in b) - min(p[1] for p in b))/image_rgb.shape[0] > 0.15 else ''}{t}" for b, t, c in results]
+                    results = engine.readtext(
+                        prepared_image,
+                        detail=0 if "fast" in (mode or "").lower() else 1,
+                    )
+                if results and isinstance(results[0], str):
+                    return " ".join(text for text in results if str(text).strip())
+                annotated = [f"{'[HUGE] ' if (max(p[1] for p in b) - min(p[1] for p in b))/prepared_image.shape[0] > 0.15 else ''}{t}" for b, t, c in results]
                 return " ".join(annotated)
             logger.warning("Unknown OCR engine payload type for %s: %s", engine_name, type(engine).__name__)
             return ""

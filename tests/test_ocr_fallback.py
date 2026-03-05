@@ -233,7 +233,8 @@ def test_florence_max_new_tokens_respects_mode_and_env(monkeypatch):
 def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):
     class _DummyReader:
         def readtext(self, _image_rgb, detail=1):
-            assert detail == 1
+            if detail == 0:
+                return ["fallback-ocr"]
             return [(
                 [(0, 0), (10, 0), (10, 10), (0, 10)],
                 "fallback-ocr",
@@ -269,9 +270,11 @@ def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):
 
 def test_easyocr_mode_profiles_adjust_readtext_kwargs(monkeypatch):
     captured: list[dict] = []
+    shapes: list[tuple[int, int]] = []
 
     class _DummyReader:
         def readtext(self, _image_rgb, **kwargs):
+            shapes.append(tuple(_image_rgb.shape[:2]))
             captured.append(dict(kwargs))
             return [(
                 [(0, 0), (10, 0), (10, 10), (0, 10)],
@@ -281,7 +284,9 @@ def test_easyocr_mode_profiles_adjust_readtext_kwargs(monkeypatch):
 
     mgr = ocr_module.OCRManager()
     monkeypatch.setattr(mgr, "get_engine", lambda _name: _DummyReader())
-    image = np.zeros((32, 32, 3), dtype=np.uint8)
+    monkeypatch.setenv("EASYOCR_MAX_DIMENSION_FAST", "64")
+    monkeypatch.setenv("EASYOCR_MAX_DIMENSION_DETAILED", "0")
+    image = np.zeros((80, 160, 3), dtype=np.uint8)
 
     fast_text = mgr.extract_text("EasyOCR", image, mode="🚀 Fast")
     detailed_text = mgr.extract_text("EasyOCR", image, mode="🧠 Detailed")
@@ -291,6 +296,8 @@ def test_easyocr_mode_profiles_adjust_readtext_kwargs(monkeypatch):
     assert len(captured) == 2
     assert captured[0]["min_size"] > captured[1]["min_size"]
     assert captured[0]["text_threshold"] > captured[1]["text_threshold"]
+    assert shapes[0][1] == 64
+    assert shapes[1] == (80, 160)
 
 
 def test_easyocr_mode_kwargs_fallback_on_type_error(monkeypatch):
@@ -314,6 +321,6 @@ def test_easyocr_mode_kwargs_fallback_on_type_error(monkeypatch):
     text = mgr.extract_text("EasyOCR", image, mode="🚀 Fast")
 
     assert "legacy-line" in text
-    assert calls[0]["detail"] == 1
+    assert calls[0]["detail"] == 0
     assert calls[0]["min_size"] == 20
-    assert calls[1] == {"detail": 1}
+    assert calls[1] == {"detail": 0}
