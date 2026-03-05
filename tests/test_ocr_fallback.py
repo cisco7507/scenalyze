@@ -233,7 +233,8 @@ def test_florence_max_new_tokens_respects_mode_and_env(monkeypatch):
 def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):
     class _DummyReader:
         def readtext(self, _image_rgb, detail=1):
-            assert detail == 1
+            if detail == 0:
+                return ["fallback-ocr"]
             return [(
                 [(0, 0), (10, 0), (10, 10), (0, 10)],
                 "fallback-ocr",
@@ -320,6 +321,6 @@ def test_easyocr_mode_kwargs_fallback_on_type_error(monkeypatch):
     text = mgr.extract_text("EasyOCR", image, mode="🚀 Fast")
 
     assert "legacy-line" in text
-    assert calls[0]["detail"] == 1
+    assert calls[0]["detail"] == 0
     assert calls[0]["min_size"] == 20
-    assert calls[1] == {"detail": 1}
+    assert calls[1] == {"detail": 0}

@@ -115,7 +115,7 @@ class OCRManager:
         mode_lower = (mode or "").lower()
         if "fast" in mode_lower:
             return {
-                "detail": 1,
+                "detail": 0,
                 "paragraph": False,
                 "min_size": 20,
                 "text_threshold": 0.8,
@@ -303,7 +303,12 @@ class OCRManager:
                         mode,
                         exc,
                     )
-                    results = engine.readtext(prepared_image, detail=1)
+                    results = engine.readtext(
+                        prepared_image,
+                        detail=0 if "fast" in (mode or "").lower() else 1,
+                    )
+                if results and isinstance(results[0], str):
+                    return " ".join(text for text in results if str(text).strip())
                 annotated = [f"{'[HUGE] ' if (max(p[1] for p in b) - min(p[1] for p in b))/prepared_image.shape[0] > 0.15 else ''}{t}" for b, t, c in results]
                 return " ".join(annotated)
             logger.warning("Unknown OCR engine payload type for %s: %s", engine_name, type(engine).__name__)
