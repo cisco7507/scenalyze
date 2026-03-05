@@ -248,6 +248,12 @@ export interface BenchmarkSuiteResults {
   points: BenchmarkPoint[];
 }
 
+export interface ModelCombo {
+  provider: string;
+  model: string;
+  key: string; // `${provider}::${model}`
+}
+
 export function emptyAnalytics(): AnalyticsData {
   return {
     top_brands: [],
@@ -526,6 +532,25 @@ export const updateBenchmarkSuite = (suiteId: string, data: { name: string; desc
   safe(() => api.put<BenchmarkSuiteSummary>(`/benchmarks/suites/${suiteId}`, data).then((r) => r.data));
 export const deleteBenchmarkSuite = (suiteId: string) =>
   safe(() => api.delete(`/benchmarks/suites/${suiteId}`).then((r) => r.data));
+export const deleteBenchmarkTruth = (truthId: string) =>
+  safe(() => api.delete(`/api/benchmark/truths/${truthId}`).then((r) => r.data));
+export const getBenchmarkModels = async (): Promise<ModelCombo[]> => {
+  const combos: ModelCombo[] = [];
+  try {
+    const res = await api.get<{ name: string }[]>('/ollama/models');
+    for (const m of res.data || []) {
+      if (m.name) combos.push({ provider: 'Ollama', model: m.name, key: `Ollama::${m.name}` });
+    }
+  } catch { /* no Ollama */ }
+  try {
+    const res = await api.get<{ name?: string; id?: string }[]>('/llama-server/models');
+    for (const m of res.data || []) {
+      const name = m.name || m.id || '';
+      if (name) combos.push({ provider: 'Llama Server', model: name, key: `Llama Server::${name}` });
+    }
+  } catch { /* no Llama Server */ }
+  return combos;
+};
 export const updateBenchmarkTest = (
   testId: string,
   data: {

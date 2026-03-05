@@ -952,6 +952,34 @@ def get_benchmark_truth(truth_id: str):
     return _serialize_benchmark_truth_row(row)
 
 
+@app.delete("/api/benchmark/truths/{truth_id}", tags=["benchmark"])
+def delete_benchmark_truth(truth_id: str):
+    """Delete a golden-truth record.  Rejects deletion if a running suite references it."""
+    with closing(get_db()) as conn:
+        row = conn.execute(
+            "SELECT id FROM benchmark_truth WHERE id = ?", (truth_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Benchmark truth not found")
+        # Prevent deletion if an active suite points to this truth
+        active = conn.execute(
+            """
+            SELECT id FROM benchmark_suites
+            WHERE truth_id = ? AND status IN ('running', 'queued')
+            LIMIT 1
+            """,
+            (truth_id,),
+        ).fetchone()
+        if active:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot delete: an active benchmark suite references this truth",
+            )
+        with conn:
+            conn.execute("DELETE FROM benchmark_truth WHERE id = ?", (truth_id,))
+    return {"deleted": truth_id}
+
+
 @app.post("/api/benchmark/run", tags=["benchmark"])
 async def run_benchmark_suite(body: BenchmarkRunRequest):
     with closing(get_db()) as conn:
@@ -967,10 +995,18 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
     if not truth:
         raise HTTPException(status_code=404, detail="Benchmark truth not found")
 
-    provider_model_pairs = await _resolve_benchmark_provider_models(
-        requested_providers=body.providers,
-        requested_models=body.models,
-    )
+    # If explicit combos are provided, use them directly; otherwise auto-resolve.
+    if body.model_combos:
+        provider_model_pairs = [
+            (c.get("provider", ""), c.get("model", ""))
+            for c in body.model_combos
+            if c.get("provider") and c.get("model")
+        ]
+    else:
+        provider_model_pairs = await _resolve_benchmark_provider_models(
+            requested_providers=body.providers,
+            requested_models=body.models,
+        )
     if not provider_model_pairs:
         raise HTTPException(status_code=400, detail="No provider/model pairs available for benchmark")
 
@@ -1056,6 +1092,7 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
             ocr_mode=normalize_ocr_mode(permutation["ocr_mode"]),
             scan_mode=normalize_scan_mode(permutation["scan_strategy"]),
             override=False,
+            express_mode=body.express_mode,
             enable_search=True,
             enable_web_search=True,
             enable_agentic_search=True,
