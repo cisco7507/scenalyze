@@ -115,3 +115,63 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
     assert row[1] == "Brand X"
     assert row[2] == "101"
     assert any(stage == "vision" for stage, _ in stages)
+
+
+def test_pipeline_skips_prompt_categories_for_forced_json_providers(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One", "Category Two"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "sample ocr"
+
+    llm_calls: list[dict] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            llm_calls.append({"args": args, "kwargs": kwargs})
+            return {
+                "brand": "Brand X",
+                "category": "Raw Category",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-lmstudio-1",
+    )
+
+    assert len(llm_calls) == 1
+    assert llm_calls[0]["kwargs"]["skip_prompt_categories"] is True
+    assert llm_calls[0]["args"][3] == ["Category One", "Category Two"]

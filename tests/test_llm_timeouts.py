@@ -178,7 +178,7 @@ def test_lm_studio_pipeline_uses_assistant_prefill_and_reconstructs_json(monkeyp
                 "choices": [
                     {
                         "message": {
-                            "content": 'BrandY",\n  "category":"Retail",\n  "confidence":0.88,\n  "reasoning":"ok"}'
+                            "content": '{"brand":"BrandY","category":"Retail","confidence":0.88,"reasoning":"ok"}'
                         }
                     }
                 ]
@@ -203,9 +203,78 @@ def test_lm_studio_pipeline_uses_assistant_prefill_and_reconstructs_json(monkeyp
     assert call["url"].endswith("/v1/chat/completions")
     assert call["timeout"] == 300
     assert call["json"]["messages"][1]["role"] == "user"
-    assert call["json"]["messages"][2]["role"] == "assistant"
-    assert call["json"]["messages"][2]["content"].startswith("</think>\n{\n  \"brand\": \"")
+    assert "Categories:" not in call["json"]["messages"][1]["content"]
+    assert 'OCR Text: "sample"' in call["json"]["messages"][1]["content"]
     assert call["json"]["temperature"] == 0.0
     assert call["json"]["top_p"] == 1.0
-    assert call["json"]["presence_penalty"] == 2.0
-    assert call["json"]["response_format"] == {"type": "json_object"}
+    assert call["json"]["presence_penalty"] == 0.0
+    assert call["json"]["response_format"]["type"] == "json_schema"
+    enum_values = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]["enum"]
+    assert enum_values == ["Auto", "Unknown"]
+
+
+def test_llama_server_pipeline_omits_prompt_categories_but_keeps_schema_enum(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"brand":"Heineken","category":"Beer","confidence":0.91,"reasoning":"ok"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    llm = HybridLLM()
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    result = llm.query_pipeline(
+        provider="llama-server",
+        backend_model="unsloth/Qwen3.5-4B-GGUF",
+        text="sample",
+        categories="Beer",
+        enable_search=False,
+        skip_prompt_categories=True,
+    )
+
+    assert result["brand"] == "Heineken"
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["url"].endswith("/v1/chat/completions")
+    assert "Categories:" not in call["json"]["messages"][1]["content"]
+    assert 'OCR Text: "sample"' in call["json"]["messages"][1]["content"]
+    enum_values = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]["enum"]
+    assert enum_values == ["Beer", "Unknown"]
+
+
+def test_ollama_pipeline_keeps_categories_in_prompt_and_sends_no_schema(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse(
+            {"message": {"content": '{"brand":"BrandX","category":"Auto","confidence":0.93,"reasoning":"ok"}'}}
+        )
+
+    llm = HybridLLM()
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    result = llm.query_pipeline(
+        provider="Ollama",
+        backend_model="qwen3-vl:8b-instruct",
+        text="sample",
+        categories="Auto",
+        enable_search=False,
+    )
+
+    assert result["brand"] == "BrandX"
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["url"].endswith("/api/chat")
+    assert "Categories: Auto" in call["json"]["messages"][1]["content"]
+    assert "response_format" not in call["json"]

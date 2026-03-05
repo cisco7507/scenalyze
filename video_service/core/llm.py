@@ -631,7 +631,16 @@ class HybridLLM:
         force_multimodal=False,
         context_size=8192,
         express_mode=False,
+        skip_prompt_categories=False,
     ):
+        provider_name = str(provider or "").strip().lower()
+        skip_prompt_categories = skip_prompt_categories or provider_name in {
+            "llama server",
+            "llama-server",
+            "lm studio",
+            "openai compatible",
+            "openai-compatible",
+        }
         if express_mode:
             system_prompt = (
                 "You are a Senior Marketing Analyst and Global Brand Expert. "
@@ -641,7 +650,11 @@ class HybridLLM:
                 "Determine Category: Pick from 'Suggested Categories' or generate a professional tag if Override Allowed is True. "
                 "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
-            user_prompt = f"Categories: {categories}\nOverride: {override}"
+            user_prompt = (
+                f"Override: {override}"
+                if skip_prompt_categories
+                else f"Categories: {categories}\nOverride: {override}"
+            )
         else:
             system_prompt = (
                 "You are a Senior Marketing Analyst and Global Brand Expert. "
@@ -654,7 +667,11 @@ class HybridLLM:
                 "Determine Category: Pick from 'Suggested Categories' or generate a professional tag if Override Allowed is True. "
                 "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
-            user_prompt = f'Categories: {categories}\nOverride: {override}\nOCR Text: "{text}"'
+            user_prompt = (
+                f'Override: {override}\nOCR Text: "{text}"'
+                if skip_prompt_categories
+                else f'Categories: {categories}\nOverride: {override}\nOCR Text: "{text}"'
+            )
         b64_img = self._pil_to_base64(tail_image) if tail_image else None
 
         try:
