@@ -319,3 +319,76 @@ def test_pipeline_easyocr_roi_falls_back_to_full_frame_when_crop_text_is_weak(mo
     assert ocr_shapes[0][0] < frame.shape[0]
     assert ocr_shapes[0][1] < frame.shape[1]
     assert ocr_shapes[1] == frame.shape[:2]
+
+
+def test_pipeline_tail_ocr_stops_early_after_strong_signal_but_keeps_last_frame(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    ocr_calls: list[int] = []
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            marker = int(image[0, 0, 0])
+            ocr_calls.append(marker)
+            if marker == 10:
+                return "brand.com save more"
+            if marker == 40:
+                return "final frame"
+            return "should not run"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Brand X",
+                "category": "Raw Category",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    frames = [
+        {"image": object(), "ocr_image": np.full((32, 32, 3), fill_value=v, dtype=np.uint8), "time": 27.0 + i, "type": "tail"}
+        for i, v in enumerate((10, 20, 30, 40))
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+    monkeypatch.setattr(
+        pipeline_module,
+        "_select_frames_for_ocr",
+        lambda incoming_frames: (incoming_frames, 0),
+    )
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-ocr-early-stop-1",
+    )
+
+    assert ocr_calls == [10, 40]

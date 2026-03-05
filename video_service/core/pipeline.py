@@ -219,6 +219,37 @@ def _ocr_text_has_signal(text: str) -> bool:
     return len("".join(tokens)) >= 4
 
 
+def _ocr_early_stop_enabled(scan_mode: str) -> bool:
+    raw = os.environ.get("OCR_EARLY_STOP_ENABLED", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    mode = (scan_mode or "").strip().lower()
+    return mode not in {"full video", "full scan"}
+
+
+def _resolve_ocr_early_stop_min_chars() -> int:
+    raw = os.environ.get("OCR_EARLY_STOP_MIN_CHARS", "12")
+    try:
+        return max(4, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_early_stop_min_chars value=%r fallback=12", raw)
+        return 12
+
+
+def _ocr_text_is_strong_for_early_stop(text: str) -> bool:
+    cleaned = re.sub(r"\[HUGE\]", " ", text or "", flags=re.IGNORECASE)
+    tokens = re.findall(r"[a-z0-9.]{2,}", cleaned.lower())
+    if not tokens:
+        return False
+
+    joined = "".join(tokens)
+    min_chars = _resolve_ocr_early_stop_min_chars()
+    has_domain_like_token = any("." in token and len(token) >= 6 for token in tokens)
+    has_multi_token_signal = len(tokens) >= 2 and len(joined) >= min_chars
+    has_single_long_token = any(len(token) >= min_chars for token in tokens)
+    return has_domain_like_token or has_multi_token_signal or has_single_long_token
+
+
 def process_single_video(
     url,
     categories,
@@ -363,8 +394,12 @@ def process_single_video(
                 skipped_count = 0
                 roi_hits = 0
                 roi_fallbacks = 0
+                early_stop_skipped = 0
+                early_stop_active = _ocr_early_stop_enabled(sm)
                 last_index = len(ocr_frames) - 1
-                for idx, frame in enumerate(ocr_frames):
+                idx = 0
+                while idx < len(ocr_frames):
+                    frame = ocr_frames[idx]
                     ocr_image = frame["ocr_image"]
                     raw_text = ""
                     if _ocr_roi_enabled(oe) and isinstance(ocr_image, np.ndarray):
@@ -402,15 +437,32 @@ def process_single_video(
                             frame["time"],
                             dedup_threshold,
                         )
+                        idx += 1
                         continue
                     # Do not inject frame timestamps into OCR text; they pollute LLM/search input.
                     ocr_lines.append(raw_text)
                     prev_normalized = normalized
+                    if (
+                        early_stop_active
+                        and not is_last_frame
+                        and idx < last_index - 1
+                        and _ocr_text_is_strong_for_early_stop(raw_text)
+                    ):
+                        early_stop_skipped += last_index - idx - 1
+                        logger.debug(
+                            "ocr_early_stop: frame at %.1fs strong_signal=True skipped_intermediate=%d",
+                            frame["time"],
+                            early_stop_skipped,
+                        )
+                        idx = last_index
+                        continue
+                    idx += 1
                 logger.info(
-                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d roi_hits=%d roi_fallbacks=%d ocr_frames=%d total_frames=%d threshold=%.2f",
+                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d early_stop_skipped=%d roi_hits=%d roi_fallbacks=%d ocr_frames=%d total_frames=%d threshold=%.2f",
                     len(ocr_lines),
                     skipped_count,
                     visually_skipped_count,
+                    early_stop_skipped,
                     roi_hits,
                     roi_fallbacks,
                     len(ocr_frames),
