@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { deleteJobsBulk, getClusterJobs, getProviderModels, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
 import type { JobStatus, JobSettings } from '../lib/api';
-import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
+import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon, TrashIcon, InfoCircledIcon } from '@radix-ui/react-icons';
 import { formatDistanceToNow } from 'date-fns';
 import { HelpTooltip } from '../components/HelpTooltip';
 
@@ -34,6 +34,10 @@ function getStatusBadgeClass(status: string): string {
 
 function getStatusText(status: string): string {
   return status === 're-queued' ? 'waiting (recovered)' : status;
+}
+
+function isTerminalStatus(status: string): boolean {
+  return status === 'completed' || status === 'failed';
 }
 
 function formatRelativeTimestamp(value?: string): string {
@@ -358,9 +362,17 @@ export function Jobs() {
             </div>
           </div>
 
-          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            File/Directory paths must be accessible to the backend server (not your browser). UNC paths require server access/permissions.
-          </div>
+          {inputMode !== 'urls' && (
+            <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-xs text-slate-600">
+              <InfoCircledIcon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+              <div className="space-y-0.5">
+                <div className="font-semibold uppercase tracking-wider text-[10px] text-slate-500">Server Path Note</div>
+                <div>
+                  File and directory paths are resolved on the backend server, not in your browser. UNC paths only work if the server can reach that share and has permission to read it.
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-gray-50/80 p-4 rounded-lg border border-gray-200">
             <div className="space-y-1">
@@ -644,6 +656,13 @@ export function Jobs() {
             const categoryLabel = job.category || '—';
             const brandLabel = job.brand || '—';
             const categoryId = (job.category_id || '').trim();
+            const terminal = isTerminalStatus(job.status);
+            const ageLabel =
+              job.status === 'processing'
+                ? 'Running Since'
+                : job.status === 'queued' || job.status === 're-queued'
+                  ? 'Queued Since'
+                  : 'Age';
 
             return (
               <div
@@ -790,24 +809,26 @@ export function Jobs() {
                     </div>
 
                     <div className="min-w-0 flex flex-col xl:items-end gap-2">
-                      <div className="grid grid-cols-2 xl:grid-cols-1 gap-2 w-full xl:w-auto">
+                      <div className={`grid gap-2 w-full xl:w-auto ${terminal ? 'grid-cols-1' : 'grid-cols-2 xl:grid-cols-1'}`}>
                         <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
                           <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Duration</div>
-                        <div
-                          className="mt-1 text-sm font-mono text-gray-800"
-                          title={job.duration_seconds != null ? `${job.duration_seconds.toFixed(3)} seconds` : 'No duration recorded'}
-                        >
-                          {formatDurationLabel(job.duration_seconds)}
-                        </div>
-                      </div>
-                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Created</div>
-                          <div className="mt-1 text-sm text-gray-800" title={job.created_at}>
-                            {formatRelativeTimestamp(job.created_at)}
+                          <div
+                            className="mt-1 text-sm font-mono text-gray-800"
+                            title={job.duration_seconds != null ? `${job.duration_seconds.toFixed(3)} seconds` : 'No duration recorded'}
+                          >
+                            {formatDurationLabel(job.duration_seconds)}
                           </div>
                         </div>
+                        {!terminal && (
+                          <div className="rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wider text-blue-500 font-semibold">{ageLabel}</div>
+                            <div className="mt-1 text-sm text-blue-900" title={job.created_at}>
+                              {formatRelativeTimestamp(job.created_at)}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="text-xs text-gray-500" title={job.updated_at}>
+                      <div className="text-xs text-gray-500 text-right" title={job.updated_at}>
                         Updated {formatRelativeTimestamp(job.updated_at)}
                       </div>
                       <Link

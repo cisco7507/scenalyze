@@ -129,3 +129,46 @@ def test_job_explanation_endpoint_returns_structured_trace(monkeypatch):
     assert explanation["final"]["category_id"] == "101"
     assert explanation["evidence"]["event_count"] == 2
     assert explanation["evidence"]["latest_frames"][0]["url"].endswith("frame_001.jpg")
+
+
+def test_job_video_poster_endpoint_returns_jpeg(monkeypatch, tmp_path):
+    video_path = tmp_path / "sample.mp4"
+    video_path.write_bytes(b"video")
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with conn:
+        conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, url TEXT)")
+        conn.execute(
+            "INSERT INTO jobs (id, url) VALUES (?, ?)",
+            ("job-poster", str(video_path)),
+        )
+
+    class _DummyEncoded:
+        def tobytes(self):
+            return b"jpeg-bytes"
+
+    class _DummyCapture:
+        def __init__(self, path):
+            self.path = path
+            self.read_count = 0
+
+        def isOpened(self):
+            return True
+
+        def read(self):
+            self.read_count += 1
+            return True, type("Frame", (), {"size": 1})()
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(main, "get_db", lambda: conn)
+    monkeypatch.setattr(main, "_maybe_proxy", _no_proxy)
+    monkeypatch.setattr(main.cv2, "VideoCapture", _DummyCapture)
+    monkeypatch.setattr(main.cv2, "imencode", lambda *_args, **_kwargs: (True, _DummyEncoded()))
+
+    response = asyncio.run(main.get_job_video_poster(_Req(), "job-poster"))
+
+    assert response.media_type == "image/jpeg"
+    assert response.body == b"jpeg-bytes"

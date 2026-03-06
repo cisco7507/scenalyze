@@ -34,6 +34,7 @@ from contextlib import asynccontextmanager, closing
 from typing import List, Optional, AsyncGenerator
 from pathlib import Path
 
+import cv2
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Depends
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
@@ -2015,6 +2016,67 @@ async def stream_job_video(req: Request, job_id: str):
 
     media_type = mimetypes.guess_type(str(video_path))[0] or "video/mp4"
     return FileResponse(path=str(video_path), media_type=media_type, filename=video_path.name)
+
+
+@app.get("/jobs/{job_id}/video-poster", tags=["jobs"])
+async def get_job_video_poster(req: Request, job_id: str):
+    """Return a JPEG poster frame for a local source video."""
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
+
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT url FROM jobs WHERE id = ?", (job_id,)).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    source_url = (row["url"] or "").strip()
+    if not source_url:
+        raise HTTPException(status_code=404, detail="Source video not configured")
+
+    if source_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=404, detail="Poster preview is only available for local videos")
+
+    try:
+        video_path = Path(source_url).expanduser().resolve()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid video path: {exc}") from exc
+
+    if not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Source video file not found on server")
+
+    cap = cv2.VideoCapture(str(video_path))
+    try:
+        if not cap.isOpened():
+            raise HTTPException(status_code=500, detail="Could not open source video")
+
+        frame = None
+        ok = False
+        for _ in range(5):
+            ok, candidate = cap.read()
+            if ok and candidate is not None and getattr(candidate, "size", 0) > 0:
+                frame = candidate
+                break
+
+        if frame is None:
+            raise HTTPException(status_code=500, detail="Could not decode poster frame")
+
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), 88],
+        )
+        if not ok:
+            raise HTTPException(status_code=500, detail="Could not encode poster frame")
+
+        return Response(
+            content=encoded.tobytes(),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+    finally:
+        cap.release()
 
 
 @app.get("/jobs/{job_id}/artifacts", tags=["jobs"])

@@ -678,6 +678,8 @@ export const updateBenchmarkTest = (
 export const deleteBenchmarkTest = (testId: string) =>
   safe(() => api.delete(`/benchmarks/tests/${testId}`).then((r) => r.data));
 export const getJobVideoUrl   = (jobId: string): string => `${API_BASE_URL}/jobs/${jobId}/video`;
+export const getJobVideoPosterUrl = (jobId: string): string =>
+  `${API_BASE_URL}/jobs/${jobId}/video-poster`;
 
 export async function getClusterAnalytics(): Promise<AnalyticsData> {
   try {

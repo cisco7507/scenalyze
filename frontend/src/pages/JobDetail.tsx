@@ -17,6 +17,7 @@ import {
   getJobArtifacts,
   getJobExplanation,
   getJobVideoUrl,
+  getJobVideoPosterUrl,
   exportResultsCSV,
   copyToClipboard,
 } from "../lib/api";
@@ -117,6 +118,7 @@ type VideoSource = { type: "local" | "youtube" | "remote"; url: string };
 type ScratchTool = "OCR" | "SEARCH" | "VISION" | "FINAL" | "ERROR";
 type ReasoningTermType = "brand" | "url" | "evidence";
 type ReasoningTerm = { text: string; type: ReasoningTermType };
+type ExtractedReasoningPhrase = { text: string; contextBefore: string };
 type HighlightedReasoningPart =
   | string
   | { text: string; type: ReasoningTermType };
@@ -213,6 +215,28 @@ const COMMON_SIGNAL_WORDS = new Set([
   "therefore",
   "thus",
 ]);
+const SIGNAL_PILL_EXACT_BLOCKLIST = new Set([
+  "which translates to",
+  "translated as",
+  "translation",
+  "translation:",
+  "in french",
+  "in english",
+  "for example",
+]);
+const SIGNAL_PILL_PREFIX_BLOCKLIST = [
+  "which translates to",
+  "translated as",
+  "translation:",
+  "translation of",
+  "in french",
+  "in english",
+  "for example",
+  "meaning",
+];
+const SIGNAL_TRANSLATION_TRAIL_REGEX =
+  /\s*\((?:which translates to|translated as|translation:?|meaning)\b.*$/i;
+const DEFAULT_VISIBLE_REASONING_TERMS = 4;
 
 function extractFrameTimestampKey(frame: {
   timestamp?: number | null;
@@ -235,31 +259,114 @@ function formatStageName(stage: string): string {
   return stage.replace(/_/g, " ");
 }
 
+function normalizeReasoningNarrative(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/([a-zà-ÿ])\(/gi, "$1 (")
+    .replace(/\)([A-Za-zÀ-ÿ])/g, ") $1")
+    .replace(/([.!?])([A-ZÀ-Ý])/g, "$1 $2")
+    .replace(/([a-zà-ÿ]{3,})([A-ZÀ-Ý][a-zà-ÿ]+)/g, "$1 $2")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractQuotedReasoningPhrases(text: string): ExtractedReasoningPhrase[] {
+  const phrases: ExtractedReasoningPhrase[] = [];
+  const chars = Array.from(text);
+  const matchingQuote: Record<string, string> = {
+    "'": "'",
+    '"': '"',
+    "“": "”",
+    "‘": "’",
+  };
+
+  const isOpeningBoundary = (char?: string) => !char || /[\s([{,;:]/.test(char);
+  const isClosingBoundary = (char?: string) => !char || /[\s)\]}.!,;:?]/.test(char);
+
+  for (let i = 0; i < chars.length; i += 1) {
+    const open = chars[i];
+    const close = matchingQuote[open];
+    if (!close) continue;
+    const prev = chars[i - 1];
+    const next = chars[i + 1];
+    if (!isOpeningBoundary(prev) || !next || /\s/.test(next)) continue;
+
+    let collected = "";
+    for (let j = i + 1; j < chars.length; j += 1) {
+      const current = chars[j];
+      const after = chars[j + 1];
+      if (current === close && collected.trim().length > 0 && isClosingBoundary(after)) {
+        const startIdx = Math.max(0, i - 48);
+        phrases.push({
+          text: collected,
+          contextBefore: chars.slice(startIdx, i).join(""),
+        });
+        i = j;
+        break;
+      }
+      collected += current;
+    }
+  }
+
+  return phrases;
+}
+
+function cleanSignalPhrase(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/^["'([{]+/, "")
+    .replace(/["')\]}.,;:!?]+$/g, "")
+    .replace(SIGNAL_TRANSLATION_TRAIL_REGEX, "")
+    .trim();
+}
+
 function classifyReasoningTerm(term: string, brandText: string): ReasoningTerm {
-  const cleanTerm = term.trim();
+  const cleanTerm = cleanSignalPhrase(term);
   const termLower = cleanTerm.toLowerCase();
   const brandLower = brandText.trim().toLowerCase();
   if (brandLower && termLower === brandLower)
     return { text: cleanTerm, type: "brand" };
-  if (/\.\w{2,4}$/i.test(cleanTerm)) return { text: cleanTerm, type: "url" };
+  if (/\b(?:[a-z0-9-]+\.)+(?:com|net|org|co|io|ai|ca|us|uk|edu|gov)\b/i.test(cleanTerm)) {
+    return { text: cleanTerm, type: "url" };
+  }
   return { text: cleanTerm, type: "evidence" };
 }
 
 function isValidSignalPill(text: string): boolean {
-  const trimmed = text.trim();
+  const trimmed = cleanSignalPhrase(text);
   if (trimmed.length > 50) return false;
   if (trimmed.length < 2) return false;
-  if (/^[—\-,;:)\.\!\?'’]/.test(trimmed)) return false;
-  if (/[,;:\('’]$/.test(trimmed)) return false;
-  if (/[\[\]]/.test(trimmed)) return false;
+  if (/^[—\-,;:)\.\!\?]/.test(trimmed)) return false;
+  if (/[[\]]/.test(trimmed)) return false;
+  if (!/[A-Za-zÀ-ÿ0-9]/.test(trimmed)) return false;
+  if (SIGNAL_PILL_EXACT_BLOCKLIST.has(trimmed.toLowerCase())) return false;
+  if (
+    SIGNAL_PILL_PREFIX_BLOCKLIST.some((prefix) =>
+      trimmed.toLowerCase().startsWith(prefix),
+    )
+  ) {
+    return false;
+  }
+  if (/[()]/.test(trimmed)) return false;
   const wordCount = trimmed.split(/\s+/).length;
   if (wordCount > 10) return false;
+  if (wordCount > 1 && /\b[\p{L}]$/u.test(trimmed)) {
+    const lastWord = trimmed.split(/\s+/).at(-1) || "";
+    if (lastWord.length === 1) return false;
+  }
   if (COMMON_SIGNAL_WORDS.has(trimmed.toLowerCase())) return false;
   return true;
 }
 
 function normalizeSignalPillText(text: string): string {
-  const trimmed = text.trim().replace(/\s+/g, " ");
+  const trimmed = cleanSignalPhrase(text).replace(/\s+/g, " ");
   const spacedDomain = trimmed.match(
     /^([a-z0-9-]+)\s+(com|net|org|co|io|ai|ca|us|uk|edu|gov)$/i,
   );
@@ -269,11 +376,35 @@ function normalizeSignalPillText(text: string): string {
   return trimmed;
 }
 
+function isTranslationPhraseContext(contextBefore: string): boolean {
+  const normalized = contextBefore.toLowerCase().replace(/\s+/g, " ").trim();
+  return SIGNAL_PILL_PREFIX_BLOCKLIST.some((prefix) =>
+    normalized.endsWith(prefix),
+  );
+}
+
+function shouldSuppressReasoningTerm(
+  term: ReasoningTerm,
+  rawLlmCategory: string,
+  mappedCategory: string,
+): boolean {
+  const normalized = normalizeSignalPillText(term.text).toLowerCase();
+  if (!normalized) return true;
+  if (term.type !== "evidence") return false;
+  const rawCategoryNormalized = normalizeSignalPillText(rawLlmCategory).toLowerCase();
+  const mappedCategoryNormalized = normalizeSignalPillText(mappedCategory).toLowerCase();
+  if (rawCategoryNormalized && normalized === rawCategoryNormalized) return true;
+  if (mappedCategoryNormalized && normalized === mappedCategoryNormalized) return true;
+  return false;
+}
+
 function sanitizeInlineReasoningFragment(text: string): string {
-  return text
+  return normalizeReasoningNarrative(
+    text
     .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, "")
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim(),
+  );
 }
 
 function getFrameConfidenceTone(score: number | null): FrameConfidenceTone {
@@ -340,14 +471,22 @@ function reasoningInlineClass(type: ReasoningTermType): string {
 function HelpHeading({
   label,
   help,
+  tooltipAlign = "start",
 }: {
   label: string;
   help?: string;
+  tooltipAlign?: "center" | "start" | "end";
 }) {
   return (
     <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-gray-400 font-bold">
       <span>{label}</span>
-      {help ? <HelpTooltip content={help} widthClassName="w-72" /> : null}
+      {help ? (
+        <HelpTooltip
+          content={help}
+          widthClassName="w-72"
+          align={tooltipAlign}
+        />
+      ) : null}
     </div>
   );
 }
@@ -563,6 +702,37 @@ function buildOperatorNotes(
   }
 
   return Array.from(new Set(notes.filter(Boolean))).slice(0, 6);
+}
+
+function buildReasoningSummary(
+  operatorNotes: string[],
+  acceptedAttempt: ProcessingTraceAttempt | null,
+  brand: string,
+  category: string,
+  evidenceTerms: ReasoningTerm[],
+): string {
+  const firstOperatorNote = operatorNotes.find((note) => note.trim().length > 0);
+  if (firstOperatorNote) return firstOperatorNote;
+
+  const acceptedTitle = formatAttemptTitle(acceptedAttempt);
+  const primaryEvidence = evidenceTerms
+    .slice(0, 3)
+    .map((term) => term.text)
+    .filter(Boolean);
+
+  if (brand && category && primaryEvidence.length > 0) {
+    return `Chosen as ${brand} in ${category} based on ${primaryEvidence.join(", ")}.`;
+  }
+  if (brand && category && acceptedAttempt?.attempt_type && acceptedAttempt.attempt_type !== "initial") {
+    return `Recovered via ${acceptedTitle.toLowerCase()} and finalized as ${brand} in ${category}.`;
+  }
+  if (brand && category) {
+    return `Finalized as ${brand} in ${category}.`;
+  }
+  if (acceptedAttempt?.detail) {
+    return `${acceptedTitle} completed with ${acceptedAttempt.detail.toLowerCase()}.`;
+  }
+  return "The classifier produced a result, but there was not enough structured evidence to summarize it cleanly.";
 }
 
 type ExplainMethodGuideEntry = {
@@ -1064,9 +1234,13 @@ export function JobDetail() {
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const autoSelectVideoRef = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoPrimedRef = useRef(false);
   const firstRow = result?.[0];
   const brandText =
     typeof firstRow?.Brand === "string" ? firstRow.Brand.trim() : "";
+  const categoryText =
+    typeof firstRow?.Category === "string" ? firstRow.Category.trim() : "";
   const reasoningRaw = firstRow
     ? (firstRow.Reasoning ??
       (firstRow as any).reasoning ??
@@ -1074,36 +1248,32 @@ export function JobDetail() {
     : "";
   const reasoningText =
     typeof reasoningRaw === "string" ? reasoningRaw.trim() : "";
+  const reasoningNarrativeText = useMemo(
+    () => normalizeReasoningNarrative(reasoningText),
+    [reasoningText],
+  );
   const isRecoveredReasoning = reasoningText
     .toLowerCase()
     .startsWith("(recovered)");
   const reasoningDisplayText = useMemo(() => {
-    if (!reasoningText) return "";
-    if (showFullReasoning || reasoningText.length <= 500) return reasoningText;
-    return `${reasoningText.slice(0, 220).trimEnd()}...`;
-  }, [reasoningText, showFullReasoning]);
+    if (!reasoningNarrativeText) return "";
+    if (showFullReasoning || reasoningNarrativeText.length <= 500)
+      return reasoningNarrativeText;
+    return `${reasoningNarrativeText.slice(0, 220).trimEnd()}...`;
+  }, [reasoningNarrativeText, showFullReasoning]);
   const quotedTermsAll = useMemo<ReasoningTerm[]>(() => {
-    if (!reasoningText) return [];
-    const regex = /'([^']+)'/g;
-    const seen = new Set<string>();
+    if (!reasoningNarrativeText) return [];
     const orderedTerms: string[] = [];
-    let match = regex.exec(reasoningText);
-    while (match) {
-      const clean = match[1].trim();
-      const key = clean.toLowerCase();
-      if (clean && !seen.has(key)) {
-        seen.add(key);
-        orderedTerms.push(clean);
-      }
-      match = regex.exec(reasoningText);
-    }
     const canonicalMap = new Map<string, string>();
-    orderedTerms.filter(isValidSignalPill).forEach((term) => {
-      const normalized = normalizeSignalPillText(term);
+
+    const pushCandidate = (candidate: string) => {
+      const normalized = normalizeSignalPillText(candidate);
       const key = normalized.toLowerCase();
+      if (!isValidSignalPill(normalized)) return;
       const existing = canonicalMap.get(key);
       if (!existing) {
         canonicalMap.set(key, normalized);
+        orderedTerms.push(normalized);
         return;
       }
       if (
@@ -1112,40 +1282,79 @@ export function JobDetail() {
       ) {
         canonicalMap.set(key, normalized);
       }
+    };
+
+    if (brandText) pushCandidate(brandText);
+
+    const domainMatches = reasoningNarrativeText.match(
+      /\b(?:[a-z0-9-]+\.)+(?:com|net|org|co|io|ai|ca|us|uk|edu|gov)\b/gi,
+    );
+    domainMatches?.forEach((match) => pushCandidate(match));
+
+    extractQuotedReasoningPhrases(reasoningNarrativeText).forEach((phrase) => {
+      if (isTranslationPhraseContext(phrase.contextBefore)) return;
+      pushCandidate(phrase.text);
     });
 
-    return Array.from(canonicalMap.values()).map((term) =>
+    return orderedTerms.map((term) =>
       classifyReasoningTerm(term, brandText),
     );
-  }, [reasoningText, brandText]);
-  const visibleQuotedTerms = showAllReasoningTerms
-    ? quotedTermsAll
-    : quotedTermsAll.slice(0, 6);
-  const hiddenQuotedTermsCount = Math.max(
-    0,
-    quotedTermsAll.length - visibleQuotedTerms.length,
+  }, [reasoningNarrativeText, brandText]);
+  const localExplanation = useMemo(
+    () => buildLocalExplanation(job, result, artifacts, events),
+    [job, result, artifacts, events],
   );
+  const precomputedExplanation = explanation || localExplanation;
+  const precomputedAttempts = Array.isArray(precomputedExplanation?.attempts)
+    ? precomputedExplanation.attempts
+    : [];
+  const precomputedAcceptedAttempt =
+    [...precomputedAttempts]
+      .reverse()
+      .find((attempt) => attempt.status === "accepted") || null;
+  const rawLlmCategoryHint = (precomputedAcceptedAttempt?.result?.category || "").trim();
   const highlightedReasoning = useMemo<HighlightedReasoningPart[]>(() => {
     if (!reasoningDisplayText) return [];
-    if (quotedTermsAll.length === 0) return [reasoningDisplayText];
-    const termType = new Map<string, ReasoningTermType>();
-    quotedTermsAll.forEach((term) =>
-      termType.set(term.text.toLowerCase(), term.type),
+    const highlightTerms = quotedTermsAll.filter(
+      (term) => !shouldSuppressReasoningTerm(term, rawLlmCategoryHint, categoryText),
     );
+    if (highlightTerms.length === 0) return [reasoningDisplayText];
+    const sortedTerms = [...highlightTerms]
+      .map((term) => term.text)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    const uniqueTerms: string[] = [];
+    const termType = new Map<string, ReasoningTermType>();
+    for (const term of sortedTerms) {
+      const key = term.toLowerCase();
+      if (termType.has(key)) continue;
+      termType.set(
+        key,
+        highlightTerms.find((item) => item.text.toLowerCase() === key)?.type || "evidence",
+      );
+      uniqueTerms.push(term);
+    }
+    const escapedTerms = uniqueTerms.map((term) =>
+      term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    );
+    if (escapedTerms.length === 0) return [reasoningDisplayText];
 
     const parts: HighlightedReasoningPart[] = [];
-    const regex = /'([^']+)'/g;
+    const regex = new RegExp(
+      `(?:['"“”‘’])?(${escapedTerms.join("|")})(?:['"“”‘’])?`,
+      "gi",
+    );
     let lastIndex = 0;
     let match = regex.exec(reasoningDisplayText);
     while (match) {
       if (match.index > lastIndex) {
         parts.push(reasoningDisplayText.slice(lastIndex, match.index));
       }
-      const term = match[1];
+      const term = match[1] || match[0];
       const normalizedTerm = normalizeSignalPillText(term);
       const termKind = termType.get(normalizedTerm.toLowerCase());
       if (termKind) {
-        parts.push({ text: normalizedTerm, type: termKind });
+        parts.push({ text: term, type: termKind });
       } else {
         const sanitized = sanitizeInlineReasoningFragment(term);
         if (sanitized) parts.push(sanitized);
@@ -1207,10 +1416,6 @@ export function JobDetail() {
     }
     return map;
   }, [events, stageSequenceForEvents]);
-  const localExplanation = useMemo(
-    () => buildLocalExplanation(job, result, artifacts, events),
-    [job, result, artifacts, events],
-  );
 
   const updateVideoSource = useCallback((currentJob: JobStatus) => {
     const rawUrl = (currentJob.url || "").trim();
@@ -1309,6 +1514,24 @@ export function JobDetail() {
     setExplanationError("");
     setExplanationLoading(false);
   }, [id]);
+
+  useEffect(() => {
+    videoPrimedRef.current = false;
+  }, [videoSource?.url]);
+
+  const primeVideoFirstFrame = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || videoPrimedRef.current) return;
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const targetTime = duration > 0 ? Math.min(0.05, Math.max(0.001, duration / 1000)) : 0.05;
+    videoPrimedRef.current = true;
+    try {
+      video.currentTime = targetTime;
+    } catch {
+      // Some browsers reject early seeks before the stream is fully ready.
+      videoPrimedRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -1466,6 +1689,8 @@ export function JobDetail() {
   const progressPercent = Math.round(job.progress ?? 0);
 
   const frameItems = artifacts?.latest_frames || [];
+  const videoPosterUrl =
+    videoSource?.type === "local" ? getJobVideoPosterUrl(job.job_id) : undefined;
   const perFrameVision = Array.isArray(artifacts?.per_frame_vision)
     ? artifacts.per_frame_vision
     : [];
@@ -1502,8 +1727,6 @@ export function JobDetail() {
   const currentStage = (job.stage || "").trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
 
-  const categoryText =
-    typeof firstRow?.Category === "string" ? firstRow.Category.trim() : "";
   const categoryIdRaw =
     firstRow?.["Category ID"] ?? (firstRow as any)?.category_id;
   const categoryIdText =
@@ -1590,7 +1813,7 @@ export function JobDetail() {
     [...explanationAttempts]
       .reverse()
       .find((attempt) => attempt.status === "accepted") || null;
-  const rawLlmCategory = (acceptedExplanationAttempt?.result?.category || "").trim();
+  const rawLlmCategory = rawLlmCategoryHint;
   const rawLlmConfidence =
     typeof acceptedExplanationAttempt?.result?.confidence === "number"
       ? acceptedExplanationAttempt.result.confidence
@@ -1601,6 +1824,28 @@ export function JobDetail() {
   );
   const usedExplainMethodGuide = EXPLAIN_METHOD_GUIDE.filter((entry) =>
     explanationAttempts.some((attempt) => attempt.attempt_type === entry.key),
+  );
+  const filteredReasoningTerms = quotedTermsAll.filter(
+    (term) => !shouldSuppressReasoningTerm(term, rawLlmCategory, categoryText),
+  );
+  const orderedReasoningTerms: ReasoningTerm[] = [
+    ...filteredReasoningTerms.filter((term) => term.type === "brand"),
+    ...filteredReasoningTerms.filter((term) => term.type === "url"),
+    ...filteredReasoningTerms.filter((term) => term.type === "evidence"),
+  ];
+  const visibleReasoningTerms = showAllReasoningTerms
+    ? orderedReasoningTerms
+    : orderedReasoningTerms.slice(0, DEFAULT_VISIBLE_REASONING_TERMS);
+  const hiddenReasoningTermsCount = Math.max(
+    0,
+    orderedReasoningTerms.length - visibleReasoningTerms.length,
+  );
+  const reasoningSummary = buildReasoningSummary(
+    operatorNotes,
+    acceptedExplanationAttempt,
+    brandText,
+    categoryText,
+    orderedReasoningTerms,
   );
   const latestExplainFrames = Array.isArray(explanationEvidence?.latest_frames)
     ? explanationEvidence.latest_frames
@@ -1811,10 +2056,10 @@ export function JobDetail() {
 
       {firstRow && firstRow.Brand !== "Err" && (
         <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
-          <div className="bg-white border border-gray-200 border-l-[3px] border-l-primary-500 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 border-l-[3px] border-l-primary-500 rounded-xl p-6 shadow-sm">
             <div className="flex items-center justify-between gap-3 mb-3">
               <h3 className="text-xs uppercase tracking-wider text-gray-400 font-bold">
-                💡 LLM Reasoning
+                Evidence &amp; Reasoning
               </h3>
               <CopyButton
                 text={reasoningText || "No reasoning provided by the LLM."}
@@ -1822,80 +2067,129 @@ export function JobDetail() {
               />
             </div>
 
-            {isRecoveredReasoning && (
-              <div className="mb-3 inline-flex items-center gap-1 text-amber-700 border border-amber-200 bg-amber-50 rounded px-2 py-1 text-xs">
-                <span>🔍</span>
-                <span>Web-assisted recovery</span>
-              </div>
-            )}
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {acceptedMethodGuideEntry ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-[11px] font-semibold text-primary-700">
+                  <span>Accepted Path</span>
+                  <span className="font-normal text-primary-600">
+                    {acceptedMethodGuideEntry.label}
+                  </span>
+                </span>
+              ) : null}
+              {isRecoveredReasoning && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                  <span>Web-assisted recovery</span>
+                </span>
+              )}
+              {typeof rawLlmConfidence === "number" ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[11px] font-semibold text-gray-700">
+                  <span>LLM</span>
+                  <span className="font-mono text-gray-900">
+                    {rawLlmConfidence.toFixed(2)}
+                  </span>
+                </span>
+              ) : null}
+            </div>
 
-            {visibleQuotedTerms.length > 0 && (
-              <div className="mb-4">
-                <div className="flex flex-wrap gap-2">
-                  {visibleQuotedTerms.map((term, idx) => (
-                    <span
-                      key={`${term.text}-${idx}`}
-                      role="status"
-                      className={reasoningPillClass(term.type)}
-                    >
-                      {term.text}
-                    </span>
-                  ))}
-                  {hiddenQuotedTermsCount > 0 && !showAllReasoningTerms && (
-                    <button
-                      type="button"
-                      onClick={() => setShowAllReasoningTerms(true)}
-                      className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
-                    >
-                      +{hiddenQuotedTermsCount} more
-                    </button>
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
+              <div className="space-y-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold mb-3">
+                    Key Evidence
+                  </div>
+                  {visibleReasoningTerms.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {visibleReasoningTerms.map((term, idx) => (
+                        <span
+                          key={`${term.text}-${idx}`}
+                          role="status"
+                          className={reasoningPillClass(term.type)}
+                        >
+                          {term.text}
+                        </span>
+                      ))}
+                      {hiddenReasoningTermsCount > 0 && !showAllReasoningTerms && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllReasoningTerms(true)}
+                          className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          +{hiddenReasoningTermsCount} more evidence
+                        </button>
+                      )}
+                      {orderedReasoningTerms.length > DEFAULT_VISIBLE_REASONING_TERMS &&
+                        showAllReasoningTerms && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllReasoningTerms(false)}
+                          className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          Show less
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-500">
+                      No structured evidence terms were extracted from the reasoning text.
+                    </div>
                   )}
-                  {quotedTermsAll.length > 6 && showAllReasoningTerms && (
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold mb-2">
+                    Decision Summary
+                  </div>
+                  <p className="text-sm leading-7 text-gray-700">
+                    {reasoningSummary}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold">
+                      LLM Narrative
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Full model prose with inline evidence highlights.
+                    </div>
+                  </div>
+                  {reasoningNarrativeText.length > 500 && (
                     <button
                       type="button"
-                      onClick={() => setShowAllReasoningTerms(false)}
-                      className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                      onClick={() => setShowFullReasoning((current) => !current)}
+                      className="text-xs text-cyan-700 hover:text-cyan-800 underline underline-offset-2"
                     >
-                      Show less
+                      {showFullReasoning ? "Show less" : "Show more"}
                     </button>
                   )}
                 </div>
-                <div className="border-b border-gray-200 mt-4" />
-              </div>
-            )}
 
-            {reasoningText ? (
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {highlightedReasoning.map((part, idx) =>
-                  typeof part === "string" ? (
-                    <span key={idx}>{part}</span>
-                  ) : (
-                    <span key={idx} className={reasoningInlineClass(part.type)}>
-                      {part.text}
-                    </span>
-                  ),
+                {reasoningText ? (
+                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                    {highlightedReasoning.map((part, idx) =>
+                      typeof part === "string" ? (
+                        <span key={idx}>{part}</span>
+                      ) : (
+                        <span key={idx} className={reasoningInlineClass(part.type)}>
+                          {part.text}
+                        </span>
+                      ),
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-gray-400 italic text-sm">
+                    No reasoning provided by the LLM.
+                  </p>
                 )}
-              </p>
-            ) : (
-              <p className="text-gray-400 italic text-sm">
-                No reasoning provided by the LLM.
-              </p>
-            )}
-
-            {reasoningText.length > 500 && (
-              <button
-                type="button"
-                onClick={() => setShowFullReasoning((current) => !current)}
-                className="mt-3 text-xs text-cyan-700 hover:text-cyan-800 underline underline-offset-2"
-              >
-                {showFullReasoning ? "Show less" : "Show more"}
-              </button>
-            )}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-visible">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
           {videoAvailable && videoSource && (
             <button
@@ -1942,9 +2236,14 @@ export function JobDetail() {
             {videoSource.type === "local" && (
               <div className="space-y-3">
                 <video
+                  ref={videoRef}
                   controls
-                  preload="metadata"
+                  preload="auto"
+                  playsInline
+                  poster={videoPosterUrl}
                   className="w-full max-h-[500px] rounded-lg border border-gray-300 bg-black"
+                  onLoadedMetadata={primeVideoFirstFrame}
+                  onLoadedData={primeVideoFirstFrame}
                   onError={() =>
                     setVideoError(
                       "Source video could not be streamed (missing file or unavailable).",
@@ -2016,49 +2315,26 @@ export function JobDetail() {
                   {mapperCategoryText || "No mapped category available."}
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-xs">
-                  <div
-                    title={`Mapper method: ${mapperMethodDisplay}`}
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
-                  >
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="Method"
                       help="How the final category was chosen. For example, Embeddings means the raw category text was matched against taxonomy labels in embedding space."
                     />
-                    <div className="font-medium text-gray-800">
-                      {mapperMethodDisplay}
-                    </div>
+                    <div className="font-medium text-gray-800">{mapperMethodDisplay}</div>
                   </div>
-                  <div
-                    title={
-                      mapperScoreValue === null
-                        ? "No mapper score available."
-                        : `Mapper score: ${mapperScoreValue.toFixed(6)}`
-                    }
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
-                  >
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="Mapper Score"
                       help="Strength of the final taxonomy match. Higher means the mapper considered the chosen canonical category a closer fit to the source label or evidence."
                     />
-                    <div className="font-mono text-cyan-700">
-                      {mapperScoreDisplay}
-                    </div>
+                    <div className="font-mono text-cyan-700">{mapperScoreDisplay}</div>
                   </div>
-                  <div
-                    title={
-                      mapperConfidenceValue === null
-                        ? "No LLM confidence available."
-                        : `LLM confidence: ${mapperConfidenceValue.toFixed(6)}`
-                    }
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
-                  >
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="LLM Confidence"
                       help="The classification model's own confidence in the brand/category answer before the final taxonomy mapping step."
                     />
-                    <div className="font-mono text-gray-800">
-                      {mapperConfidenceDisplay}
-                    </div>
+                    <div className="font-mono text-gray-800">{mapperConfidenceDisplay}</div>
                   </div>
                 </div>
               </div>
@@ -2117,6 +2393,7 @@ export function JobDetail() {
                       <HelpTooltip
                         content="A local 2D projection of the category neighborhood. Query shows the source signal, final category is the mapped answer, and nearby points are the closest alternatives in that embedding space."
                         widthClassName="w-80"
+                        align="start"
                       />
                     </div>
                     <p className="text-xs text-slate-400">
