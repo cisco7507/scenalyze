@@ -214,6 +214,28 @@ const COMMON_SIGNAL_WORDS = new Set([
   "therefore",
   "thus",
 ]);
+const SIGNAL_PILL_EXACT_BLOCKLIST = new Set([
+  "which translates to",
+  "translated as",
+  "translation",
+  "translation:",
+  "in french",
+  "in english",
+  "for example",
+]);
+const SIGNAL_PILL_PREFIX_BLOCKLIST = [
+  "which translates to",
+  "translated as",
+  "translation:",
+  "translation of",
+  "in french",
+  "in english",
+  "for example",
+  "meaning",
+];
+const SIGNAL_TRANSLATION_TRAIL_REGEX =
+  /\s*\((?:which translates to|translated as|translation:?|meaning)\b.*$/i;
+const DEFAULT_VISIBLE_REASONING_TERMS = 4;
 
 function extractFrameTimestampKey(frame: {
   timestamp?: number | null;
@@ -236,31 +258,110 @@ function formatStageName(stage: string): string {
   return stage.replace(/_/g, " ");
 }
 
+function normalizeReasoningNarrative(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/([a-zà-ÿ])\(/gi, "$1 (")
+    .replace(/\)([A-Za-zÀ-ÿ])/g, ") $1")
+    .replace(/([.!?])([A-ZÀ-Ý])/g, "$1 $2")
+    .replace(/([a-zà-ÿ]{3,})([A-ZÀ-Ý][a-zà-ÿ]+)/g, "$1 $2")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractQuotedReasoningPhrases(text: string): string[] {
+  const phrases: string[] = [];
+  const chars = Array.from(text);
+  const matchingQuote: Record<string, string> = {
+    "'": "'",
+    '"': '"',
+    "“": "”",
+    "‘": "’",
+  };
+
+  const isOpeningBoundary = (char?: string) => !char || /[\s([{,;:]/.test(char);
+  const isClosingBoundary = (char?: string) => !char || /[\s)\]}.!,;:?]/.test(char);
+
+  for (let i = 0; i < chars.length; i += 1) {
+    const open = chars[i];
+    const close = matchingQuote[open];
+    if (!close) continue;
+    const prev = chars[i - 1];
+    const next = chars[i + 1];
+    if (!isOpeningBoundary(prev) || !next || /\s/.test(next)) continue;
+
+    let collected = "";
+    for (let j = i + 1; j < chars.length; j += 1) {
+      const current = chars[j];
+      const after = chars[j + 1];
+      if (current === close && collected.trim().length > 0 && isClosingBoundary(after)) {
+        phrases.push(collected);
+        i = j;
+        break;
+      }
+      collected += current;
+    }
+  }
+
+  return phrases;
+}
+
+function cleanSignalPhrase(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/^["'([{]+/, "")
+    .replace(/["')\]}.,;:!?]+$/g, "")
+    .replace(SIGNAL_TRANSLATION_TRAIL_REGEX, "")
+    .trim();
+}
+
 function classifyReasoningTerm(term: string, brandText: string): ReasoningTerm {
-  const cleanTerm = term.trim();
+  const cleanTerm = cleanSignalPhrase(term);
   const termLower = cleanTerm.toLowerCase();
   const brandLower = brandText.trim().toLowerCase();
   if (brandLower && termLower === brandLower)
     return { text: cleanTerm, type: "brand" };
-  if (/\.\w{2,4}$/i.test(cleanTerm)) return { text: cleanTerm, type: "url" };
+  if (/\b(?:[a-z0-9-]+\.)+(?:com|net|org|co|io|ai|ca|us|uk|edu|gov)\b/i.test(cleanTerm)) {
+    return { text: cleanTerm, type: "url" };
+  }
   return { text: cleanTerm, type: "evidence" };
 }
 
 function isValidSignalPill(text: string): boolean {
-  const trimmed = text.trim();
+  const trimmed = cleanSignalPhrase(text);
   if (trimmed.length > 50) return false;
   if (trimmed.length < 2) return false;
-  if (/^[—\-,;:)\.\!\?'’]/.test(trimmed)) return false;
-  if (/[,;:\('’]$/.test(trimmed)) return false;
-  if (/[\[\]]/.test(trimmed)) return false;
+  if (/^[—\-,;:)\.\!\?]/.test(trimmed)) return false;
+  if (/[[\]]/.test(trimmed)) return false;
+  if (!/[A-Za-zÀ-ÿ0-9]/.test(trimmed)) return false;
+  if (SIGNAL_PILL_EXACT_BLOCKLIST.has(trimmed.toLowerCase())) return false;
+  if (
+    SIGNAL_PILL_PREFIX_BLOCKLIST.some((prefix) =>
+      trimmed.toLowerCase().startsWith(prefix),
+    )
+  ) {
+    return false;
+  }
+  if (/[()]/.test(trimmed)) return false;
   const wordCount = trimmed.split(/\s+/).length;
   if (wordCount > 10) return false;
+  if (wordCount > 1 && /\b[\p{L}]$/u.test(trimmed)) {
+    const lastWord = trimmed.split(/\s+/).at(-1) || "";
+    if (lastWord.length === 1) return false;
+  }
   if (COMMON_SIGNAL_WORDS.has(trimmed.toLowerCase())) return false;
   return true;
 }
 
 function normalizeSignalPillText(text: string): string {
-  const trimmed = text.trim().replace(/\s+/g, " ");
+  const trimmed = cleanSignalPhrase(text).replace(/\s+/g, " ");
   const spacedDomain = trimmed.match(
     /^([a-z0-9-]+)\s+(com|net|org|co|io|ai|ca|us|uk|edu|gov)$/i,
   );
@@ -271,10 +372,12 @@ function normalizeSignalPillText(text: string): string {
 }
 
 function sanitizeInlineReasoningFragment(text: string): string {
-  return text
+  return normalizeReasoningNarrative(
+    text
     .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, "")
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim(),
+  );
 }
 
 function getFrameConfidenceTone(score: number | null): FrameConfidenceTone {
@@ -1116,36 +1219,32 @@ export function JobDetail() {
     : "";
   const reasoningText =
     typeof reasoningRaw === "string" ? reasoningRaw.trim() : "";
+  const reasoningNarrativeText = useMemo(
+    () => normalizeReasoningNarrative(reasoningText),
+    [reasoningText],
+  );
   const isRecoveredReasoning = reasoningText
     .toLowerCase()
     .startsWith("(recovered)");
   const reasoningDisplayText = useMemo(() => {
-    if (!reasoningText) return "";
-    if (showFullReasoning || reasoningText.length <= 500) return reasoningText;
-    return `${reasoningText.slice(0, 220).trimEnd()}...`;
-  }, [reasoningText, showFullReasoning]);
+    if (!reasoningNarrativeText) return "";
+    if (showFullReasoning || reasoningNarrativeText.length <= 500)
+      return reasoningNarrativeText;
+    return `${reasoningNarrativeText.slice(0, 220).trimEnd()}...`;
+  }, [reasoningNarrativeText, showFullReasoning]);
   const quotedTermsAll = useMemo<ReasoningTerm[]>(() => {
-    if (!reasoningText) return [];
-    const regex = /'([^']+)'/g;
-    const seen = new Set<string>();
+    if (!reasoningNarrativeText) return [];
     const orderedTerms: string[] = [];
-    let match = regex.exec(reasoningText);
-    while (match) {
-      const clean = match[1].trim();
-      const key = clean.toLowerCase();
-      if (clean && !seen.has(key)) {
-        seen.add(key);
-        orderedTerms.push(clean);
-      }
-      match = regex.exec(reasoningText);
-    }
     const canonicalMap = new Map<string, string>();
-    orderedTerms.filter(isValidSignalPill).forEach((term) => {
-      const normalized = normalizeSignalPillText(term);
+
+    const pushCandidate = (candidate: string) => {
+      const normalized = normalizeSignalPillText(candidate);
       const key = normalized.toLowerCase();
+      if (!isValidSignalPill(normalized)) return;
       const existing = canonicalMap.get(key);
       if (!existing) {
         canonicalMap.set(key, normalized);
+        orderedTerms.push(normalized);
         return;
       }
       if (
@@ -1154,33 +1253,56 @@ export function JobDetail() {
       ) {
         canonicalMap.set(key, normalized);
       }
-    });
+    };
 
-    return Array.from(canonicalMap.values()).map((term) =>
+    if (brandText) pushCandidate(brandText);
+
+    const domainMatches = reasoningNarrativeText.match(
+      /\b(?:[a-z0-9-]+\.)+(?:com|net|org|co|io|ai|ca|us|uk|edu|gov)\b/gi,
+    );
+    domainMatches?.forEach((match) => pushCandidate(match));
+
+    extractQuotedReasoningPhrases(reasoningNarrativeText).forEach((term) =>
+      pushCandidate(term),
+    );
+
+    return orderedTerms.map((term) =>
       classifyReasoningTerm(term, brandText),
     );
-  }, [reasoningText, brandText]);
+  }, [reasoningNarrativeText, brandText]);
   const highlightedReasoning = useMemo<HighlightedReasoningPart[]>(() => {
     if (!reasoningDisplayText) return [];
     if (quotedTermsAll.length === 0) return [reasoningDisplayText];
+    const sortedTerms = [...quotedTermsAll]
+      .map((term) => term.text)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    const uniqueTerms: string[] = [];
     const termType = new Map<string, ReasoningTermType>();
-    quotedTermsAll.forEach((term) =>
-      termType.set(term.text.toLowerCase(), term.type),
+    for (const term of sortedTerms) {
+      const key = term.toLowerCase();
+      if (termType.has(key)) continue;
+      termType.set(key, quotedTermsAll.find((item) => item.text.toLowerCase() === key)?.type || "evidence");
+      uniqueTerms.push(term);
+    }
+    const escapedTerms = uniqueTerms.map((term) =>
+      term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
     );
+    if (escapedTerms.length === 0) return [reasoningDisplayText];
 
     const parts: HighlightedReasoningPart[] = [];
-    const regex = /'([^']+)'/g;
+    const regex = new RegExp(escapedTerms.join("|"), "gi");
     let lastIndex = 0;
     let match = regex.exec(reasoningDisplayText);
     while (match) {
       if (match.index > lastIndex) {
         parts.push(reasoningDisplayText.slice(lastIndex, match.index));
       }
-      const term = match[1];
+      const term = match[0];
       const normalizedTerm = normalizeSignalPillText(term);
       const termKind = termType.get(normalizedTerm.toLowerCase());
       if (termKind) {
-        parts.push({ text: normalizedTerm, type: termKind });
+        parts.push({ text: term, type: termKind });
       } else {
         const sanitized = sanitizeInlineReasoningFragment(term);
         if (sanitized) parts.push(sanitized);
@@ -1664,7 +1786,7 @@ export function JobDetail() {
   ];
   const visibleReasoningTerms = showAllReasoningTerms
     ? orderedReasoningTerms
-    : orderedReasoningTerms.slice(0, 5);
+    : orderedReasoningTerms.slice(0, DEFAULT_VISIBLE_REASONING_TERMS);
   const hiddenReasoningTermsCount = Math.max(
     0,
     orderedReasoningTerms.length - visibleReasoningTerms.length,
@@ -1946,7 +2068,8 @@ export function JobDetail() {
                           +{hiddenReasoningTermsCount} more evidence
                         </button>
                       )}
-                      {orderedReasoningTerms.length > 5 && showAllReasoningTerms && (
+                      {orderedReasoningTerms.length > DEFAULT_VISIBLE_REASONING_TERMS &&
+                        showAllReasoningTerms && (
                         <button
                           type="button"
                           onClick={() => setShowAllReasoningTerms(false)}
@@ -1983,7 +2106,7 @@ export function JobDetail() {
                       Full model prose with inline evidence highlights.
                     </div>
                   </div>
-                  {reasoningText.length > 500 && (
+                  {reasoningNarrativeText.length > 500 && (
                     <button
                       type="button"
                       onClick={() => setShowFullReasoning((current) => !current)}
