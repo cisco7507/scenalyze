@@ -118,6 +118,7 @@ type VideoSource = { type: "local" | "youtube" | "remote"; url: string };
 type ScratchTool = "OCR" | "SEARCH" | "VISION" | "FINAL" | "ERROR";
 type ReasoningTermType = "brand" | "url" | "evidence";
 type ReasoningTerm = { text: string; type: ReasoningTermType };
+type ExtractedReasoningPhrase = { text: string; contextBefore: string };
 type HighlightedReasoningPart =
   | string
   | { text: string; type: ReasoningTermType };
@@ -275,8 +276,8 @@ function normalizeReasoningNarrative(text: string): string {
     .trim();
 }
 
-function extractQuotedReasoningPhrases(text: string): string[] {
-  const phrases: string[] = [];
+function extractQuotedReasoningPhrases(text: string): ExtractedReasoningPhrase[] {
+  const phrases: ExtractedReasoningPhrase[] = [];
   const chars = Array.from(text);
   const matchingQuote: Record<string, string> = {
     "'": "'",
@@ -301,7 +302,11 @@ function extractQuotedReasoningPhrases(text: string): string[] {
       const current = chars[j];
       const after = chars[j + 1];
       if (current === close && collected.trim().length > 0 && isClosingBoundary(after)) {
-        phrases.push(collected);
+        const startIdx = Math.max(0, i - 48);
+        phrases.push({
+          text: collected,
+          contextBefore: chars.slice(startIdx, i).join(""),
+        });
         i = j;
         break;
       }
@@ -369,6 +374,28 @@ function normalizeSignalPillText(text: string): string {
     return `${spacedDomain[1].toLowerCase()}.${spacedDomain[2].toLowerCase()}`;
   }
   return trimmed;
+}
+
+function isTranslationPhraseContext(contextBefore: string): boolean {
+  const normalized = contextBefore.toLowerCase().replace(/\s+/g, " ").trim();
+  return SIGNAL_PILL_PREFIX_BLOCKLIST.some((prefix) =>
+    normalized.endsWith(prefix),
+  );
+}
+
+function shouldSuppressReasoningTerm(
+  term: ReasoningTerm,
+  rawLlmCategory: string,
+  mappedCategory: string,
+): boolean {
+  const normalized = normalizeSignalPillText(term.text).toLowerCase();
+  if (!normalized) return true;
+  if (term.type !== "evidence") return false;
+  const rawCategoryNormalized = normalizeSignalPillText(rawLlmCategory).toLowerCase();
+  const mappedCategoryNormalized = normalizeSignalPillText(mappedCategory).toLowerCase();
+  if (rawCategoryNormalized && normalized === rawCategoryNormalized) return true;
+  if (mappedCategoryNormalized && normalized === mappedCategoryNormalized) return true;
+  return false;
 }
 
 function sanitizeInlineReasoningFragment(text: string): string {
@@ -1212,6 +1239,8 @@ export function JobDetail() {
   const firstRow = result?.[0];
   const brandText =
     typeof firstRow?.Brand === "string" ? firstRow.Brand.trim() : "";
+  const categoryText =
+    typeof firstRow?.Category === "string" ? firstRow.Category.trim() : "";
   const reasoningRaw = firstRow
     ? (firstRow.Reasoning ??
       (firstRow as any).reasoning ??
@@ -1262,18 +1291,35 @@ export function JobDetail() {
     );
     domainMatches?.forEach((match) => pushCandidate(match));
 
-    extractQuotedReasoningPhrases(reasoningNarrativeText).forEach((term) =>
-      pushCandidate(term),
-    );
+    extractQuotedReasoningPhrases(reasoningNarrativeText).forEach((phrase) => {
+      if (isTranslationPhraseContext(phrase.contextBefore)) return;
+      pushCandidate(phrase.text);
+    });
 
     return orderedTerms.map((term) =>
       classifyReasoningTerm(term, brandText),
     );
   }, [reasoningNarrativeText, brandText]);
+  const localExplanation = useMemo(
+    () => buildLocalExplanation(job, result, artifacts, events),
+    [job, result, artifacts, events],
+  );
+  const precomputedExplanation = explanation || localExplanation;
+  const precomputedAttempts = Array.isArray(precomputedExplanation?.attempts)
+    ? precomputedExplanation.attempts
+    : [];
+  const precomputedAcceptedAttempt =
+    [...precomputedAttempts]
+      .reverse()
+      .find((attempt) => attempt.status === "accepted") || null;
+  const rawLlmCategoryHint = (precomputedAcceptedAttempt?.result?.category || "").trim();
   const highlightedReasoning = useMemo<HighlightedReasoningPart[]>(() => {
     if (!reasoningDisplayText) return [];
-    if (quotedTermsAll.length === 0) return [reasoningDisplayText];
-    const sortedTerms = [...quotedTermsAll]
+    const highlightTerms = quotedTermsAll.filter(
+      (term) => !shouldSuppressReasoningTerm(term, rawLlmCategoryHint, categoryText),
+    );
+    if (highlightTerms.length === 0) return [reasoningDisplayText];
+    const sortedTerms = [...highlightTerms]
       .map((term) => term.text)
       .filter(Boolean)
       .sort((a, b) => b.length - a.length);
@@ -1282,7 +1328,10 @@ export function JobDetail() {
     for (const term of sortedTerms) {
       const key = term.toLowerCase();
       if (termType.has(key)) continue;
-      termType.set(key, quotedTermsAll.find((item) => item.text.toLowerCase() === key)?.type || "evidence");
+      termType.set(
+        key,
+        highlightTerms.find((item) => item.text.toLowerCase() === key)?.type || "evidence",
+      );
       uniqueTerms.push(term);
     }
     const escapedTerms = uniqueTerms.map((term) =>
@@ -1291,14 +1340,17 @@ export function JobDetail() {
     if (escapedTerms.length === 0) return [reasoningDisplayText];
 
     const parts: HighlightedReasoningPart[] = [];
-    const regex = new RegExp(escapedTerms.join("|"), "gi");
+    const regex = new RegExp(
+      `(?:['"“”‘’])?(${escapedTerms.join("|")})(?:['"“”‘’])?`,
+      "gi",
+    );
     let lastIndex = 0;
     let match = regex.exec(reasoningDisplayText);
     while (match) {
       if (match.index > lastIndex) {
         parts.push(reasoningDisplayText.slice(lastIndex, match.index));
       }
-      const term = match[0];
+      const term = match[1] || match[0];
       const normalizedTerm = normalizeSignalPillText(term);
       const termKind = termType.get(normalizedTerm.toLowerCase());
       if (termKind) {
@@ -1364,10 +1416,6 @@ export function JobDetail() {
     }
     return map;
   }, [events, stageSequenceForEvents]);
-  const localExplanation = useMemo(
-    () => buildLocalExplanation(job, result, artifacts, events),
-    [job, result, artifacts, events],
-  );
 
   const updateVideoSource = useCallback((currentJob: JobStatus) => {
     const rawUrl = (currentJob.url || "").trim();
@@ -1679,8 +1727,6 @@ export function JobDetail() {
   const currentStage = (job.stage || "").trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
 
-  const categoryText =
-    typeof firstRow?.Category === "string" ? firstRow.Category.trim() : "";
   const categoryIdRaw =
     firstRow?.["Category ID"] ?? (firstRow as any)?.category_id;
   const categoryIdText =
@@ -1767,7 +1813,7 @@ export function JobDetail() {
     [...explanationAttempts]
       .reverse()
       .find((attempt) => attempt.status === "accepted") || null;
-  const rawLlmCategory = (acceptedExplanationAttempt?.result?.category || "").trim();
+  const rawLlmCategory = rawLlmCategoryHint;
   const rawLlmConfidence =
     typeof acceptedExplanationAttempt?.result?.confidence === "number"
       ? acceptedExplanationAttempt.result.confidence
@@ -1779,10 +1825,13 @@ export function JobDetail() {
   const usedExplainMethodGuide = EXPLAIN_METHOD_GUIDE.filter((entry) =>
     explanationAttempts.some((attempt) => attempt.attempt_type === entry.key),
   );
+  const filteredReasoningTerms = quotedTermsAll.filter(
+    (term) => !shouldSuppressReasoningTerm(term, rawLlmCategory, categoryText),
+  );
   const orderedReasoningTerms: ReasoningTerm[] = [
-    ...quotedTermsAll.filter((term) => term.type === "brand"),
-    ...quotedTermsAll.filter((term) => term.type === "url"),
-    ...quotedTermsAll.filter((term) => term.type === "evidence"),
+    ...filteredReasoningTerms.filter((term) => term.type === "brand"),
+    ...filteredReasoningTerms.filter((term) => term.type === "url"),
+    ...filteredReasoningTerms.filter((term) => term.type === "evidence"),
   ];
   const visibleReasoningTerms = showAllReasoningTerms
     ? orderedReasoningTerms
