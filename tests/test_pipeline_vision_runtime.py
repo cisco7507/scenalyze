@@ -1326,3 +1326,567 @@ def test_pipeline_edge_rescue_runs_full_video_last_and_limits_frames(monkeypatch
     assert ocr_counts[40] == pipeline_module._resolve_full_video_rescue_max_frames()
     assert "FINAL RESCUE SIGNAL" in ocr_text
     assert row[1] == "Final Rescue Brand"
+
+
+def test_pipeline_runs_ocr_context_rescue_for_low_confidence_short_ocr(monkeypatch):
+    class _DummyMapper:
+        categories = ["Furniture", "Sleep Products"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            ocr_summary = kwargs.get("ocr_summary", "")
+            if raw == "unknown" and "base réglable" in ocr_summary:
+                return {
+                    "canonical_category": "Furniture",
+                    "category_id": "201",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.91,
+                }
+            if raw == "Furniture":
+                return {
+                    "canonical_category": "Furniture",
+                    "category_id": "201",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.97,
+                }
+            return {
+                "canonical_category": "Sleep Products",
+                "category_id": "202",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.94,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            marker = int(image[0, 0, 0])
+            if mode == "🚀 Fast":
+                if marker == 10:
+                    return "DoRMEZ-vous"
+                return ""
+            if marker == 10:
+                return "DoRMEZ-vous"
+            if marker == 20:
+                return "Zéro gravité"
+            if marker == 30:
+                return "achat d'une base réglable"
+            raise AssertionError(f"unexpected OCR marker {marker}")
+
+    llm_calls: list[tuple[str, bool]] = []
+    rescue_calls: list[str] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            text = args[2]
+            llm_calls.append((text, bool(kwargs.get("express_mode", False))))
+            if "base réglable" in text:
+                return {
+                    "brand": "Dormez-vous",
+                    "category": "Furniture",
+                    "confidence": 0.95,
+                    "reasoning": "rescued by aggregated OCR context",
+                }
+            return {
+                "brand": "Dormez-vous",
+                "category": "Sleep Products",
+                "confidence": 0.45,
+                "reasoning": "too little OCR context",
+            }
+
+    initial_frames = [
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.0, "type": "tail"},
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 20, dtype=np.uint8), "time": 29.4, "type": "tail"},
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 30, dtype=np.uint8), "time": 29.8, "type": "tail"},
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (initial_frames, None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "_select_frames_for_ocr",
+        lambda frames: ([frames[0]], len(frames) - 1),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_tail_rescue_frames",
+        lambda _url, **kwargs: (rescue_calls.append("called"), ([], None))[1],
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-context-rescue-1",
+    )
+
+    assert rescue_calls == []
+    assert llm_calls[0] == ("DoRMEZ-vous", False)
+    assert "DoRMEZ-vous" in llm_calls[1][0]
+    assert "Zéro gravité" in llm_calls[1][0]
+    assert "base réglable" in llm_calls[1][0]
+    assert llm_calls[1][1] is False
+    assert "base réglable" in ocr_text
+    assert row[1] == "Dormez-vous"
+    assert row[3] == "Furniture"
+    processing_trace = signal_artifacts["processing_trace"]
+    assert [attempt["attempt_type"] for attempt in processing_trace["attempts"]] == [
+        "initial",
+        "ocr_context_rescue",
+    ]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "ocr_context_rescue"
+
+
+def test_pipeline_runs_ocr_context_rescue_on_short_ocr_when_mapper_score_is_weak(monkeypatch):
+    class _DummyMapper:
+        categories = ["Furniture", "Sleep Products"]
+        vision_text_features = torch.tensor(
+            [[1.0, 0.0], [0.0, 1.0]],
+            dtype=torch.float32,
+        )
+
+        @staticmethod
+        def ensure_vision_text_features():
+            return True, "ready"
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            ocr_summary = kwargs.get("ocr_summary", "")
+            if raw == "unknown" and "base réglable" in ocr_summary:
+                return {
+                    "canonical_category": "Furniture",
+                    "category_id": "201",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.91,
+                }
+            if raw == "Furniture":
+                return {
+                    "canonical_category": "Furniture",
+                    "category_id": "201",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.97,
+                }
+            return {
+                "canonical_category": "Sleep Products",
+                "category_id": "202",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.73,
+            }
+
+    class _DummyInputs(dict):
+        def to(self, _device):
+            return self
+
+    class _DummyProcessor:
+        def __call__(self, **kwargs):
+            return _DummyInputs({"pixel_values": torch.tensor([[1.0, 1.0]], dtype=torch.float32)})
+
+    class _DummyModel:
+        logit_scale = torch.tensor(2.0)
+        logit_bias = torch.tensor(0.0)
+
+        @staticmethod
+        def get_image_features(**kwargs):
+            class _Output:
+                pooler_output = torch.tensor([[2.0, 0.1]], dtype=torch.float32)
+
+            return _Output()
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            marker = int(image[0, 0, 0])
+            if mode == "🚀 Fast":
+                return "DoRMEZ-vous" if marker == 10 else ""
+            if marker == 10:
+                return "DoRMEZ-vous"
+            if marker == 20:
+                return "Zéro gravité"
+            if marker == 30:
+                return "achat d'une base réglable"
+            raise AssertionError(f"unexpected OCR marker {marker}")
+
+    llm_calls: list[tuple[str, bool]] = []
+    rescue_calls: list[str] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            text = args[2]
+            llm_calls.append((text, bool(kwargs.get("express_mode", False))))
+            if "base réglable" in text:
+                return {
+                    "brand": "Dormez-vous",
+                    "category": "Furniture",
+                    "confidence": 0.96,
+                    "reasoning": "weak mapper score corrected by richer OCR",
+                }
+            return {
+                "brand": "Dormez-vous",
+                "category": "Sleep Products",
+                "confidence": 0.99,
+                "reasoning": "brand meaning only",
+            }
+
+    frame_image = Image.fromarray(np.full((16, 16, 3), 180, dtype=np.uint8))
+    initial_frames = [
+        {"image": frame_image, "_pil_cache": frame_image, "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.0, "type": "tail"},
+        {"image": frame_image, "_pil_cache": frame_image, "ocr_image": np.full((32, 32, 3), 20, dtype=np.uint8), "time": 29.4, "type": "tail"},
+        {"image": frame_image, "_pil_cache": frame_image, "ocr_image": np.full((32, 32, 3), 30, dtype=np.uint8), "time": 29.8, "type": "tail"},
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (initial_frames, None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "_select_frames_for_ocr",
+        lambda frames: ([frames[0]], len(frames) - 1),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_tail_rescue_frames",
+        lambda _url, **kwargs: (rescue_calls.append("called"), ([], None))[1],
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+    monkeypatch.setattr(pipeline_module.categories_runtime, "siglip_model", _DummyModel())
+    monkeypatch.setattr(pipeline_module.categories_runtime, "siglip_processor", _DummyProcessor())
+
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision_board=True,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-context-rescue-vision-1",
+    )
+
+    assert rescue_calls == []
+    assert llm_calls[0] == ("DoRMEZ-vous", False)
+    assert "base réglable" in llm_calls[1][0]
+    assert "Zéro gravité" in llm_calls[1][0]
+    assert "base réglable" in ocr_text
+    assert row[3] == "Furniture"
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "ocr_context_rescue"
+
+
+def test_pipeline_rejects_context_rescue_when_ocr_supports_different_category(monkeypatch):
+    class _DummyMapper:
+        categories = ["Historical Programming", "Financial Services", "Sleep Products"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            ocr_summary = kwargs.get("ocr_summary", "")
+            if raw == "Historical Programming":
+                return {
+                    "canonical_category": "Historical Programming",
+                    "category_id": "301",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.97,
+                }
+            if raw == "Financial Services":
+                return {
+                    "canonical_category": "Financial Services",
+                    "category_id": "391",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 1.0,
+                }
+            if raw == "Sleep Products":
+                return {
+                    "canonical_category": "Sleep Products",
+                    "category_id": "5361",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.63,
+                }
+            if raw == "unknown" and "HERITAGE" in ocr_summary:
+                return {
+                    "canonical_category": "Historical Programming",
+                    "category_id": "301",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.91,
+                }
+            return {
+                "canonical_category": raw or "Historical Programming",
+                "category_id": "301",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            marker = int(image[0, 0, 0])
+            if mode == "🚀 Fast":
+                return "HISTORICA" if marker == 10 else ""
+            if marker == 10:
+                return "HISTORICA"
+            if marker == 20:
+                return "HERITAGE MINUTES"
+            if marker == 30:
+                return "THE CRB FOUNDATION"
+            raise AssertionError(f"unexpected OCR marker {marker}")
+
+    llm_calls: list[tuple[str, bool]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            text = args[2]
+            express_mode = bool(kwargs.get("express_mode", False))
+            llm_calls.append((text, express_mode))
+            if express_mode:
+                return {
+                    "brand": "Historica",
+                    "category": "Historical Programming",
+                    "confidence": 0.98,
+                    "reasoning": "rescued by express fallback",
+                }
+            if "HERITAGE MINUTES" in text:
+                return {
+                    "brand": "Historica",
+                    "category": "Financial Services",
+                    "confidence": 0.95,
+                    "reasoning": "confident but wrong",
+                }
+            return {
+                "brand": "Historica",
+                "category": "Sleep Products",
+                "confidence": 0.99,
+                "reasoning": "too little OCR context",
+            }
+
+    initial_frames = [
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 57.8, "type": "tail"},
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 20, dtype=np.uint8), "time": 58.4, "type": "tail"},
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 30, dtype=np.uint8), "time": 59.0, "type": "tail"},
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (initial_frames, None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "_select_frames_for_ocr",
+        lambda frames: ([frames[0]], len(frames) - 1),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_tail_rescue_frames",
+        lambda _url, **kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_express_brand_frame",
+        lambda _url, **kwargs: Image.fromarray(np.full((16, 16, 3), 200, dtype=np.uint8)),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision_board=False,
+        enable_llm_frame=True,
+        ctx=8192,
+        job_id="job-context-rescue-reject-1",
+    )
+
+    assert llm_calls[0] == ("HISTORICA", False)
+    assert "HERITAGE MINUTES" in llm_calls[1][0]
+    assert llm_calls[2] == ("", True)
+    assert row[1] == "Historica"
+    assert row[3] == "Historical Programming"
+    assert ocr_text == ""
+    processing_trace = signal_artifacts["processing_trace"]
+    assert [attempt["attempt_type"] for attempt in processing_trace["attempts"]] == [
+        "initial",
+        "ocr_context_rescue",
+        "ocr_rescue",
+        "express_rescue",
+    ]
+    assert processing_trace["attempts"][1]["status"] == "rejected"
+    assert processing_trace["summary"]["accepted_attempt_type"] == "express_rescue"
+
+
+def test_pipeline_challenges_generic_context_rescue_with_express_when_ocr_is_non_commercial(monkeypatch):
+    class _DummyMapper:
+        categories = ["Historical Programming", "Financial Services", "Sleep Remedy"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            ocr_summary = kwargs.get("ocr_summary", "")
+            if raw == "Sleep Products":
+                return {
+                    "canonical_category": "Sleep Remedy",
+                    "category_id": "5361",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.63,
+                }
+            if raw == "Financial Services":
+                return {
+                    "canonical_category": "Financial Services",
+                    "category_id": "391",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 1.0,
+                }
+            if raw == "Educational Media / Historical Programming":
+                return {
+                    "canonical_category": "Historical Programming",
+                    "category_id": "301",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.78,
+                }
+            if raw == "unknown" and "HERITAGE MINUTES" in ocr_summary:
+                return {
+                    "canonical_category": "Financial Services",
+                    "category_id": "391",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.86,
+                }
+            return {
+                "canonical_category": raw or "Financial Services",
+                "category_id": "391",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.50,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            marker = int(image[0, 0, 0])
+            if mode == "🚀 Fast":
+                return "DoRMEZ-vous" if marker == 10 else ""
+            if marker == 10:
+                return "HISTORICA"
+            if marker == 20:
+                return "HERITAGE MINUTES"
+            if marker == 30:
+                return "THE CRB FOUNDATION"
+            raise AssertionError(f"unexpected OCR marker {marker}")
+
+    llm_calls: list[tuple[str, bool]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            text = args[2]
+            express_mode = bool(kwargs.get("express_mode", False))
+            llm_calls.append((text, express_mode))
+            if express_mode:
+                return {
+                    "brand": "Historica",
+                    "category": "Educational Media / Historical Programming",
+                    "confidence": 0.99,
+                    "reasoning": "express rescue wins",
+                }
+            if "HERITAGE MINUTES" in text:
+                return {
+                    "brand": "Historica",
+                    "category": "Financial Services",
+                    "confidence": 0.95,
+                    "reasoning": "generic but wrong sector guess",
+                }
+            return {
+                "brand": "Dormez-vous",
+                "category": "Sleep Products",
+                "confidence": 0.99,
+                "reasoning": "too little OCR context",
+            }
+
+    initial_frames = [
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 57.8, "type": "tail"},
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 20, dtype=np.uint8), "time": 58.4, "type": "tail"},
+        {"image": object(), "ocr_image": np.full((32, 32, 3), 30, dtype=np.uint8), "time": 59.0, "type": "tail"},
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (initial_frames, None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "_select_frames_for_ocr",
+        lambda frames: ([frames[0]], len(frames) - 1),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_tail_rescue_frames",
+        lambda _url, **kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_express_brand_frame",
+        lambda _url, **kwargs: Image.fromarray(np.full((16, 16, 3), 200, dtype=np.uint8)),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision_board=False,
+        enable_llm_frame=True,
+        ctx=8192,
+        job_id="job-context-rescue-challenge-1",
+    )
+
+    assert llm_calls[0] == ("DoRMEZ-vous", False)
+    assert "HERITAGE MINUTES" in llm_calls[1][0]
+    assert llm_calls[2] == ("", True)
+    assert row[1] == "Historica"
+    assert row[3] == "Historical Programming"
+    assert "HISTORICA" in ocr_text
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "express_rescue"
+    assert processing_trace["attempts"][1]["attempt_type"] == "ocr_context_rescue"
+    assert processing_trace["attempts"][1]["status"] == "rejected"

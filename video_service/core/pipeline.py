@@ -1,6 +1,7 @@
 import time
 import os
 import re
+from collections.abc import Callable
 import torch
 import cv2
 import numpy as np
@@ -269,6 +270,16 @@ def _ocr_edge_rescue_enabled(scan_mode: str, express_mode: bool) -> bool:
     return mode not in {"full video", "full scan"}
 
 
+def _ocr_context_rescue_enabled(scan_mode: str, express_mode: bool) -> bool:
+    raw = os.environ.get("OCR_CONTEXT_RESCUE_ENABLED", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if express_mode:
+        return False
+    mode = (scan_mode or "").strip().lower()
+    return mode not in {"full video", "full scan"}
+
+
 def _express_rescue_enabled() -> bool:
     raw = os.environ.get("EXPRESS_RESCUE_ENABLED", "true").strip().lower()
     return raw not in {"0", "false", "no", "off"}
@@ -315,6 +326,436 @@ def _resolve_rescue_ocr_mode(engine_name: str, current_mode: str) -> str:
     if engine_name == "EasyOCR":
         return "🧠 Detailed"
     return current_mode
+
+
+def _resolve_ocr_context_confidence_threshold() -> float:
+    raw = os.environ.get("OCR_CONTEXT_CONFIDENCE_THRESHOLD", "0.80")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_confidence_threshold value=%r fallback=0.80", raw)
+        return 0.80
+    return max(0.0, min(1.0, value))
+
+
+def _resolve_ocr_context_short_chars() -> int:
+    raw = os.environ.get("OCR_CONTEXT_SHORT_TEXT_CHARS", "48")
+    try:
+        return max(16, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_short_text_chars value=%r fallback=48", raw)
+        return 48
+
+
+def _resolve_ocr_context_sparse_tokens() -> int:
+    raw = os.environ.get("OCR_CONTEXT_SPARSE_TOKENS", "6")
+    try:
+        return max(2, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_sparse_tokens value=%r fallback=6", raw)
+        return 6
+
+
+def _resolve_ocr_context_max_lines() -> int:
+    raw = os.environ.get("OCR_CONTEXT_MAX_LINES", "8")
+    try:
+        return max(3, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_max_lines value=%r fallback=8", raw)
+        return 8
+
+
+def _resolve_ocr_context_max_chars() -> int:
+    raw = os.environ.get("OCR_CONTEXT_MAX_CHARS", "600")
+    try:
+        return max(160, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_max_chars value=%r fallback=600", raw)
+        return 600
+
+
+def _resolve_ocr_context_vision_score_threshold() -> float:
+    raw = os.environ.get("OCR_CONTEXT_VISION_SCORE_THRESHOLD", "0.10")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_vision_score_threshold value=%r fallback=0.10", raw)
+        return 0.10
+    return max(0.0, min(1.0, value))
+
+
+def _ocr_context_use_vision_assist() -> bool:
+    raw = os.environ.get("OCR_CONTEXT_USE_VISION_ASSIST", "false").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _resolve_ocr_context_vision_margin_threshold() -> float:
+    raw = os.environ.get("OCR_CONTEXT_VISION_MARGIN_THRESHOLD", "0.03")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_vision_margin_threshold value=%r fallback=0.03", raw)
+        return 0.03
+    return max(0.0, min(1.0, value))
+
+
+def _resolve_ocr_context_mapper_score_threshold() -> float:
+    raw = os.environ.get("OCR_CONTEXT_MAPPER_SCORE_THRESHOLD", "0.82")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_context_mapper_score_threshold value=%r fallback=0.82", raw)
+        return 0.82
+    return max(0.0, min(1.0, value))
+
+
+def _resolve_ocr_support_score_threshold() -> float:
+    raw = os.environ.get("OCR_SUPPORT_SCORE_THRESHOLD", "0.72")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_support_score_threshold value=%r fallback=0.72", raw)
+        return 0.72
+    return max(0.0, min(1.0, value))
+
+
+def _ocr_text_has_commercial_context(text: str) -> tuple[bool, str]:
+    normalized = _normalize_ocr(text or "")
+    if not normalized:
+        return False, "no_text"
+
+    tokens = set(re.findall(r"[a-z0-9']{2,}", normalized))
+    numeric_hint = bool(re.search(r"\d", normalized))
+    commercial_terms = {
+        "promo",
+        "promotion",
+        "offre",
+        "offers",
+        "offer",
+        "achat",
+        "purchase",
+        "remise",
+        "rabais",
+        "discount",
+        "deal",
+        "sale",
+        "soldes",
+        "magasin",
+        "magasins",
+        "store",
+        "stores",
+        "shop",
+        "shops",
+        "cart",
+        "carte",
+        "card",
+        "base",
+        "reglable",
+        "réglable",
+        "mattress",
+        "bed",
+        "beds",
+        "bedding",
+        "linens",
+        "massage",
+        "bluetooth",
+        "zero",
+        "zéro",
+        "gravite",
+        "gravité",
+        "tele",
+        "télé",
+        "service",
+        "services",
+        "insurance",
+        "assurance",
+        "mortgage",
+        "loan",
+        "credit",
+        "banking",
+        "banque",
+        "expert",
+        "experts",
+        "online",
+        "ligne",
+    }
+    matched = sorted(term for term in commercial_terms if term in tokens)
+    if matched:
+        return True, f"commercial_terms={','.join(matched[:4])}"
+    if numeric_hint and any(term in tokens for term in {"promo", "offre", "achat", "store", "magasin", "card", "carte"}):
+        return True, "numeric_offer_context"
+    return False, "no_commercial_context"
+
+
+def _ocr_context_needs_express_confirmation(
+    result_payload: dict[str, object] | None,
+    ocr_text: str,
+    job_id: str | None,
+) -> tuple[bool, str]:
+    if not isinstance(result_payload, dict):
+        return False, "invalid_result"
+
+    has_context, context_reason = _ocr_text_has_commercial_context(ocr_text)
+    if has_context:
+        return False, context_reason
+
+    raw_category = str(result_payload.get("category", "") or "").strip()
+    if not raw_category:
+        return False, "category_missing"
+
+    mapped = category_mapper.map_category(
+        raw_category=raw_category,
+        job_id=job_id,
+        suggested_categories_text="",
+        predicted_brand=str(result_payload.get("brand", "") or ""),
+        ocr_summary="",
+    )
+    canonical = str(mapped.get("canonical_category", "") or raw_category)
+    score_raw = mapped.get("category_match_score", 0.0)
+    try:
+        score = float(score_raw or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+
+    generic_terms = {
+        "services",
+        "service",
+        "financial",
+        "education",
+        "educational",
+        "media",
+        "programming",
+        "organization",
+        "institutions",
+        "institution",
+        "documentary",
+        "historical",
+        "nonprofit",
+        "retail",
+        "technology",
+        "telecommunications",
+        "insurance",
+        "banking",
+    }
+    category_tokens = set(re.findall(r"[a-z0-9']{2,}", _normalize_ocr(canonical)))
+    if category_tokens & generic_terms:
+        return True, f"generic_category={canonical!r} without commercial OCR context"
+    if len(category_tokens) <= 3 and score >= 0.99:
+        return True, f"short_exact_category={canonical!r} score={score:.4f} without commercial OCR context"
+    return False, f"specific_category={canonical!r} score={score:.4f}"
+
+
+def _ocr_text_lacks_context(text: str) -> tuple[bool, str]:
+    cleaned_lines: list[str] = []
+    seen_lines: set[str] = set()
+    for raw_line in (text or "").splitlines():
+        line = re.sub(r"\[HUGE\]", " ", raw_line, flags=re.IGNORECASE)
+        line = re.sub(r"\s+", " ", line).strip(" -•\t")
+        if not line:
+            continue
+        normalized_line = _normalize_ocr(line)
+        if normalized_line in seen_lines:
+            continue
+        cleaned_lines.append(line)
+        seen_lines.add(normalized_line)
+
+    tokens = re.findall(r"[a-z0-9.]{2,}", " ".join(cleaned_lines).lower())
+    signal_tokens = [token for token in tokens if not token.isdigit()]
+    if any("." in token and len(token) >= 6 for token in signal_tokens):
+        return False, "domain_present"
+
+    compact_len = len(" ".join(cleaned_lines))
+    sparse_threshold = _resolve_ocr_context_sparse_tokens()
+    if compact_len <= _resolve_ocr_context_short_chars():
+        return True, f"short_text_chars={compact_len}"
+    if len(cleaned_lines) <= 1 and len(signal_tokens) <= sparse_threshold:
+        return True, f"single_line_sparse_tokens={len(signal_tokens)}"
+    if len(set(signal_tokens)) <= sparse_threshold:
+        return True, f"sparse_tokens={len(set(signal_tokens))}"
+    return False, "rich_ocr"
+
+
+def _ocr_context_visual_mismatch(
+    sorted_vision: dict[str, float],
+    result_payload: dict[str, object] | None,
+    job_id: str | None,
+    ocr_text: str,
+) -> tuple[bool, str]:
+    if not sorted_vision or not isinstance(result_payload, dict):
+        return False, "vision_unavailable"
+
+    ordered_scores = list(sorted_vision.items())
+    top_category, top_score = ordered_scores[0]
+    second_score = ordered_scores[1][1] if len(ordered_scores) > 1 else 0.0
+    if float(top_score) < _resolve_ocr_context_vision_score_threshold():
+        return False, f"vision_score_too_low={float(top_score):.4f}"
+    if (float(top_score) - float(second_score)) < _resolve_ocr_context_vision_margin_threshold():
+        return False, f"vision_margin_too_low={float(top_score) - float(second_score):.4f}"
+
+    category_match = category_mapper.map_category(
+        raw_category=str(result_payload.get("category", "") or ""),
+        job_id=job_id,
+        suggested_categories_text="",
+        predicted_brand=str(result_payload.get("brand", "") or ""),
+        ocr_summary=ocr_text,
+    )
+    canonical_category = str(category_match.get("canonical_category", "") or "")
+    if not canonical_category:
+        return False, "category_map_empty"
+    if canonical_category == top_category:
+        return False, f"vision_matches={canonical_category}"
+    return True, f"vision_mismatch={canonical_category}->{top_category}"
+
+
+def _ocr_context_mapper_is_weak(
+    result_payload: dict[str, object] | None,
+    job_id: str | None,
+    ocr_text: str,
+) -> tuple[bool, str]:
+    if not isinstance(result_payload, dict):
+        return False, "invalid_result"
+    category_match = category_mapper.map_category(
+        raw_category=str(result_payload.get("category", "") or ""),
+        job_id=job_id,
+        suggested_categories_text="",
+        predicted_brand=str(result_payload.get("brand", "") or ""),
+        ocr_summary=ocr_text,
+    )
+    score_raw = category_match.get("category_match_score", 0.0)
+    try:
+        score = float(score_raw or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    threshold = _resolve_ocr_context_mapper_score_threshold()
+    if score < threshold:
+        return True, f"mapper_score={score:.4f}<threshold={threshold:.2f}"
+    return False, f"mapper_score={score:.4f}"
+
+
+def _ocr_evidence_supports_result(
+    result_payload: dict[str, object] | None,
+    ocr_text: str,
+    job_id: str | None,
+) -> tuple[bool, str]:
+    if not _ocr_text_has_signal(ocr_text):
+        return True, "ocr_support_unavailable"
+    if not isinstance(result_payload, dict):
+        return False, "invalid_result"
+
+    llm_match = category_mapper.map_category(
+        raw_category=str(result_payload.get("category", "") or ""),
+        job_id=job_id,
+        suggested_categories_text="",
+        predicted_brand="",
+        ocr_summary="",
+    )
+    llm_canonical = str(llm_match.get("canonical_category", "") or "")
+
+    ocr_match = category_mapper.map_category(
+        raw_category="unknown",
+        job_id=job_id,
+        suggested_categories_text="",
+        predicted_brand="",
+        ocr_summary=ocr_text,
+    )
+    ocr_canonical = str(ocr_match.get("canonical_category", "") or "")
+    ocr_score_raw = ocr_match.get("category_match_score", 0.0)
+    try:
+        ocr_score = float(ocr_score_raw or 0.0)
+    except (TypeError, ValueError):
+        ocr_score = 0.0
+
+    threshold = _resolve_ocr_support_score_threshold()
+    if ocr_score >= threshold and ocr_canonical and llm_canonical and ocr_canonical != llm_canonical:
+        return False, f"ocr_support={ocr_canonical!r} score={ocr_score:.4f} llm={llm_canonical!r}"
+    return True, f"ocr_support={ocr_canonical!r} score={ocr_score:.4f}"
+
+
+def _should_run_ocr_context_rescue(
+    scan_mode: str,
+    express_mode: bool,
+    ocr_text: str,
+    res: dict[str, object] | None,
+    source_frames: list[dict[str, object]],
+    sorted_vision: dict[str, float],
+    job_id: str | None,
+) -> tuple[bool, str]:
+    if not _ocr_context_rescue_enabled(scan_mode, express_mode):
+        return False, "disabled"
+    if len(source_frames) < 2:
+        return False, "insufficient_frames"
+    if not _ocr_text_has_signal(ocr_text):
+        return False, "ocr_blank"
+    blank_result, blank_reason = _llm_result_is_blank(res)
+    if blank_result:
+        return False, f"blank_result={blank_reason}"
+
+    lacks_context, context_reason = _ocr_text_lacks_context(ocr_text)
+    if not lacks_context:
+        return False, context_reason
+
+    confidence_raw = res.get("confidence", 0.0) if isinstance(res, dict) else 0.0
+    try:
+        confidence = float(confidence_raw)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < _resolve_ocr_context_confidence_threshold():
+        return True, f"{context_reason};low_confidence={confidence:.2f}"
+
+    mapper_weak, mapper_reason = _ocr_context_mapper_is_weak(res, job_id, ocr_text)
+    if mapper_weak:
+        return True, f"{context_reason};{mapper_reason}"
+
+    if _ocr_context_use_vision_assist():
+        visual_mismatch, visual_reason = _ocr_context_visual_mismatch(sorted_vision, res, job_id, ocr_text)
+        if visual_mismatch:
+            return True, f"{context_reason};{visual_reason}"
+        return False, f"{context_reason};{mapper_reason};{visual_reason}"
+
+    return False, f"{context_reason};{mapper_reason};vision_assist_disabled"
+
+
+def _clean_ocr_context_line(line: str) -> str:
+    cleaned = re.sub(r"\[HUGE\]", " ", line or "", flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -•\t")
+    return cleaned
+
+
+def _build_ocr_context_pack(primary_text: str, expanded_text: str) -> str:
+    lines: list[str] = []
+    seen_lines: set[str] = set()
+    max_chars = _resolve_ocr_context_max_chars()
+    max_lines = _resolve_ocr_context_max_lines()
+
+    for text in (primary_text or "", expanded_text or ""):
+        for raw_line in text.splitlines():
+            line = _clean_ocr_context_line(raw_line)
+            if not _ocr_text_has_signal(line):
+                continue
+            normalized_line = _normalize_ocr(line)
+            if normalized_line in seen_lines:
+                continue
+            seen_lines.add(normalized_line)
+            lines.append(line)
+            if len(lines) >= max_lines:
+                break
+        if len(lines) >= max_lines:
+            break
+
+    if not lines:
+        return expanded_text or primary_text
+
+    compact_lines: list[str] = []
+    remaining = max_chars
+    for line in lines:
+        clipped = line[:remaining].rstrip()
+        if not clipped:
+            break
+        compact_lines.append(clipped)
+        remaining -= len(clipped) + 1
+        if remaining <= 0:
+            break
+    return "\n".join(compact_lines)
 
 
 def _limit_rescue_frames(frames: list[dict[str, object]], max_frames: int) -> list[dict[str, object]]:
@@ -1046,6 +1487,8 @@ def process_single_video(
             fallback_res: dict[str, object],
             detail: str = "",
             reason: str = "",
+            trace_ocr_text: str | None = None,
+            ocr_mode_used: str = "",
         ) -> None:
             nonlocal frames, ocr_text, res, sorted_vision, per_frame_vision
             frames = fallback_frames
@@ -1061,9 +1504,9 @@ def process_single_video(
                 source_frames=fallback_frames,
                 detail=detail,
                 trigger_reason=reason,
-                ocr_text_value=fallback_ocr_text,
+                ocr_text_value=trace_ocr_text if trace_ocr_text is not None else fallback_ocr_text,
                 result_payload=fallback_res,
-                ocr_mode_used="image-only" if fallback_type == "express_rescue" else "",
+                ocr_mode_used=ocr_mode_used or ("image-only" if fallback_type == "express_rescue" else ""),
                 llm_mode="express" if fallback_type == "express_rescue" else "standard",
             )
 
@@ -1073,6 +1516,7 @@ def process_single_video(
             detail: str,
             reason: str,
             ocr_mode_override: str | None = None,
+            llm_text_builder: Callable[[str], str] | None = None,
         ) -> tuple[bool, str]:
             attempt_started_at = time.perf_counter()
             if not fallback_frames:
@@ -1130,13 +1574,14 @@ def process_single_video(
                     elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
                 )
                 return False, fallback_ocr_text
+            fallback_llm_text = llm_text_builder(fallback_ocr_text) if llm_text_builder else fallback_ocr_text
             fallback_tail_image = get_pil_image(fallback_frames[-1]) if send_llm_frame else None
             if stage_callback:
                 stage_callback("llm", f"retrying {fallback_type} provider={p.lower()} model={m}")
             fallback_res = llm_engine.query_pipeline(
                 p,
                 m,
-                fallback_ocr_text,
+                fallback_llm_text,
                 fallback_tail_image,
                 override,
                 enable_search,
@@ -1160,13 +1605,95 @@ def process_single_video(
                     source_frames=fallback_frames,
                     detail=detail,
                     trigger_reason=reason,
-                    ocr_text_value=fallback_ocr_text,
+                    ocr_text_value=fallback_llm_text,
                     result_payload=fallback_res,
                     ocr_mode_used=ocr_mode_override or "",
                     evidence_note=f"Classifier response was rejected: {fallback_blank_reason}.",
                     elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
                 )
                 return False, fallback_ocr_text
+            ocr_supports_result, ocr_support_reason = _ocr_evidence_supports_result(
+                fallback_res,
+                fallback_llm_text,
+                job_id,
+            )
+            if not ocr_supports_result:
+                logger.info(
+                    "[%s] fallback_rejected type=%s reason=%s trigger=%s",
+                    url,
+                    fallback_type,
+                    ocr_support_reason,
+                    reason,
+                )
+                _append_trace_attempt(
+                    attempt_type=fallback_type,
+                    title=fallback_type.replace("_", " ").title(),
+                    status="rejected",
+                    source_frames=fallback_frames,
+                    detail=detail,
+                    trigger_reason=reason,
+                    ocr_text_value=fallback_llm_text,
+                    result_payload=fallback_res,
+                    ocr_mode_used=ocr_mode_override or "",
+                    evidence_note=f"Classifier response was rejected because OCR evidence supported a different category: {ocr_support_reason}.",
+                    elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
+                )
+                return False, fallback_ocr_text
+            challenge_express, challenge_reason = (False, "")
+            if fallback_type == "ocr_context_rescue":
+                challenge_express, challenge_reason = _ocr_context_needs_express_confirmation(
+                    fallback_res,
+                    fallback_llm_text,
+                    job_id,
+                )
+            if challenge_express:
+                logger.info(
+                    "[%s] fallback_provisional type=%s reason=%s trigger=%s",
+                    url,
+                    fallback_type,
+                    challenge_reason,
+                    reason,
+                )
+                express_accepted = _run_express_fallback(
+                    fallback_type="express_rescue",
+                    reason=f"{reason}; {challenge_reason}",
+                    fallback_ocr_text=fallback_ocr_text,
+                )
+                if express_accepted:
+                    attempts = processing_trace.get("attempts")
+                    rejected_attempt = {
+                        "attempt_type": fallback_type,
+                        "title": fallback_type.replace("_", " ").title(),
+                        "status": "rejected",
+                        "detail": detail,
+                        "trigger_reason": reason,
+                        "frame_count": len(fallback_frames or []),
+                        "frame_times": _frame_times_snapshot(fallback_frames or []),
+                        "ocr_excerpt": _ocr_excerpt(fallback_llm_text),
+                        "ocr_signal": _ocr_text_has_signal(fallback_llm_text),
+                        "ocr_mode": ocr_mode_override or "",
+                        "llm_mode": "standard",
+                        "evidence_note": f"Text rescue was superseded by express rescue because {challenge_reason}.",
+                        "elapsed_ms": round((time.perf_counter() - attempt_started_at) * 1000.0, 1),
+                        "result": _result_snapshot(fallback_res),
+                    }
+                    if isinstance(attempts, list) and attempts:
+                        attempts.insert(len(attempts) - 1, rejected_attempt)
+                    else:
+                        _append_trace_attempt(
+                            attempt_type=fallback_type,
+                            title=fallback_type.replace("_", " ").title(),
+                            status="rejected",
+                            source_frames=fallback_frames,
+                            detail=detail,
+                            trigger_reason=reason,
+                            ocr_text_value=fallback_llm_text,
+                            result_payload=fallback_res,
+                            ocr_mode_used=ocr_mode_override or "",
+                            evidence_note=f"Text rescue was superseded by express rescue because {challenge_reason}.",
+                            elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
+                        )
+                    return True, fallback_ocr_text
             _apply_fallback_result(
                 fallback_type,
                 fallback_frames,
@@ -1174,6 +1701,8 @@ def process_single_video(
                 fallback_res,
                 detail=detail,
                 reason=reason,
+                trace_ocr_text=fallback_llm_text if llm_text_builder else None,
+                ocr_mode_used=ocr_mode_override or "",
             )
             attempts = processing_trace.get("attempts")
             if isinstance(attempts, list) and attempts:
@@ -1298,12 +1827,6 @@ def process_single_video(
                 rescue_cap.release()
             return _limit_rescue_frames(rescue_frames, _resolve_full_video_rescue_max_frames())
 
-        rescue_needed, rescue_reason = _should_run_ocr_edge_rescue(
-            scan_mode=sm,
-            express_mode=express_mode,
-            ocr_text=ocr_text,
-            res=res,
-        )
         initial_blank, initial_blank_reason = _llm_result_is_blank(res)
         initial_detail = "express image-only path" if express_mode else (
             "ocr skipped after high-confidence multimodal result" if not ocr_text and res is not None else "tail scan"
@@ -1321,6 +1844,35 @@ def process_single_video(
             llm_mode="express" if express_mode else "standard",
             elapsed_ms=(time.perf_counter() - pipeline_started_at) * 1000.0,
         )
+        context_rescue_needed, context_rescue_reason = _should_run_ocr_context_rescue(
+            scan_mode=sm,
+            express_mode=express_mode,
+            ocr_text=ocr_text,
+            res=res,
+            source_frames=initial_frames,
+            sorted_vision=sorted_vision,
+            job_id=job_id,
+        )
+        context_rescue_failed = False
+        if context_rescue_needed:
+            context_rescue_mode = _resolve_rescue_ocr_mode(oe, om)
+            context_rescue_failed = not _run_text_fallback(
+                fallback_type="ocr_context_rescue",
+                fallback_frames=initial_frames,
+                detail="aggregated tail context",
+                reason=context_rescue_reason,
+                ocr_mode_override=context_rescue_mode,
+                llm_text_builder=lambda expanded_text: _build_ocr_context_pack(ocr_text, expanded_text),
+            )[0]
+        rescue_needed, rescue_reason = _should_run_ocr_edge_rescue(
+            scan_mode=sm,
+            express_mode=express_mode,
+            ocr_text=ocr_text,
+            res=res,
+        )
+        if context_rescue_failed and not rescue_needed:
+            rescue_needed = True
+            rescue_reason = context_rescue_reason
         if rescue_needed:
             if stage_callback:
                 stage_callback("ocr", f"rescue triggered; reason={rescue_reason}")
