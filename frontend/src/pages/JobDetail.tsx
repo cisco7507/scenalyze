@@ -17,6 +17,7 @@ import {
   getJobArtifacts,
   getJobExplanation,
   getJobVideoUrl,
+  getJobVideoPosterUrl,
   exportResultsCSV,
   copyToClipboard,
 } from "../lib/api";
@@ -571,6 +572,37 @@ function buildOperatorNotes(
   }
 
   return Array.from(new Set(notes.filter(Boolean))).slice(0, 6);
+}
+
+function buildReasoningSummary(
+  operatorNotes: string[],
+  acceptedAttempt: ProcessingTraceAttempt | null,
+  brand: string,
+  category: string,
+  evidenceTerms: ReasoningTerm[],
+): string {
+  const firstOperatorNote = operatorNotes.find((note) => note.trim().length > 0);
+  if (firstOperatorNote) return firstOperatorNote;
+
+  const acceptedTitle = formatAttemptTitle(acceptedAttempt);
+  const primaryEvidence = evidenceTerms
+    .slice(0, 3)
+    .map((term) => term.text)
+    .filter(Boolean);
+
+  if (brand && category && primaryEvidence.length > 0) {
+    return `Chosen as ${brand} in ${category} based on ${primaryEvidence.join(", ")}.`;
+  }
+  if (brand && category && acceptedAttempt?.attempt_type && acceptedAttempt.attempt_type !== "initial") {
+    return `Recovered via ${acceptedTitle.toLowerCase()} and finalized as ${brand} in ${category}.`;
+  }
+  if (brand && category) {
+    return `Finalized as ${brand} in ${category}.`;
+  }
+  if (acceptedAttempt?.detail) {
+    return `${acceptedTitle} completed with ${acceptedAttempt.detail.toLowerCase()}.`;
+  }
+  return "The classifier produced a result, but there was not enough structured evidence to summarize it cleanly.";
 }
 
 type ExplainMethodGuideEntry = {
@@ -1128,13 +1160,6 @@ export function JobDetail() {
       classifyReasoningTerm(term, brandText),
     );
   }, [reasoningText, brandText]);
-  const visibleQuotedTerms = showAllReasoningTerms
-    ? quotedTermsAll
-    : quotedTermsAll.slice(0, 6);
-  const hiddenQuotedTermsCount = Math.max(
-    0,
-    quotedTermsAll.length - visibleQuotedTerms.length,
-  );
   const highlightedReasoning = useMemo<HighlightedReasoningPart[]>(() => {
     if (!reasoningDisplayText) return [];
     if (quotedTermsAll.length === 0) return [reasoningDisplayText];
@@ -1494,6 +1519,8 @@ export function JobDetail() {
   const progressPercent = Math.round(job.progress ?? 0);
 
   const frameItems = artifacts?.latest_frames || [];
+  const videoPosterUrl =
+    videoSource?.type === "local" ? getJobVideoPosterUrl(job.job_id) : undefined;
   const perFrameVision = Array.isArray(artifacts?.per_frame_vision)
     ? artifacts.per_frame_vision
     : [];
@@ -1629,6 +1656,25 @@ export function JobDetail() {
   );
   const usedExplainMethodGuide = EXPLAIN_METHOD_GUIDE.filter((entry) =>
     explanationAttempts.some((attempt) => attempt.attempt_type === entry.key),
+  );
+  const orderedReasoningTerms: ReasoningTerm[] = [
+    ...quotedTermsAll.filter((term) => term.type === "brand"),
+    ...quotedTermsAll.filter((term) => term.type === "url"),
+    ...quotedTermsAll.filter((term) => term.type === "evidence"),
+  ];
+  const visibleReasoningTerms = showAllReasoningTerms
+    ? orderedReasoningTerms
+    : orderedReasoningTerms.slice(0, 5);
+  const hiddenReasoningTermsCount = Math.max(
+    0,
+    orderedReasoningTerms.length - visibleReasoningTerms.length,
+  );
+  const reasoningSummary = buildReasoningSummary(
+    operatorNotes,
+    acceptedExplanationAttempt,
+    brandText,
+    categoryText,
+    orderedReasoningTerms,
   );
   const latestExplainFrames = Array.isArray(explanationEvidence?.latest_frames)
     ? explanationEvidence.latest_frames
@@ -1839,10 +1885,10 @@ export function JobDetail() {
 
       {firstRow && firstRow.Brand !== "Err" && (
         <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
-          <div className="bg-white border border-gray-200 border-l-[3px] border-l-primary-500 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 border-l-[3px] border-l-primary-500 rounded-xl p-6 shadow-sm">
             <div className="flex items-center justify-between gap-3 mb-3">
               <h3 className="text-xs uppercase tracking-wider text-gray-400 font-bold">
-                💡 LLM Reasoning
+                Evidence &amp; Reasoning
               </h3>
               <CopyButton
                 text={reasoningText || "No reasoning provided by the LLM."}
@@ -1850,80 +1896,128 @@ export function JobDetail() {
               />
             </div>
 
-            {isRecoveredReasoning && (
-              <div className="mb-3 inline-flex items-center gap-1 text-amber-700 border border-amber-200 bg-amber-50 rounded px-2 py-1 text-xs">
-                <span>🔍</span>
-                <span>Web-assisted recovery</span>
-              </div>
-            )}
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {acceptedMethodGuideEntry ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-[11px] font-semibold text-primary-700">
+                  <span>Accepted Path</span>
+                  <span className="font-normal text-primary-600">
+                    {acceptedMethodGuideEntry.label}
+                  </span>
+                </span>
+              ) : null}
+              {isRecoveredReasoning && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                  <span>Web-assisted recovery</span>
+                </span>
+              )}
+              {typeof rawLlmConfidence === "number" ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[11px] font-semibold text-gray-700">
+                  <span>LLM</span>
+                  <span className="font-mono text-gray-900">
+                    {rawLlmConfidence.toFixed(2)}
+                  </span>
+                </span>
+              ) : null}
+            </div>
 
-            {visibleQuotedTerms.length > 0 && (
-              <div className="mb-4">
-                <div className="flex flex-wrap gap-2">
-                  {visibleQuotedTerms.map((term, idx) => (
-                    <span
-                      key={`${term.text}-${idx}`}
-                      role="status"
-                      className={reasoningPillClass(term.type)}
-                    >
-                      {term.text}
-                    </span>
-                  ))}
-                  {hiddenQuotedTermsCount > 0 && !showAllReasoningTerms && (
-                    <button
-                      type="button"
-                      onClick={() => setShowAllReasoningTerms(true)}
-                      className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
-                    >
-                      +{hiddenQuotedTermsCount} more
-                    </button>
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
+              <div className="space-y-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold mb-3">
+                    Key Evidence
+                  </div>
+                  {visibleReasoningTerms.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {visibleReasoningTerms.map((term, idx) => (
+                        <span
+                          key={`${term.text}-${idx}`}
+                          role="status"
+                          className={reasoningPillClass(term.type)}
+                        >
+                          {term.text}
+                        </span>
+                      ))}
+                      {hiddenReasoningTermsCount > 0 && !showAllReasoningTerms && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllReasoningTerms(true)}
+                          className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          +{hiddenReasoningTermsCount} more evidence
+                        </button>
+                      )}
+                      {orderedReasoningTerms.length > 5 && showAllReasoningTerms && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllReasoningTerms(false)}
+                          className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          Show less
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-500">
+                      No structured evidence terms were extracted from the reasoning text.
+                    </div>
                   )}
-                  {quotedTermsAll.length > 6 && showAllReasoningTerms && (
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold mb-2">
+                    Decision Summary
+                  </div>
+                  <p className="text-sm leading-7 text-gray-700">
+                    {reasoningSummary}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold">
+                      LLM Narrative
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Full model prose with inline evidence highlights.
+                    </div>
+                  </div>
+                  {reasoningText.length > 500 && (
                     <button
                       type="button"
-                      onClick={() => setShowAllReasoningTerms(false)}
-                      className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                      onClick={() => setShowFullReasoning((current) => !current)}
+                      className="text-xs text-cyan-700 hover:text-cyan-800 underline underline-offset-2"
                     >
-                      Show less
+                      {showFullReasoning ? "Show less" : "Show more"}
                     </button>
                   )}
                 </div>
-                <div className="border-b border-gray-200 mt-4" />
-              </div>
-            )}
 
-            {reasoningText ? (
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {highlightedReasoning.map((part, idx) =>
-                  typeof part === "string" ? (
-                    <span key={idx}>{part}</span>
-                  ) : (
-                    <span key={idx} className={reasoningInlineClass(part.type)}>
-                      {part.text}
-                    </span>
-                  ),
+                {reasoningText ? (
+                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                    {highlightedReasoning.map((part, idx) =>
+                      typeof part === "string" ? (
+                        <span key={idx}>{part}</span>
+                      ) : (
+                        <span key={idx} className={reasoningInlineClass(part.type)}>
+                          {part.text}
+                        </span>
+                      ),
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-gray-400 italic text-sm">
+                    No reasoning provided by the LLM.
+                  </p>
                 )}
-              </p>
-            ) : (
-              <p className="text-gray-400 italic text-sm">
-                No reasoning provided by the LLM.
-              </p>
-            )}
-
-            {reasoningText.length > 500 && (
-              <button
-                type="button"
-                onClick={() => setShowFullReasoning((current) => !current)}
-                className="mt-3 text-xs text-cyan-700 hover:text-cyan-800 underline underline-offset-2"
-              >
-                {showFullReasoning ? "Show less" : "Show more"}
-              </button>
-            )}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-visible">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
           {videoAvailable && videoSource && (
             <button
@@ -1974,6 +2068,7 @@ export function JobDetail() {
                   controls
                   preload="auto"
                   playsInline
+                  poster={videoPosterUrl}
                   className="w-full max-h-[500px] rounded-lg border border-gray-300 bg-black"
                   onLoadedMetadata={primeVideoFirstFrame}
                   onLoadedData={primeVideoFirstFrame}
@@ -2053,44 +2148,21 @@ export function JobDetail() {
                       label="Method"
                       help="How the final category was chosen. For example, Embeddings means the raw category text was matched against taxonomy labels in embedding space."
                     />
-                    <div
-                      className="font-medium text-gray-800"
-                      title={`Mapper method: ${mapperMethodDisplay}`}
-                    >
-                      {mapperMethodDisplay}
-                    </div>
+                    <div className="font-medium text-gray-800">{mapperMethodDisplay}</div>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="Mapper Score"
                       help="Strength of the final taxonomy match. Higher means the mapper considered the chosen canonical category a closer fit to the source label or evidence."
                     />
-                    <div
-                      className="font-mono text-cyan-700"
-                      title={
-                        mapperScoreValue === null
-                          ? "No mapper score available."
-                          : `Mapper score: ${mapperScoreValue.toFixed(6)}`
-                      }
-                    >
-                      {mapperScoreDisplay}
-                    </div>
+                    <div className="font-mono text-cyan-700">{mapperScoreDisplay}</div>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="LLM Confidence"
                       help="The classification model's own confidence in the brand/category answer before the final taxonomy mapping step."
                     />
-                    <div
-                      className="font-mono text-gray-800"
-                      title={
-                        mapperConfidenceValue === null
-                          ? "No LLM confidence available."
-                          : `LLM confidence: ${mapperConfidenceValue.toFixed(6)}`
-                      }
-                    >
-                      {mapperConfidenceDisplay}
-                    </div>
+                    <div className="font-mono text-gray-800">{mapperConfidenceDisplay}</div>
                   </div>
                 </div>
               </div>
