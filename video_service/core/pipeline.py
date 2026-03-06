@@ -433,6 +433,7 @@ def process_single_video(
         logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
         express_mode = bool(express_mode)
         send_llm_frame = bool(enable_llm_frame or express_mode)
+        visual_debug: dict[str, object] | None = None
         if express_mode:
             if stage_callback:
                 stage_callback("frame_extract", "express mode enabled; extracting static tail frame")
@@ -470,6 +471,7 @@ def process_single_video(
             stage_callback("frame_extract", f"extracted {len(frames)} frames ({extracted_mode})")
         
         def _do_vision() -> tuple[dict[str, float], list[dict[str, object]]]:
+            nonlocal visual_debug
             logger.debug("[%s] parallel_task_start: vision", url)
             try:
                 ready, reason = category_mapper.ensure_vision_text_features()
@@ -516,6 +518,16 @@ def process_single_video(
                     )
 
                 scores = probs.mean(dim=0).cpu().numpy()
+                visual_debug = {
+                    "image_feature": image_features.mean(dim=0).detach().cpu(),
+                    "score_vector": probs.mean(dim=0).detach().cpu(),
+                    "backend": getattr(categories_runtime, "SIGLIP_ID", "SigLIP"),
+                    "query_label": (
+                        f"Frame @ {frames[0]['time']:.1f}s"
+                        if len(frames) == 1
+                        else f"Mean of {len(frames)} sampled frames"
+                    ),
+                }
                 sorted_vision_local = dict(
                     sorted(
                         {
@@ -797,6 +809,35 @@ def process_single_video(
         )
         cat_out = category_match["canonical_category"]
         cat_id_out = category_match["category_id"]
+        signal_artifacts = {
+            "mapper_plot": None,
+            "visual_plot": None,
+        }
+        if hasattr(category_mapper, "build_mapper_vector_plot"):
+            try:
+                signal_artifacts["mapper_plot"] = category_mapper.build_mapper_vector_plot(
+                    raw_category=str(res.get("category", "Unknown") or "Unknown"),
+                    selected_category=str(cat_out or ""),
+                    predicted_brand=str(res.get("brand", "Unknown") or "Unknown"),
+                    ocr_summary=ocr_text,
+                )
+            except Exception as exc:
+                logger.debug("[%s] mapper_vector_plot_failed: %s", url, exc)
+        if (
+            visual_debug
+            and hasattr(category_mapper, "build_visual_vector_plot")
+            and enable_vision_board
+        ):
+            try:
+                signal_artifacts["visual_plot"] = category_mapper.build_visual_vector_plot(
+                    image_feature=visual_debug.get("image_feature"),
+                    score_vector=visual_debug.get("score_vector"),
+                    selected_category=str(cat_out or ""),
+                    backend_name=str(visual_debug.get("backend") or "SigLIP"),
+                    query_label=str(visual_debug.get("query_label") or "Sampled frame"),
+                )
+            except Exception as exc:
+                logger.debug("[%s] visual_vector_plot_failed: %s", url, exc)
         row = [
             url,
             res.get("brand", "Unknown"),
@@ -808,11 +849,11 @@ def process_single_video(
             category_match["category_match_score"],
         ]
         
-        return sorted_vision, per_frame_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row
+        return sorted_vision, per_frame_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row, signal_artifacts
         
     except Exception as e: 
         logger.error(f"[{url}] Pipeline Worker Crash: {str(e)}", exc_info=True)
-        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None]
+        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None}
 
 def run_pipeline_job(
     src,
@@ -876,6 +917,11 @@ def run_pipeline_job(
             for u in urls_list
         }
         for fut in concurrent.futures.as_completed(futures):
-            v, pfv, t, d, g, row = fut.result()
+            result = fut.result()
+            if len(result) == 7:
+                v, pfv, t, d, g, row, signal_artifacts = result
+            else:
+                v, pfv, t, d, g, row = result
+                signal_artifacts = {}
             master.append(row)
-            yield v, pfv, t, d, g, pd.DataFrame(master, columns=RESULT_COLUMNS)
+            yield v, pfv, t, d, g, pd.DataFrame(master, columns=RESULT_COLUMNS), signal_artifacts

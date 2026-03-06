@@ -63,7 +63,7 @@ def test_process_single_video_express_mode_bypasses_ocr(monkeypatch):
     monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
     monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
 
-    vision_scores, per_frame_vision, ocr_text, _, gallery, row = pipeline_module.process_single_video(
+    vision_scores, per_frame_vision, ocr_text, _, gallery, row, _ = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",

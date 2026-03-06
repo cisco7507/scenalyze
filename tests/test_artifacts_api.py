@@ -43,6 +43,8 @@ def test_job_artifacts_endpoint_returns_required_keys_when_empty(monkeypatch):
     assert "ocr_text" in payload["artifacts"]
     assert "vision_board" in payload["artifacts"]
     assert "category_mapper" in payload["artifacts"]
+    assert "vector_plot" in payload["artifacts"]["vision_board"]
+    assert "vector_plot" in payload["artifacts"]["category_mapper"]
 
 
 def test_job_settings_accept_enable_web_search_alias():

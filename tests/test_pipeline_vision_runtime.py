@@ -94,7 +94,7 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
     def _stage_cb(stage, detail):
         stages.append((stage, detail))
 
-    vision_scores, per_frame_vision, ocr_text, _, _, row = pipeline_module.process_single_video(
+    vision_scores, per_frame_vision, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",
@@ -117,6 +117,8 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
     assert list(vision_scores.keys())[0] == "Category One"
     assert row[1] == "Brand X"
     assert row[2] == "101"
+    assert signal_artifacts["mapper_plot"] is None or signal_artifacts["mapper_plot"]["space"] == "mapper"
+    assert signal_artifacts["visual_plot"] is None or signal_artifacts["visual_plot"]["space"] == "visual"
     assert any(stage == "vision" for stage, _ in stages)
 
 
@@ -631,7 +633,7 @@ def test_pipeline_skips_ocr_when_multimodal_tail_is_high_confidence(monkeypatch)
         pipeline_module.categories_runtime, "siglip_processor", _DummyProcessor()
     )
 
-    _, _, ocr_text, _, _, row = pipeline_module.process_single_video(
+    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",
@@ -751,7 +753,7 @@ def test_pipeline_runs_ocr_when_multimodal_tail_confidence_is_too_low(monkeypatc
         pipeline_module.categories_runtime, "siglip_processor", _DummyProcessor()
     )
 
-    _, _, ocr_text, _, _, row = pipeline_module.process_single_video(
+    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",

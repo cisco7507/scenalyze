@@ -62,6 +62,76 @@ def normalize_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
     return tensor / norms
 
 
+def _to_numpy_vector(value: Any, *, source: str) -> np.ndarray:
+    if torch.is_tensor(value):
+        tensor = value.detach().cpu()
+        if tensor.dim() == 2:
+            if tensor.shape[0] != 1:
+                raise ValueError(f"{source} expected a single vector, got shape {tuple(tensor.shape)}")
+            tensor = tensor[0]
+        return tensor.numpy().astype(np.float32, copy=False)
+    array = np.asarray(value, dtype=np.float32)
+    if array.ndim == 2:
+        if array.shape[0] != 1:
+            raise ValueError(f"{source} expected a single vector, got shape {array.shape}")
+        array = array[0]
+    return array
+
+
+def _project_vectors_2d(vectors: list[np.ndarray]) -> np.ndarray:
+    if not vectors:
+        return np.zeros((0, 2), dtype=np.float32)
+    matrix = np.stack(vectors).astype(np.float32, copy=False)
+    centered = matrix - matrix.mean(axis=0, keepdims=True)
+    if centered.shape[0] == 1:
+        return np.zeros((1, 2), dtype=np.float32)
+    try:
+        _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    except np.linalg.LinAlgError:
+        return np.zeros((centered.shape[0], 2), dtype=np.float32)
+    components = vt[:2]
+    coords = centered @ components.T
+    if coords.ndim != 2:
+        coords = np.zeros((centered.shape[0], 2), dtype=np.float32)
+    if coords.shape[1] == 1:
+        coords = np.concatenate(
+            [coords, np.zeros((coords.shape[0], 1), dtype=np.float32)],
+            axis=1,
+        )
+    return coords[:, :2].astype(np.float32, copy=False)
+
+
+def _bounds_for_coords(coords: np.ndarray) -> dict[str, float]:
+    if coords.size == 0:
+        return {"x_min": -1.0, "x_max": 1.0, "y_min": -1.0, "y_max": 1.0}
+    x_values = coords[:, 0]
+    y_values = coords[:, 1]
+    x_min = float(np.min(x_values))
+    x_max = float(np.max(x_values))
+    y_min = float(np.min(y_values))
+    y_max = float(np.max(y_values))
+    if x_min == x_max:
+        x_min -= 1.0
+        x_max += 1.0
+    if y_min == y_max:
+        y_min -= 1.0
+        y_max += 1.0
+    return {"x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max}
+
+
+def _expand_bounds(bounds: dict[str, float], padding_ratio: float = 0.18) -> dict[str, float]:
+    x_span = max(bounds["x_max"] - bounds["x_min"], 1.0)
+    y_span = max(bounds["y_max"] - bounds["y_min"], 1.0)
+    x_pad = x_span * padding_ratio
+    y_pad = y_span * padding_ratio
+    return {
+        "x_min": bounds["x_min"] - x_pad,
+        "x_max": bounds["x_max"] + x_pad,
+        "y_min": bounds["y_min"] - y_pad,
+        "y_max": bounds["y_max"] + y_pad,
+    }
+
+
 def _load_siglip_explicit():
     # Fallback path when Auto* loaders fail in some transformers/hub combinations.
     from transformers import SiglipModel, SiglipProcessor, SiglipImageProcessor, SiglipTokenizer
@@ -224,6 +294,195 @@ class CategoryMapper:
             logger.warning("category mapper inactive; attempting re-initialization")
             self._initialize_mapper()
 
+    def _resolve_query_text(
+        self,
+        raw_category: str,
+        suggested_categories_text: str = "",
+        predicted_brand: str = "",
+        ocr_summary: str = "",
+    ) -> str:
+        return select_mapping_input_text(
+            raw_category=raw_category,
+            suggested_categories_text=suggested_categories_text,
+            predicted_brand=predicted_brand,
+            ocr_summary=ocr_summary,
+        )
+
+    def build_mapper_vector_plot(
+        self,
+        raw_category: str,
+        selected_category: str,
+        predicted_brand: str = "",
+        ocr_summary: str = "",
+        top_k: int = 10,
+    ) -> dict | None:
+        if not self.active or self.embedder is None or self.category_embeddings is None:
+            return None
+
+        query_text = self._resolve_query_text(
+            raw_category=raw_category,
+            predicted_brand=predicted_brand,
+            ocr_summary=ocr_summary,
+        )
+        query_embedding = self.embedder.encode(
+            query_text,
+            convert_to_tensor=True,
+            show_progress_bar=False,
+        )
+        scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
+        candidate_count = min(max(3, top_k), len(self.categories))
+        top_indices = torch.topk(scores, k=candidate_count).indices.tolist()
+        if selected_category in self.categories:
+            selected_idx = self.categories.index(selected_category)
+            if selected_idx not in top_indices:
+                top_indices = top_indices[:-1] + [selected_idx]
+
+        query_vector = _to_numpy_vector(query_embedding, source="mapper_query")
+        category_vectors = [
+            _to_numpy_vector(self.category_embeddings[idx], source=f"mapper_category[{self.categories[idx]}]")
+            for idx in range(len(self.categories))
+        ]
+        vectors = [query_vector, *category_vectors]
+        coords = _project_vectors_2d(vectors)
+        full_bounds = _expand_bounds(_bounds_for_coords(coords), padding_ratio=0.1)
+
+        highlight_indices = set(top_indices)
+        if selected_category in self.categories:
+            highlight_indices.add(self.categories.index(selected_category))
+
+        points = [
+            {
+                "label": query_text,
+                "category_id": None,
+                "score": 1.0,
+                "kind": "query",
+                "x": float(coords[0, 0]),
+                "y": float(coords[0, 1]),
+            }
+        ]
+        highlight_coords = [coords[0]]
+        for idx, label in enumerate(self.categories):
+            score = float(scores[idx].item())
+            kind = "background"
+            if label == selected_category:
+                kind = "selected"
+            elif idx in highlight_indices:
+                kind = "neighbor"
+            points.append(
+                {
+                    "label": label,
+                    "category_id": self.cat_to_id.get(label),
+                    "score": score,
+                    "kind": kind,
+                    "x": float(coords[idx + 1, 0]),
+                    "y": float(coords[idx + 1, 1]),
+                }
+            )
+            if kind != "background":
+                highlight_coords.append(coords[idx + 1])
+
+        focus_bounds = _expand_bounds(
+            _bounds_for_coords(np.stack(highlight_coords)),
+            padding_ratio=0.25,
+        )
+
+        return {
+            "space": "mapper",
+            "title": "Mapper Space",
+            "subtitle": "Semantic neighborhood of the mapper query against nearby taxonomy labels.",
+            "backend": "all-MiniLM-L6-v2",
+            "query_label": query_text,
+            "selected_label": selected_category,
+            "selected_category_id": str(self.cat_to_id.get(selected_category, "") or ""),
+            "points": points,
+            "full_bounds": full_bounds,
+            "focus_bounds": focus_bounds,
+        }
+
+    def build_visual_vector_plot(
+        self,
+        image_feature: Any,
+        score_vector: Any,
+        selected_category: str,
+        top_k: int = 10,
+        backend_name: str = "SigLIP",
+        query_label: str = "Sampled frame",
+    ) -> dict | None:
+        if self.vision_text_features is None or not self.categories:
+            return None
+
+        image_vector = _to_numpy_vector(image_feature, source="visual_query")
+        scores_tensor = torch.as_tensor(score_vector).detach().cpu().flatten()
+        if scores_tensor.numel() != len(self.categories):
+            return None
+
+        candidate_count = min(max(4, top_k), len(self.categories))
+        top_indices = torch.topk(scores_tensor, k=candidate_count).indices.tolist()
+        selected_idx = self.categories.index(selected_category) if selected_category in self.categories else None
+        if selected_idx is not None and selected_idx not in top_indices:
+            top_indices = top_indices[:-1] + [selected_idx]
+
+        prompt_vectors = [
+            _to_numpy_vector(self.vision_text_features[idx], source=f"visual_category[{self.categories[idx]}]")
+            for idx in range(len(self.categories))
+        ]
+        vectors = [image_vector, *prompt_vectors]
+        coords = _project_vectors_2d(vectors)
+        full_bounds = _expand_bounds(_bounds_for_coords(coords), padding_ratio=0.1)
+
+        highlight_indices = set(top_indices)
+        visual_leader = self.categories[top_indices[0]] if top_indices else selected_category
+        points = [
+            {
+                "label": query_label,
+                "category_id": None,
+                "score": None,
+                "kind": "query",
+                "x": float(coords[0, 0]),
+                "y": float(coords[0, 1]),
+            }
+        ]
+        highlight_coords = [coords[0]]
+        for idx, label in enumerate(self.categories):
+            score = float(scores_tensor[idx].item())
+            kind = "background"
+            if label == selected_category:
+                kind = "selected"
+            elif label == visual_leader:
+                kind = "leader"
+            elif idx in highlight_indices:
+                kind = "neighbor"
+            points.append(
+                {
+                    "label": label,
+                    "category_id": self.cat_to_id.get(label),
+                    "score": score,
+                    "kind": kind,
+                    "x": float(coords[idx + 1, 0]),
+                    "y": float(coords[idx + 1, 1]),
+                }
+            )
+            if kind != "background":
+                highlight_coords.append(coords[idx + 1])
+
+        focus_bounds = _expand_bounds(
+            _bounds_for_coords(np.stack(highlight_coords)),
+            padding_ratio=0.25,
+        )
+
+        return {
+            "space": "visual",
+            "title": "Visual Space",
+            "subtitle": "Projected visual similarity between the sampled frame embedding and nearby category prompts.",
+            "backend": backend_name,
+            "query_label": query_label,
+            "selected_label": selected_category,
+            "selected_category_id": str(self.cat_to_id.get(selected_category, "") or ""),
+            "points": points,
+            "full_bounds": full_bounds,
+            "focus_bounds": focus_bounds,
+        }
+
     def map_category(
         self,
         raw_category,
@@ -242,7 +501,7 @@ class CategoryMapper:
                 "category_match_score": None,
             }
 
-        query_text = select_mapping_input_text(
+        query_text = self._resolve_query_text(
             raw_category=raw_category,
             suggested_categories_text=suggested_categories_text,
             predicted_brand=predicted_brand,
@@ -272,6 +531,7 @@ class CategoryMapper:
             "category_id": category_id,
             "category_match_method": "embeddings",
             "category_match_score": score,
+            "mapping_query_text": query_text,
         }
 
     def get_closest_official_category(

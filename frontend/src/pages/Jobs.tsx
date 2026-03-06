@@ -5,9 +5,59 @@ import { deleteJobsBulk, getClusterJobs, getProviderModels, submitFilePath, subm
 import type { JobStatus, JobSettings } from '../lib/api';
 import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
 import { formatDistanceToNow } from 'date-fns';
+import { HelpTooltip } from '../components/HelpTooltip';
 
 type InputMode = 'urls' | 'filepath' | 'dirpath';
 const PROVIDER_OPTIONS = ['Ollama', 'LM Studio', 'Llama Server', 'Gemini CLI'] as const;
+
+function formatStageLabel(stage?: string): string {
+  const raw = (stage || '').trim();
+  if (!raw) return 'unknown';
+  return raw.replace(/_/g, ' ');
+}
+
+function formatDurationLabel(durationSeconds?: number | null): string {
+  if (durationSeconds == null || !Number.isFinite(durationSeconds)) return '—';
+  if (durationSeconds < 60) return `${durationSeconds.toFixed(1)}s`;
+  const minutes = Math.floor(durationSeconds / 60);
+  const seconds = Math.round(durationSeconds % 60);
+  return `${minutes}m ${seconds}s`;
+}
+
+function getStatusBadgeClass(status: string): string {
+  if (status === 'completed') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (status === 'failed') return 'bg-red-50 text-red-700 border-red-200';
+  if (status === 'processing') return 'bg-blue-50 text-blue-700 border-blue-200';
+  if (status === 're-queued') return 'bg-orange-50 text-orange-700 border-orange-200';
+  return 'bg-amber-50 text-amber-700 border-amber-200';
+}
+
+function getStatusText(status: string): string {
+  return status === 're-queued' ? 'waiting (recovered)' : status;
+}
+
+function formatRelativeTimestamp(value?: string): string {
+  if (!value) return '—';
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return formatDistanceToNow(parsed, { addSuffix: true });
+}
+
+function FieldLabel({
+  label,
+  help,
+}: {
+  label: string;
+  help?: string;
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs uppercase tracking-wider font-semibold text-gray-400">
+      <span>{label}</span>
+      {help ? <HelpTooltip content={help} /> : null}
+    </label>
+  );
+}
 
 export function Jobs() {
   const [jobs, setJobs] = useState<JobStatus[]>([]);
@@ -175,6 +225,26 @@ export function Jobs() {
     );
   });
 
+  const summary = useMemo(() => {
+    const counts = {
+      total: jobs.length,
+      visible: filteredJobs.length,
+      queued: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0,
+    };
+
+    for (const job of jobs) {
+      if (job.status === 'processing') counts.processing += 1;
+      else if (job.status === 'completed') counts.completed += 1;
+      else if (job.status === 'failed') counts.failed += 1;
+      else counts.queued += 1;
+    }
+
+    return counts;
+  }, [jobs, filteredJobs.length]);
+
   const disableSubmit =
     submitLoading ||
     (inputMode === 'urls' && !urls.trim()) ||
@@ -294,28 +364,40 @@ export function Jobs() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-gray-50/80 p-4 rounded-lg border border-gray-200">
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Mode</label>
+              <FieldLabel
+                label="Mode"
+                help="Standard Pipeline uses the deterministic OCR + vision + LLM flow. ReACT Agent lets the model reason in steps and call tools during analysis."
+              />
               <select value={mode} onChange={(e) => setMode(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="pipeline">Standard Pipeline</option>
                 <option value="agent">ReACT Agent</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Web Search</label>
+              <FieldLabel
+                label="Web Search"
+                help="Lets the classifier query the web when local evidence is weak. Improves recovery on ambiguous brands but adds latency and more external dependency."
+              />
               <select value={enableWebSearch ? 'true' : 'false'} onChange={(e) => setEnableWebSearch(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="true">Enabled</option>
                 <option value="false">Disabled</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Scan Strategy</label>
+              <FieldLabel
+                label="Scan Strategy"
+                help="Tail Only samples the end of the ad where brand cards usually appear. Full Video scans across the whole video for more coverage at higher cost."
+              />
               <select value={scanMode} onChange={(e) => setScanMode(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="Tail Only">Tail Only</option>
                 <option value="Full Video">Full Video</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Express Mode</label>
+              <FieldLabel
+                label="Express Mode"
+                help="Skips the normal OCR-heavy path and classifies from a key visual frame. Fastest option, but it trades away some text evidence."
+              />
               <select
                 value={expressMode ? 'true' : 'false'}
                 onChange={(e) => setExpressMode(e.target.value === 'true')}
@@ -326,39 +408,57 @@ export function Jobs() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Vision Board</label>
+              <FieldLabel
+                label="Vision Board"
+                help="Computes category similarity scores from the selected frames. Useful for debugging why the visual encoder leaned toward certain categories."
+              />
               <select value={enableVisionBoard ? 'true' : 'false'} onChange={(e) => setEnableVisionBoard(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="true">📸 Generate Vision Board (SigLIP/OpenCLIP)</option>
                 <option value="false">Disabled</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">LLM Keyframe</label>
+              <FieldLabel
+                label="LLM Keyframe"
+                help="Sends a representative video frame to the multimodal model. Disable this only if you want the LLM to rely on OCR text alone."
+              />
               <select value={enableLlmFrame ? 'true' : 'false'} onChange={(e) => setEnableLlmFrame(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="true">🧠 Send Keyframe to LLM</option>
                 <option value="false">Disabled</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">OCR Engine</label>
+              <FieldLabel
+                label="OCR Engine"
+                help="EasyOCR is lighter and faster for most runs. Florence-2 is heavier but can recover harder text cases when speed matters less than recall."
+              />
               <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="EasyOCR">EasyOCR</option>
                 <option value="Florence-2 (Microsoft)">Florence-2</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">OCR Mode</label>
+              <FieldLabel
+                label="OCR Mode"
+                help="Fast favors latency and aggressive shortcuts. Detailed keeps more OCR work enabled for harder frames and better text recovery."
+              />
               <select value={ocrMode} onChange={(e) => setOcrMode(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="🚀 Fast">Fast</option>
                 <option value="Detailed">Detailed</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Context Limit</label>
+              <FieldLabel
+                label="Context Limit"
+                help="Maximum prompt context passed to the selected model. Higher values can preserve more evidence but use more memory and may slow inference."
+              />
               <input type="number" min={512} step={512} value={contextSize} onChange={(e) => setContextSize(Number(e.target.value || 8192))} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700 font-mono" />
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Provider</label>
+              <FieldLabel
+                label="Provider"
+                help="Runtime that serves the LLM. Different providers support different models, multimodal behavior, JSON modes, and latency profiles."
+              />
               <select value={provider} onChange={(e) => setProvider(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 {PROVIDER_OPTIONS.map((providerOption) => (
                   <option key={providerOption} value={providerOption}>{providerOption}</option>
@@ -366,7 +466,10 @@ export function Jobs() {
               </select>
             </div>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Model</label>
+              <FieldLabel
+                label="Model"
+                help="Specific model loaded under the chosen provider. This controls reasoning style, multimodal support, speed, and memory usage."
+              />
               {showProviderModelPicker ? (
                 <div className="space-y-2">
                   <select
@@ -404,7 +507,10 @@ export function Jobs() {
               )}
             </div>
             <div className="space-y-1 md:col-span-4">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Target Categories (Comma Separated)</label>
+              <FieldLabel
+                label="Target Categories (Comma Separated)"
+                help="Optional hint list passed into the pipeline. Leave blank to let the system classify against the full taxonomy."
+              />
               <input value={categories} onChange={(e) => setCategories(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700 font-mono" />
             </div>
           </div>
@@ -466,91 +572,256 @@ export function Jobs() {
           </div>
         )}
 
-        <div className="overflow-x-auto min-h-[400px]">
-          <table className="w-full text-sm text-left whitespace-nowrap">
-            <thead className="text-[10px] uppercase font-bold tracking-wider text-gray-400 bg-gray-50/80">
-              <tr>
-                <th className="px-4 py-4 w-10">
-                  <input
-                    type="checkbox"
-                    checked={isAllSelected}
-                    onChange={toggleSelectAll}
-                    className="w-3.5 h-3.5 rounded border-gray-300 bg-gray-100 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
-                    title={isAllSelected ? 'Deselect all' : 'Select all'}
-                  />
-                </th>
-                <th className="px-6 py-4">Job</th>
-                <th className="px-6 py-4">Brand</th>
-                <th className="px-6 py-4">Category</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Mode</th>
-                <th className="px-6 py-4">Stage</th>
-                <th className="px-6 py-4 text-right">Progress</th>
-                <th className="px-6 py-4">Duration</th>
-                <th className="px-6 py-4">Created</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading && jobs.length === 0 ? (
-                <tr><td colSpan={10} className="px-6 py-12 text-center text-gray-400">Syncing node cluster state...</td></tr>
-              ) : filteredJobs.length === 0 ? (
-                <tr><td colSpan={10} className="px-6 py-12 text-center text-gray-400">No jobs found.</td></tr>
-              ) : filteredJobs.map((job) => (
-                <tr key={job.job_id} className={`hover:bg-gray-50 transition-colors group ${selectedJobs.has(job.job_id) ? 'bg-primary-50' : ''}`}>
-                  <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/70">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Jobs</div>
+              <div className="mt-1 text-2xl font-semibold text-gray-900">{summary.total}</div>
+              <div className="text-xs text-gray-500">{summary.visible} visible</div>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wider text-blue-500 font-semibold">Processing</div>
+              <div className="mt-1 text-2xl font-semibold text-blue-800">{summary.processing}</div>
+              <div className="text-xs text-blue-700">active now</div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wider text-amber-500 font-semibold">Queued</div>
+              <div className="mt-1 text-2xl font-semibold text-amber-800">{summary.queued}</div>
+              <div className="text-xs text-amber-700">waiting or re-queued</div>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wider text-emerald-500 font-semibold">Completed</div>
+              <div className="mt-1 text-2xl font-semibold text-emerald-800">{summary.completed}</div>
+              <div className="text-xs text-emerald-700">finished successfully</div>
+            </div>
+            <div className="rounded-lg border border-red-200 bg-red-50/70 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wider text-red-500 font-semibold">Failed</div>
+              <div className="mt-1 text-2xl font-semibold text-red-800">{summary.failed}</div>
+              <div className="text-xs text-red-700">needs attention</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-3 border-b border-gray-200 bg-white flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={isAllSelected}
+              onChange={toggleSelectAll}
+              className="w-3.5 h-3.5 rounded border-gray-300 bg-gray-100 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
+              title={isAllSelected ? 'Deselect all visible jobs' : 'Select all visible jobs'}
+            />
+            <span className="text-xs text-gray-500">
+              Select visible jobs
+            </span>
+          </div>
+          <div className="hidden xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_220px] gap-4 flex-1 text-[10px] uppercase tracking-wider text-gray-400 font-semibold">
+            <div>Job</div>
+            <div>Result</div>
+            <div>Execution</div>
+            <div className="text-right">Timing</div>
+          </div>
+        </div>
+
+        <div className="min-h-[400px] divide-y divide-gray-100">
+          {loading && jobs.length === 0 ? (
+            <div className="px-6 py-12 text-center text-gray-400">Syncing node cluster state...</div>
+          ) : filteredJobs.length === 0 ? (
+            <div className="px-6 py-12 text-center text-gray-400">No jobs found.</div>
+          ) : filteredJobs.map((job) => {
+            const selected = selectedJobs.has(job.job_id);
+            const progressValue =
+              job.status === 'completed'
+                ? 100
+                : job.status === 'processing'
+                  ? Math.max(0, Math.min(100, Number(job.progress || 0)))
+                  : 0;
+            const providerLabel = job.settings?.provider || '—';
+            const modelLabel = job.settings?.model_name || '—';
+            const ocrEngineLabel = job.settings?.ocr_engine || '—';
+            const ocrModeLabel = job.settings?.ocr_mode || '—';
+            const scanModeLabel = job.settings?.scan_mode || '—';
+            const categoryLabel = job.category || '—';
+            const brandLabel = job.brand || '—';
+            const categoryId = (job.category_id || '').trim();
+
+            return (
+              <div
+                key={job.job_id}
+                className={`px-6 py-5 transition-colors ${selected ? 'bg-primary-50/70' : 'bg-white hover:bg-gray-50/80'}`}
+              >
+                <div className="flex gap-4">
+                  <div className="pt-1" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
-                      checked={selectedJobs.has(job.job_id)}
+                      checked={selected}
                       onChange={() => toggleSelectJob(job.job_id)}
                       className="w-3.5 h-3.5 rounded border-gray-300 bg-gray-100 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
                     />
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col gap-1">
-                      <Link to={`/jobs/${job.job_id}`} className="font-mono text-xs text-primary-600 group-hover:text-primary-700 transition-colors">{job.job_id}</Link>
-                      <span className="text-[10px] text-gray-400 font-mono max-w-xs truncate">{job.url}</span>
+                  </div>
+
+                  <div className="min-w-0 flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_220px] gap-4">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          to={`/jobs/${job.job_id}`}
+                          className="font-mono text-xs text-primary-600 hover:text-primary-700 transition-colors break-all"
+                        >
+                          {job.job_id}
+                        </Link>
+                        <span className={`px-2 py-1 rounded inline-flex text-[10px] font-bold tracking-wider uppercase border ${getStatusBadgeClass(job.status)} ${job.status === 'processing' ? 'animate-pulse' : ''}`}>
+                          {/** Native title tooltip for compressed row status */}
+                          <span title={`Status: ${getStatusText(job.status)}`}>
+                            {getStatusText(job.status)}
+                          </span>
+                        </span>
+                        <span
+                          title={`Execution mode: ${job.mode || '—'}`}
+                          className="px-2 py-1 rounded border border-gray-200 bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500"
+                        >
+                          {job.mode || '—'}
+                        </span>
+                      </div>
+                      <div
+                        className="text-[11px] text-gray-500 font-mono break-all"
+                        title={job.url}
+                      >
+                        {job.url}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                        <span className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1">
+                          <span title={`Provider: ${providerLabel}`}>{providerLabel}</span>
+                        </span>
+                        <span
+                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 font-mono max-w-full truncate"
+                          title={`Model: ${modelLabel}`}
+                        >
+                          {modelLabel}
+                        </span>
+                        <span
+                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1"
+                          title={`OCR engine: ${ocrEngineLabel}`}
+                        >
+                          {ocrEngineLabel}
+                        </span>
+                        <span
+                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1"
+                          title={`OCR mode: ${ocrModeLabel}`}
+                        >
+                          {ocrModeLabel}
+                        </span>
+                        <span
+                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1"
+                          title={`Scan mode: ${scanModeLabel}`}
+                        >
+                          {scanModeLabel}
+                        </span>
+                      </div>
                     </div>
-                  </td>
-                  <td className="px-6 py-4 text-xs text-gray-700">{job.brand || '—'}</td>
-                  <td className="px-6 py-4 text-xs text-gray-700">{job.category || '—'}</td>
-                  <td className="px-6 py-4">
-                    {(() => {
-                      const statusClass = job.status === 'completed'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : job.status === 'failed'
-                          ? 'bg-red-50 text-red-700 border-red-200'
-                          : job.status === 'processing'
-                            ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse'
-                            : job.status === 're-queued'
-                              ? 'bg-orange-50 text-orange-700 border-orange-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200';
-                      const statusText = job.status === 're-queued' ? 'waiting (recovered)' : job.status;
-                      return (
-                    <span className={`px-2 py-1 rounded inline-flex text-[10px] font-bold tracking-wider uppercase border ${
-                      statusClass
-                    }`}>
-                      {statusText}
-                    </span>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-gray-500">{job.mode || '—'}</td>
-                  <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-gray-500">{job.stage || '—'}</td>
-                  <td className="px-6 py-4 font-mono text-xs text-right text-gray-700">
-                    {job.status === 'processing' ? `${job.progress.toFixed(1)}%` : job.status === 'completed' ? '100%' : '—'}
-                  </td>
-                  <td className="px-6 py-4 font-mono text-xs text-gray-500">
-                    {job.duration_seconds != null
-                      ? job.duration_seconds < 60
-                        ? `${job.duration_seconds.toFixed(1)}s`
-                        : `${Math.floor(job.duration_seconds / 60)}m ${Math.round(job.duration_seconds % 60)}s`
-                      : '—'}
-                  </td>
-                  <td className="px-6 py-4 font-mono text-[10px] text-gray-400">{job.created_at}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+                    <div className="min-w-0 space-y-2">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Brand</div>
+                        <div className="mt-1 text-sm font-semibold text-gray-900 break-words">{brandLabel}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Category</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <span
+                              className="text-sm text-gray-700 break-words"
+                              title={`Category: ${categoryLabel}`}
+                            >
+                              {categoryLabel}
+                            </span>
+                          {categoryId && (
+                            <span
+                              title={`Category ID: ${categoryId}`}
+                              className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-[10px] font-mono font-semibold text-primary-700"
+                            >
+                              ID {categoryId}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 space-y-2">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Stage</div>
+                        <div className="mt-1 text-sm font-semibold text-gray-900 capitalize">
+                          <span title={`Stage: ${formatStageLabel(job.stage)}`}>
+                            {formatStageLabel(job.stage)}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Detail</div>
+                        <div
+                          className="mt-1 text-xs text-gray-600 break-words"
+                          title={job.stage_detail || '—'}
+                        >
+                          {job.stage_detail || '—'}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-gray-400">
+                          <span>Progress</span>
+                          <span className="font-mono text-gray-600">
+                            {job.status === 'completed'
+                              ? '100%'
+                              : job.status === 'processing'
+                                ? `${progressValue.toFixed(1)}%`
+                                : '—'}
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              job.status === 'failed'
+                                ? 'bg-red-400'
+                                : job.status === 'completed'
+                                  ? 'bg-emerald-500'
+                                  : 'bg-primary-500'
+                            }`}
+                            style={{ width: `${job.status === 'failed' ? 100 : progressValue}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 flex flex-col xl:items-end gap-2">
+                      <div className="grid grid-cols-2 xl:grid-cols-1 gap-2 w-full xl:w-auto">
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Duration</div>
+                        <div
+                          className="mt-1 text-sm font-mono text-gray-800"
+                          title={job.duration_seconds != null ? `${job.duration_seconds.toFixed(3)} seconds` : 'No duration recorded'}
+                        >
+                          {formatDurationLabel(job.duration_seconds)}
+                        </div>
+                      </div>
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Created</div>
+                          <div className="mt-1 text-sm text-gray-800" title={job.created_at}>
+                            {formatRelativeTimestamp(job.created_at)}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-500" title={job.updated_at}>
+                        Updated {formatRelativeTimestamp(job.updated_at)}
+                      </div>
+                      <Link
+                        to={`/jobs/${job.job_id}`}
+                        className="inline-flex items-center justify-center rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs font-semibold text-primary-700 hover:bg-primary-100 transition-colors"
+                      >
+                        Open details
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

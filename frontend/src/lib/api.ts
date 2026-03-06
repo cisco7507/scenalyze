@@ -71,11 +71,41 @@ export interface ArtifactVisionMatch {
   category_id?: number | null;
 }
 
+export interface SignalVectorPlotPoint {
+  x: number;
+  y: number;
+  label: string;
+  category_id?: string | number | null;
+  score?: number | null;
+  kind?: 'query' | 'selected' | 'neighbor' | 'leader' | 'background';
+}
+
+export interface SignalVectorBounds {
+  x_min: number;
+  x_max: number;
+  y_min: number;
+  y_max: number;
+}
+
+export interface SignalVectorPlot {
+  space: 'mapper' | 'visual';
+  title?: string;
+  subtitle?: string;
+  backend?: string;
+  query_label?: string;
+  selected_label?: string;
+  selected_category_id?: string | null;
+  points: SignalVectorPlotPoint[];
+  full_bounds?: SignalVectorBounds;
+  focus_bounds?: SignalVectorBounds;
+}
+
 export interface ArtifactVisionBoard {
   image_url?: string | null;
   plot_url?: string | null;
   top_matches?: ArtifactVisionMatch[];
   metadata?: Record<string, unknown>;
+  vector_plot?: SignalVectorPlot | null;
 }
 
 export interface ArtifactCategoryMapper {
@@ -84,6 +114,7 @@ export interface ArtifactCategoryMapper {
   method?: string;
   score?: number | null;
   confidence?: number | null;
+  vector_plot?: SignalVectorPlot | null;
 }
 
 export interface PerFrameVision {

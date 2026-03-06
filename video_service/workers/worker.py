@@ -98,13 +98,20 @@ def _build_default_artifacts(job_id: str) -> dict:
         "latest_frames": [],
         "ocr_text": {"text": "", "lines": [], "url": None},
         "per_frame_vision": [],
-        "vision_board": {"image_url": None, "plot_url": None, "top_matches": [], "metadata": {}},
+        "vision_board": {
+            "image_url": None,
+            "plot_url": None,
+            "top_matches": [],
+            "metadata": {},
+            "vector_plot": None,
+        },
         "category_mapper": {
             "category": "",
             "category_id": "",
             "method": "",
             "score": None,
             "confidence": None,
+            "vector_plot": None,
         },
         "extras": {"events_url": f"/jobs/{job_id}/events"},
     }
@@ -162,7 +169,7 @@ def _save_gallery_frames(job_id: str, gallery: list) -> list[dict]:
     return frames
 
 
-def _vision_board_from_scores(scores: dict) -> dict:
+def _vision_board_from_scores(scores: dict, vector_plot: dict | None = None) -> dict:
     from video_service.core.categories import category_mapper  # avoid circular at module level
     top_matches = []
     for label, score in (scores or {}).items():
@@ -173,6 +180,7 @@ def _vision_board_from_scores(scores: dict) -> dict:
         "plot_url": None,
         "top_matches": top_matches,
         "metadata": {"source": "pipeline_scores", "count": len(top_matches)},
+        "vector_plot": vector_plot,
     }
 
 
@@ -228,6 +236,7 @@ def _category_mapper_from_row(row: dict | None) -> dict:
         "method": str(row.get("category_match_method") or row.get("match_method") or ""),
         "score": row.get("category_match_score"),
         "confidence": row.get("Confidence") if "Confidence" in row else row.get("confidence"),
+        "vector_plot": None,
     }
 
 
@@ -679,8 +688,16 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     latest_per_frame_vision: list[dict] = []
     latest_ocr_text = ""
     latest_gallery = []
+    latest_signal_artifacts: dict = {}
     for content in generator:
-        if len(content) == 6:
+        if len(content) == 7:
+            latest_scores = content[0] if isinstance(content[0], dict) else {}
+            latest_per_frame_vision = content[1] if isinstance(content[1], list) else []
+            latest_ocr_text = content[2] if isinstance(content[2], str) else ""
+            latest_gallery = content[4] if isinstance(content[4], list) else []
+            final_df = content[5]
+            latest_signal_artifacts = content[6] if isinstance(content[6], dict) else {}
+        elif len(content) == 6:
             latest_scores = content[0] if isinstance(content[0], dict) else {}
             latest_per_frame_vision = content[1] if isinstance(content[1], list) else []
             latest_ocr_text = content[2] if isinstance(content[2], str) else ""
@@ -703,13 +720,18 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         job_id, "ocr/ocr_output.txt", latest_ocr_text
     )
     artifacts_payload["per_frame_vision"] = latest_per_frame_vision
-    artifacts_payload["vision_board"] = _vision_board_from_scores(latest_scores)
+    artifacts_payload["vision_board"] = _vision_board_from_scores(
+        latest_scores,
+        latest_signal_artifacts.get("visual_plot") if isinstance(latest_signal_artifacts, dict) else None,
+    )
 
     if final_df is not None and not final_df.empty:
         rows = final_df.to_dict(orient="records")
         artifacts_payload["category_mapper"] = _category_mapper_from_row(
             rows[0] if rows else None
         )
+        if isinstance(latest_signal_artifacts, dict):
+            artifacts_payload["category_mapper"]["vector_plot"] = latest_signal_artifacts.get("mapper_plot")
         result = json.dumps(final_df.to_dict(orient="records"))
         logger.info("pipeline_done: rows=%d", len(final_df))
         return result, artifacts_payload

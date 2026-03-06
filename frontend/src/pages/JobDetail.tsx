@@ -8,6 +8,8 @@ import {
 } from "react";
 import type { ReactElement } from "react";
 import { useParams, Link } from "react-router-dom";
+import ReactECharts from "echarts-for-react";
+import type { EChartsOption } from "echarts";
 import {
   getJob,
   getJobResult,
@@ -17,7 +19,13 @@ import {
   exportResultsCSV,
   copyToClipboard,
 } from "../lib/api";
-import type { JobStatus, ResultRow, JobArtifacts } from "../lib/api";
+import type {
+  JobStatus,
+  ResultRow,
+  JobArtifacts,
+  SignalVectorPlot,
+  SignalVectorPlotPoint,
+} from "../lib/api";
 import {
   ArrowLeftIcon,
   FileTextIcon,
@@ -27,6 +35,7 @@ import {
   ExclamationTriangleIcon,
   CopyIcon,
 } from "@radix-ui/react-icons";
+import { HelpTooltip } from "../components/HelpTooltip";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
@@ -324,6 +333,223 @@ function reasoningInlineClass(type: ReasoningTermType): string {
   return "bg-amber-50 text-amber-700 px-1 rounded";
 }
 
+function HelpHeading({
+  label,
+  help,
+}: {
+  label: string;
+  help?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-gray-400 font-bold">
+      <span>{label}</span>
+      {help ? <HelpTooltip content={help} widthClassName="w-72" /> : null}
+    </div>
+  );
+}
+
+function vectorPointKindLabel(kind?: string): string {
+  if (kind === "query") return "Query";
+  if (kind === "selected") return "Final category";
+  if (kind === "leader") return "Top visual match";
+  if (kind === "background") return "Taxonomy backdrop";
+  return "Nearby category";
+}
+
+function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
+  const emptyOption: EChartsOption = {
+    animation: false,
+    xAxis: { show: false, min: -1, max: 1 },
+    yAxis: { show: false, min: -1, max: 1 },
+    series: [],
+  };
+  if (!plot || !Array.isArray(plot.points) || plot.points.length === 0) {
+    return emptyOption;
+  }
+
+  const grouped = {
+    query: [] as SignalVectorPlotPoint[],
+    selected: [] as SignalVectorPlotPoint[],
+    leader: [] as SignalVectorPlotPoint[],
+    neighbor: [] as SignalVectorPlotPoint[],
+    background: [] as SignalVectorPlotPoint[],
+  };
+
+  for (const point of plot.points) {
+    if (point.kind === "query") grouped.query.push(point);
+    else if (point.kind === "selected") grouped.selected.push(point);
+    else if (point.kind === "leader") grouped.leader.push(point);
+    else if (point.kind === "background") grouped.background.push(point);
+    else grouped.neighbor.push(point);
+  }
+
+  const toSeriesData = (points: SignalVectorPlotPoint[]) =>
+    points.map((point) => ({
+      value: [point.x, point.y],
+      pointLabel: point.label,
+      categoryId: point.category_id ?? "",
+      score: point.score,
+      kind: point.kind ?? "neighbor",
+    }));
+
+  const fullBounds = plot.full_bounds;
+  const focusBounds = plot.focus_bounds || fullBounds;
+
+  return {
+    backgroundColor: "transparent",
+    animationDuration: 500,
+    grid: { left: 12, right: 12, top: 12, bottom: 12 },
+    dataZoom: fullBounds
+      ? [
+          {
+            type: "inside",
+            xAxisIndex: [0],
+            filterMode: "none",
+            startValue: focusBounds?.x_min,
+            endValue: focusBounds?.x_max,
+            zoomOnMouseWheel: true,
+            moveOnMouseMove: true,
+            moveOnMouseWheel: false,
+          },
+          {
+            type: "inside",
+            yAxisIndex: [0],
+            filterMode: "none",
+            startValue: focusBounds?.y_min,
+            endValue: focusBounds?.y_max,
+            zoomOnMouseWheel: true,
+            moveOnMouseMove: true,
+            moveOnMouseWheel: false,
+          },
+        ]
+      : [],
+    tooltip: {
+      trigger: "item",
+      backgroundColor: "rgba(2, 6, 23, 0.96)",
+      borderColor: "rgba(56, 189, 248, 0.25)",
+      textStyle: { color: "#e2e8f0" },
+      formatter: (params: any) => {
+        const data = params?.data || {};
+        const lines = [
+          `<strong>${String(data.pointLabel || "Point")}</strong>`,
+          vectorPointKindLabel(data.kind),
+        ];
+        if (data.categoryId) lines.push(`ID: ${data.categoryId}`);
+        if (typeof data.score === "number") lines.push(`Score: ${data.score.toFixed(4)}`);
+        return lines.join("<br/>");
+      },
+    },
+    xAxis: {
+      type: "value",
+      show: false,
+      splitLine: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      min: fullBounds?.x_min,
+      max: fullBounds?.x_max,
+      scale: true,
+    },
+    yAxis: {
+      type: "value",
+      show: false,
+      splitLine: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      min: fullBounds?.y_min,
+      max: fullBounds?.y_max,
+      scale: true,
+    },
+    series: [
+      {
+        name: "Nebula",
+        type: "scatter",
+        symbolSize: 6,
+        silent: false,
+        data: toSeriesData(grouped.background),
+        itemStyle: {
+          color: "rgba(71, 85, 105, 0.22)",
+          borderColor: "rgba(148, 163, 184, 0.18)",
+          borderWidth: 0.5,
+        },
+        emphasis: { scale: 1.05 },
+      },
+      {
+        name: "Nearby categories",
+        type: "scatter",
+        symbolSize: 14,
+        data: toSeriesData(grouped.neighbor),
+        itemStyle: {
+          color: "rgba(148, 163, 184, 0.55)",
+          borderColor: "rgba(226, 232, 240, 0.35)",
+          borderWidth: 1,
+        },
+        emphasis: { scale: 1.15 },
+      },
+      {
+        name: "Top visual match",
+        type: "scatter",
+        symbol: "diamond",
+        symbolSize: 18,
+        data: toSeriesData(grouped.leader),
+        itemStyle: {
+          color: "#f59e0b",
+          borderColor: "#fde68a",
+          borderWidth: 2,
+        },
+        label: {
+          show: true,
+          position: "top",
+          color: "#fef3c7",
+          fontSize: 11,
+          formatter: (params: any) => params?.data?.pointLabel || "",
+        },
+      },
+      {
+        name: "Final category",
+        type: "scatter",
+        symbol: "roundRect",
+        symbolSize: 20,
+        data: toSeriesData(grouped.selected),
+        itemStyle: {
+          color: "#6366f1",
+          borderColor: "#c7d2fe",
+          borderWidth: 2,
+          shadowBlur: 14,
+          shadowColor: "rgba(99, 102, 241, 0.45)",
+        },
+        label: {
+          show: true,
+          position: "top",
+          color: "#e0e7ff",
+          fontSize: 11,
+          formatter: (params: any) => params?.data?.pointLabel || "",
+        },
+      },
+      {
+        name: "Query",
+        type: "scatter",
+        symbol: "circle",
+        symbolSize: 24,
+        data: toSeriesData(grouped.query),
+        itemStyle: {
+          color: "#22d3ee",
+          borderColor: "#cffafe",
+          borderWidth: 2,
+          shadowBlur: 18,
+          shadowColor: "rgba(34, 211, 238, 0.45)",
+        },
+        label: {
+          show: true,
+          position: "bottom",
+          color: "#cffafe",
+          fontSize: 11,
+          formatter: (params: any) => params?.data?.pointLabel || "",
+        },
+      },
+    ],
+  };
+}
+
 function parseToolSegment(line: string): {
   tool: ScratchTool | null;
   query: string;
@@ -556,6 +782,7 @@ export function JobDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>("signals");
+  const [vectorSpace, setVectorSpace] = useState<"mapper" | "visual">("mapper");
   const [videoSource, setVideoSource] = useState<VideoSource | null>(null);
   const [videoAvailable, setVideoAvailable] = useState(false);
   const [videoError, setVideoError] = useState("");
@@ -1020,6 +1247,25 @@ export function JobDetail() {
   const mapperConfidenceDisplay =
     mapperConfidenceValue === null ? "—" : mapperConfidenceValue.toFixed(2);
   const summaryFrameDisplay = artifacts ? String(frameCount) : "—";
+  const mapperVectorPlot =
+    mapperArtifact && typeof mapperArtifact.vector_plot === "object"
+      ? mapperArtifact.vector_plot
+      : null;
+  const visualVectorPlot =
+    visionBoard && typeof visionBoard.vector_plot === "object"
+      ? visionBoard.vector_plot
+      : null;
+  const vectorPlotSpaces = [
+    mapperVectorPlot ? "mapper" : null,
+    visualVectorPlot ? "visual" : null,
+  ].filter(Boolean) as Array<"mapper" | "visual">;
+  const effectiveVectorSpace =
+    vectorPlotSpaces.includes(vectorSpace)
+      ? vectorSpace
+      : vectorPlotSpaces[0] || "mapper";
+  const activeVectorPlot =
+    effectiveVectorSpace === "visual" ? visualVectorPlot : mapperVectorPlot;
+  const vectorPlotOption = buildSignalPlotOption(activeVectorPlot);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
@@ -1312,6 +1558,7 @@ export function JobDetail() {
           <button
             type="button"
             onClick={() => setArtifactTab("signals")}
+            title="Final mapper output and supporting vision matches"
             className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "signals" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
           >
             Signals
@@ -1387,43 +1634,70 @@ export function JobDetail() {
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold">
-                      Final Mapper Output
-                    </div>
+                    <HelpHeading
+                      label="Final Mapper Output"
+                      help="This is the final canonical taxonomy category after the service maps the model's raw category choice onto the official FreeWheel taxonomy."
+                    />
                     <div className="text-xs text-gray-500">
                       Canonical taxonomy category selected after mapping.
                     </div>
                   </div>
                   {mapperCategoryIdText && (
-                    <span className="inline-flex items-center px-2 py-1 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[11px] font-mono font-semibold leading-none">
+                    <span
+                      title={`Canonical taxonomy ID: ${mapperCategoryIdText}`}
+                      className="inline-flex items-center px-2 py-1 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[11px] font-mono font-semibold leading-none"
+                    >
                       ID {mapperCategoryIdText}
                     </span>
                   )}
                 </div>
-                <div className="text-lg font-semibold text-gray-900 break-words">
+                <div
+                  title={mapperCategoryText || "No mapped category available."}
+                  className="text-lg font-semibold text-gray-900 break-words"
+                >
                   {mapperCategoryText || "No mapped category available."}
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-xs">
-                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                    <div className="uppercase tracking-wider text-gray-400 mb-1">
-                      Method
-                    </div>
+                  <div
+                    title={`Mapper method: ${mapperMethodDisplay}`}
+                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
+                  >
+                    <HelpHeading
+                      label="Method"
+                      help="How the final category was chosen. For example, Embeddings means the raw category text was matched against taxonomy labels in embedding space."
+                    />
                     <div className="font-medium text-gray-800">
                       {mapperMethodDisplay}
                     </div>
                   </div>
-                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                    <div className="uppercase tracking-wider text-gray-400 mb-1">
-                      Mapper Score
-                    </div>
+                  <div
+                    title={
+                      mapperScoreValue === null
+                        ? "No mapper score available."
+                        : `Mapper score: ${mapperScoreValue.toFixed(6)}`
+                    }
+                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
+                  >
+                    <HelpHeading
+                      label="Mapper Score"
+                      help="Strength of the final taxonomy match. Higher means the mapper considered the chosen canonical category a closer fit to the source label or evidence."
+                    />
                     <div className="font-mono text-cyan-700">
                       {mapperScoreDisplay}
                     </div>
                   </div>
-                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-                    <div className="uppercase tracking-wider text-gray-400 mb-1">
-                      LLM Confidence
-                    </div>
+                  <div
+                    title={
+                      mapperConfidenceValue === null
+                        ? "No LLM confidence available."
+                        : `LLM confidence: ${mapperConfidenceValue.toFixed(6)}`
+                    }
+                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
+                  >
+                    <HelpHeading
+                      label="LLM Confidence"
+                      help="The classification model's own confidence in the brand/category answer before the final taxonomy mapping step."
+                    />
                     <div className="font-mono text-gray-800">
                       {mapperConfidenceDisplay}
                     </div>
@@ -1433,9 +1707,10 @@ export function JobDetail() {
 
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
                 <div>
-                  <div className="text-[11px] uppercase tracking-wider text-gray-400 font-bold">
-                    Vision Matches
-                  </div>
+                  <HelpHeading
+                    label="Vision Matches"
+                    help="Visual encoder category scores from the sampled frames. These are supporting signals only; they help explain what the visual model saw but do not replace the final mapped category."
+                  />
                   <div className="text-xs text-gray-500">
                     Raw visual category scores used as supporting evidence.
                   </div>
@@ -1445,12 +1720,16 @@ export function JobDetail() {
                     {(visionBoard?.top_matches || []).map((m, idx) => (
                       <div
                         key={idx}
+                        title={`${m.label} · score ${Number(m.score).toFixed(6)}${m.category_id != null ? ` · category ID ${m.category_id}` : ""}`}
                         className="flex items-center justify-between text-xs bg-white border border-gray-200 rounded px-3 py-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-gray-800 truncate">{m.label}</span>
                           {m.category_id != null && (
-                            <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[10px] font-mono font-semibold leading-none">
+                            <span
+                              title={`Category ID: ${m.category_id}`}
+                              className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-[10px] font-mono font-semibold leading-none"
+                            >
                               #{m.category_id}
                             </span>
                           )}
@@ -1468,6 +1747,78 @@ export function JobDetail() {
                 )}
               </div>
             </div>
+
+            {activeVectorPlot && (
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-xl">
+                <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-200">
+                        Vector View
+                      </h3>
+                      <HelpTooltip
+                        content="A local 2D projection of the category neighborhood. Query shows the source signal, final category is the mapped answer, and nearby points are the closest alternatives in that embedding space."
+                        widthClassName="w-80"
+                      />
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      {activeVectorPlot.subtitle ||
+                        "Projected neighborhood around the chosen category."}
+                    </p>
+                  </div>
+                  {vectorPlotSpaces.length > 1 && (
+                    <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setVectorSpace("mapper")}
+                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          effectiveVectorSpace === "mapper"
+                            ? "bg-indigo-500 text-white"
+                            : "text-slate-300 hover:bg-slate-800"
+                        }`}
+                      >
+                        Mapper Space
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVectorSpace("visual")}
+                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          effectiveVectorSpace === "visual"
+                            ? "bg-cyan-500 text-slate-950"
+                            : "text-slate-300 hover:bg-slate-800"
+                        }`}
+                      >
+                        Visual Space
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-slate-300">
+                  <span className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-2.5 py-1">
+                    Query: {activeVectorPlot.query_label || "signal"}
+                  </span>
+                  <span className="rounded-full border border-indigo-400/40 bg-indigo-400/10 px-2.5 py-1">
+                    Final: {activeVectorPlot.selected_label || mapperCategoryText || "—"}
+                  </span>
+                  {activeVectorPlot.backend && (
+                    <span className="rounded-full border border-slate-600 bg-slate-900 px-2.5 py-1">
+                      Backend: {activeVectorPlot.backend}
+                    </span>
+                  )}
+                  <span className="rounded-full border border-slate-600 bg-slate-900 px-2.5 py-1 text-slate-400">
+                    Scroll to zoom, drag to pan
+                  </span>
+                </div>
+
+                <ReactECharts
+                  option={vectorPlotOption}
+                  style={{ height: 360, width: "100%" }}
+                  notMerge
+                  lazyUpdate
+                />
+              </div>
+            )}
 
             {visionBoard?.image_url && (
               <img
