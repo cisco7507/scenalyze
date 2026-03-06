@@ -522,6 +522,11 @@ def process_single_video(
                     "image_feature": image_features.mean(dim=0).detach().cpu(),
                     "score_vector": probs.mean(dim=0).detach().cpu(),
                     "backend": getattr(categories_runtime, "SIGLIP_ID", "SigLIP"),
+                    "query_label": (
+                        f"Frame @ {frames[0]['time']:.1f}s"
+                        if len(frames) == 1
+                        else f"Mean of {len(frames)} sampled frames"
+                    ),
                 }
                 sorted_vision_local = dict(
                     sorted(
@@ -829,6 +834,7 @@ def process_single_video(
                     score_vector=visual_debug.get("score_vector"),
                     selected_category=str(cat_out or ""),
                     backend_name=str(visual_debug.get("backend") or "SigLIP"),
+                    query_label=str(visual_debug.get("query_label") or "Sampled frame"),
                 )
             except Exception as exc:
                 logger.debug("[%s] visual_vector_plot_failed: %s", url, exc)

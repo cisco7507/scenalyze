@@ -406,6 +406,7 @@ class CategoryMapper:
         selected_category: str,
         top_k: int = 10,
         backend_name: str = "SigLIP",
+        query_label: str = "Sampled frame",
     ) -> dict | None:
         if self.vision_text_features is None or not self.categories:
             return None
@@ -433,7 +434,7 @@ class CategoryMapper:
         visual_leader = self.categories[top_indices[0]] if top_indices else selected_category
         points = [
             {
-                "label": "Frame embedding",
+                "label": query_label,
                 "category_id": None,
                 "score": None,
                 "kind": "query",
@@ -474,7 +475,7 @@ class CategoryMapper:
             "title": "Visual Space",
             "subtitle": "Projected visual similarity between the sampled frame embedding and nearby category prompts.",
             "backend": backend_name,
-            "query_label": "Frame embedding",
+            "query_label": query_label,
             "selected_label": selected_category,
             "selected_category_id": str(self.cat_to_id.get(selected_category, "") or ""),
             "points": points,
