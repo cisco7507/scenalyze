@@ -99,6 +99,13 @@ def _build_default_artifacts(job_id: str) -> dict:
         "ocr_text": {"text": "", "lines": [], "url": None},
         "per_frame_vision": [],
         "vision_board": {"image_url": None, "plot_url": None, "top_matches": [], "metadata": {}},
+        "category_mapper": {
+            "category": "",
+            "category_id": "",
+            "method": "",
+            "score": None,
+            "confidence": None,
+        },
         "extras": {"events_url": f"/jobs/{job_id}/events"},
     }
 
@@ -204,6 +211,24 @@ def _extract_summary_fields(result_json: str | None) -> tuple[str, str, str]:
     category = str(row.get("Category") or row.get("category") or "")
     category_id = str(row.get("Category ID") or row.get("category_id") or "")
     return brand, category, category_id
+
+
+def _category_mapper_from_row(row: dict | None) -> dict:
+    if not isinstance(row, dict):
+        return {
+            "category": "",
+            "category_id": "",
+            "method": "",
+            "score": None,
+            "confidence": None,
+        }
+    return {
+        "category": str(row.get("Category") or row.get("category") or ""),
+        "category_id": str(row.get("Category ID") or row.get("category_id") or ""),
+        "method": str(row.get("category_match_method") or row.get("match_method") or ""),
+        "score": row.get("category_match_score"),
+        "confidence": row.get("Confidence") if "Confidence" in row else row.get("confidence"),
+    }
 
 
 def _record_job_stats(
@@ -681,6 +706,10 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     artifacts_payload["vision_board"] = _vision_board_from_scores(latest_scores)
 
     if final_df is not None and not final_df.empty:
+        rows = final_df.to_dict(orient="records")
+        artifacts_payload["category_mapper"] = _category_mapper_from_row(
+            rows[0] if rows else None
+        )
         result = json.dumps(final_df.to_dict(orient="records"))
         logger.info("pipeline_done: rows=%d", len(final_df))
         return result, artifacts_payload
@@ -745,6 +774,10 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
 
     result_json = None
     if final_df is not None and not final_df.empty:
+        rows = final_df.to_dict(orient="records")
+        artifacts_payload["category_mapper"] = _category_mapper_from_row(
+            rows[0] if rows else None
+        )
         result_json = json.dumps(final_df.to_dict(orient="records"))
         logger.info("agent_done: rows=%d events=%d", len(final_df), len(events))
     else:
