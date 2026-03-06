@@ -117,6 +117,48 @@ export interface ArtifactCategoryMapper {
   vector_plot?: SignalVectorPlot | null;
 }
 
+export interface ProcessingTraceResult {
+  brand?: string;
+  category?: string;
+  confidence?: number | null;
+}
+
+export interface ProcessingTraceAttempt {
+  attempt_type: string;
+  title: string;
+  status: 'accepted' | 'rejected' | 'skipped';
+  detail?: string;
+  trigger_reason?: string;
+  elapsed_ms?: number | null;
+  frame_count?: number;
+  frame_times?: number[];
+  ocr_excerpt?: string;
+  ocr_signal?: boolean;
+  ocr_mode?: string;
+  llm_mode?: string;
+  evidence_note?: string;
+  result?: ProcessingTraceResult;
+}
+
+export interface ProcessingTraceSummary {
+  headline?: string;
+  attempt_count?: number;
+  retry_count?: number;
+  accepted_attempt_type?: string;
+  trigger_reason?: string;
+}
+
+export interface ArtifactProcessingTrace {
+  mode?: string;
+  provider?: string;
+  model?: string;
+  ocr_engine?: string;
+  ocr_mode?: string;
+  scan_mode?: string;
+  attempts?: ProcessingTraceAttempt[];
+  summary?: ProcessingTraceSummary;
+}
+
 export interface PerFrameVision {
   frame_index: number;
   top_category: string;
@@ -129,8 +171,37 @@ export interface JobArtifacts {
   ocr_text: ArtifactOCR;
   vision_board: ArtifactVisionBoard;
   category_mapper: ArtifactCategoryMapper;
+  processing_trace?: ArtifactProcessingTrace | null;
   extras?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+export interface JobExplanationFinal {
+  brand?: string;
+  category?: string;
+  category_id?: string | null;
+  confidence?: number | null;
+  mapper_method?: string;
+  mapper_score?: number | null;
+}
+
+export interface JobExplanationEvidence {
+  ocr_excerpt?: string;
+  latest_frames?: ArtifactFrame[];
+  event_count?: number;
+  recent_events?: string[];
+}
+
+export interface JobExplanation {
+  job_id: string;
+  mode?: string | null;
+  status: string;
+  stage?: string | null;
+  stage_detail?: string | null;
+  summary: ProcessingTraceSummary;
+  attempts: ProcessingTraceAttempt[];
+  final: JobExplanationFinal;
+  evidence: JobExplanationEvidence;
 }
 
 export interface OllamaModel {
@@ -542,6 +613,7 @@ export const getJob           = (id: string) => safe(() => api.get<JobStatus>(`/
 export const getJobResult     = (id: string) => safe(() => api.get<{ result: ResultRow[] | null }>(`/jobs/${id}/result`).then(r => r.data));
 export const getJobArtifacts  = (id: string) => safe(() => api.get<{ artifacts: JobArtifacts }>(`/jobs/${id}/artifacts`).then(r => r.data));
 export const getJobEvents     = (id: string) => safe(() => api.get<{ events: string[] }>(`/jobs/${id}/events`).then(r => r.data));
+export const getJobExplanation = (id: string) => safe(() => api.get<{ explanation: JobExplanation }>(`/jobs/${id}/explanation`).then(r => r.data));
 export const getProviderModels = (provider: string) =>
   safe(() => api.get<OllamaModel[]>('/api/v1/models', { params: { provider } }).then((r) => r.data));
 export const getOllamaModels  = () => getProviderModels('ollama');

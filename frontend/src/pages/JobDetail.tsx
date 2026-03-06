@@ -15,14 +15,18 @@ import {
   getJobResult,
   getJobEvents,
   getJobArtifacts,
+  getJobExplanation,
   getJobVideoUrl,
   exportResultsCSV,
   copyToClipboard,
 } from "../lib/api";
 import type {
+  ArtifactFrame,
   JobStatus,
   ResultRow,
   JobArtifacts,
+  JobExplanation,
+  ProcessingTraceAttempt,
   SignalVectorPlot,
   SignalVectorPlotPoint,
 } from "../lib/api";
@@ -108,7 +112,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-type ArtifactTab = "video" | "signals" | "ocr" | "frames";
+type ArtifactTab = "video" | "signals" | "ocr" | "frames" | "explain";
 type VideoSource = { type: "local" | "youtube" | "remote"; url: string };
 type ScratchTool = "OCR" | "SEARCH" | "VISION" | "FINAL" | "ERROR";
 type ReasoningTermType = "brand" | "url" | "evidence";
@@ -354,6 +358,265 @@ function vectorPointKindLabel(kind?: string): string {
   if (kind === "leader") return "Top visual match";
   if (kind === "background") return "Taxonomy backdrop";
   return "Nearby category";
+}
+
+function formatReasonLabel(value?: string): string {
+  const raw = (value || "").trim();
+  if (!raw) return "—";
+  return raw
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function attemptTone(status?: string) {
+  if (status === "accepted") {
+    return {
+      dot: "bg-emerald-500 border-emerald-300",
+      badge: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+      card: "border-emerald-200 bg-emerald-50/50",
+    };
+  }
+  if (status === "rejected") {
+    return {
+      dot: "bg-red-500 border-red-300",
+      badge: "bg-red-50 text-red-700 border border-red-200",
+      card: "border-red-200 bg-red-50/40",
+    };
+  }
+  return {
+    dot: "bg-gray-300 border-gray-200",
+    badge: "bg-gray-100 text-gray-700 border border-gray-200",
+    card: "border-gray-200 bg-gray-50",
+  };
+}
+
+function formatElapsedMs(value?: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "—";
+  }
+  if (value >= 1000) return `${(value / 1000).toFixed(2)}s`;
+  return `${Math.round(value)}ms`;
+}
+
+function buildLocalExplanation(
+  job: JobStatus | null,
+  result: ResultRow[] | null,
+  artifacts: JobArtifacts | null,
+  events: string[],
+): JobExplanation | null {
+  const trace = artifacts?.processing_trace;
+  if (!job || !trace || !Array.isArray(trace.attempts)) return null;
+
+  const firstRow = Array.isArray(result) && result.length > 0 ? result[0] : null;
+  const mapper = artifacts?.category_mapper || {};
+  const ocr = artifacts?.ocr_text || {};
+  const latestFrames = Array.isArray(artifacts?.latest_frames)
+    ? artifacts.latest_frames
+    : [];
+
+  return {
+    job_id: job.job_id,
+    mode: job.mode,
+    status: job.status,
+    stage: job.stage || null,
+    stage_detail: job.stage_detail || null,
+    summary: trace.summary || {},
+    attempts: trace.attempts || [],
+    final: {
+      brand:
+        (firstRow?.Brand as string | undefined) ||
+        (job.brand as string | undefined) ||
+        "",
+      category:
+        (firstRow?.Category as string | undefined) ||
+        (job.category as string | undefined) ||
+        "",
+      category_id:
+        (firstRow?.["Category ID"] as string | undefined) ||
+        (job.category_id as string | undefined) ||
+        "",
+      confidence:
+        typeof firstRow?.Confidence === "number"
+          ? firstRow.Confidence
+          : mapper?.confidence ?? null,
+      mapper_method: mapper?.method || "",
+      mapper_score:
+        typeof mapper?.score === "number" ? mapper.score : null,
+    },
+    evidence: {
+      ocr_excerpt: typeof ocr?.text === "string" ? ocr.text.slice(0, 400) : "",
+      latest_frames: latestFrames.slice(0, 6),
+      event_count: events.length,
+      recent_events: events.slice(-8),
+    },
+  };
+}
+
+function summarizeAttemptDelta(
+  previous: ProcessingTraceAttempt | null,
+  current: ProcessingTraceAttempt,
+): string[] {
+  if (!previous) return [];
+  const deltas: string[] = [];
+  const prevBrand = (previous.result?.brand || "").trim();
+  const currBrand = (current.result?.brand || "").trim();
+  const prevCategory = (previous.result?.category || "").trim();
+  const currCategory = (current.result?.category || "").trim();
+  const prevConfidence =
+    typeof previous.result?.confidence === "number"
+      ? previous.result.confidence
+      : null;
+  const currConfidence =
+    typeof current.result?.confidence === "number"
+      ? current.result.confidence
+      : null;
+
+  if (prevBrand !== currBrand && currBrand) {
+    deltas.push(`Brand: ${prevBrand || "—"} -> ${currBrand}`);
+  }
+  if (prevCategory !== currCategory && currCategory) {
+    deltas.push(`Category: ${prevCategory || "—"} -> ${currCategory}`);
+  }
+  if (prevConfidence !== currConfidence && currConfidence !== null) {
+    deltas.push(
+      `Confidence: ${prevConfidence !== null ? prevConfidence.toFixed(2) : "—"} -> ${currConfidence.toFixed(2)}`,
+    );
+  }
+  return deltas;
+}
+
+function formatAttemptTitle(attempt?: ProcessingTraceAttempt | null): string {
+  if (!attempt) return "Processing path";
+  return attempt.title || formatReasonLabel(attempt.attempt_type) || "Processing path";
+}
+
+function buildOperatorNotes(
+  attempts: ProcessingTraceAttempt[],
+  finalResult: JobExplanation["final"],
+): string[] {
+  const notes: string[] = [];
+  if (!Array.isArray(attempts) || attempts.length === 0) return notes;
+
+  const initialAttempt = attempts[0];
+  const acceptedAttempt =
+    [...attempts].reverse().find((attempt) => attempt.status === "accepted") || null;
+
+  if (initialAttempt?.status === "rejected") {
+    if (initialAttempt.ocr_signal === false) {
+      notes.push(
+        `${formatAttemptTitle(initialAttempt)} failed because no usable OCR text was recovered from the selected frame set.`,
+      );
+    } else if (initialAttempt.trigger_reason) {
+      notes.push(
+        `${formatAttemptTitle(initialAttempt)} was rejected after the classifier returned ${formatReasonLabel(initialAttempt.trigger_reason).toLowerCase()}.`,
+      );
+    } else if (initialAttempt.detail) {
+      notes.push(`${formatAttemptTitle(initialAttempt)} did not produce a usable result (${initialAttempt.detail.toLowerCase()}).`);
+    }
+  }
+
+  for (const attempt of attempts) {
+    if (attempt.status !== "rejected" || !attempt.evidence_note) continue;
+    if (attempt.attempt_type === "initial") continue;
+    notes.push(`${formatAttemptTitle(attempt)} was rejected: ${attempt.evidence_note}`);
+  }
+
+  if (acceptedAttempt && acceptedAttempt.attempt_type !== "initial") {
+    if (acceptedAttempt.attempt_type === "express_rescue") {
+      notes.push(
+        "Express rescue succeeded because the final branded frame was visually explicit enough for the multimodal model to classify directly.",
+      );
+    } else if (acceptedAttempt.attempt_type === "ocr_rescue") {
+      notes.push(
+        "OCR rescue succeeded after retrying with a more permissive OCR profile on additional tail frames.",
+      );
+    } else if (acceptedAttempt.attempt_type === "extended_tail") {
+      notes.push(
+        "Extended tail succeeded by scanning further back than the default tail window to recover a stronger branded frame.",
+      );
+    } else if (acceptedAttempt.attempt_type === "full_video") {
+      notes.push(
+        "Full-video fallback succeeded only after the narrower recovery paths failed to produce a confident answer.",
+      );
+    }
+  }
+
+  const rawCategory = (acceptedAttempt?.result?.category || "").trim();
+  const mappedCategory = (finalResult?.category || "").trim();
+  const categoryId = (finalResult?.category_id || "").trim();
+  const mapperScore =
+    typeof finalResult?.mapper_score === "number"
+      ? finalResult.mapper_score.toFixed(4)
+      : "";
+  if (rawCategory && mappedCategory) {
+    if (rawCategory.toLowerCase() === mappedCategory.toLowerCase()) {
+      notes.push(
+        `The mapper kept the LLM category as ${mappedCategory}${categoryId ? ` (ID ${categoryId})` : ""}${mapperScore ? ` with score ${mapperScore}` : ""}.`,
+      );
+    } else {
+      notes.push(
+        `The mapper normalized the raw LLM category ${rawCategory} to the canonical taxonomy category ${mappedCategory}${categoryId ? ` (ID ${categoryId})` : ""}${mapperScore ? ` with score ${mapperScore}` : ""}.`,
+      );
+    }
+  }
+
+  return Array.from(new Set(notes.filter(Boolean))).slice(0, 6);
+}
+
+type ExplainMethodGuideEntry = {
+  key: string;
+  label: string;
+  short: string;
+  detail: string;
+};
+
+const EXPLAIN_METHOD_GUIDE: ExplainMethodGuideEntry[] = [
+  {
+    key: "initial",
+    label: "Initial Tail Pass",
+    short: "Default fast path over the tail of the video.",
+    detail:
+      "Samples the default tail window, runs the normal OCR profile, then classifies with the configured LLM path before any retries are attempted.",
+  },
+  {
+    key: "ocr_rescue",
+    label: "OCR Rescue",
+    short: "Retry path for weak or empty OCR.",
+    detail:
+      "Uses a broader and more permissive OCR retry profile on additional tail evidence when the initial pass did not recover enough usable text.",
+  },
+  {
+    key: "express_rescue",
+    label: "Express Rescue",
+    short: "Image-first fallback that bypasses OCR.",
+    detail:
+      "Extracts a representative branded frame and sends it directly to the multimodal model when text-driven recovery still fails.",
+  },
+  {
+    key: "extended_tail",
+    label: "Extended Tail",
+    short: "Scans further back than the normal tail window.",
+    detail:
+      "Searches deeper into the end portion of the video to recover branding that appeared before the final fade or endcard transition.",
+  },
+  {
+    key: "full_video",
+    label: "Full Video",
+    short: "Last-resort recovery path across the whole video.",
+    detail:
+      "Samples across the full video only after the narrower retry paths fail to produce a confident answer.",
+  },
+];
+
+function getExplainMethodGuideEntry(
+  attemptType?: string | null,
+): ExplainMethodGuideEntry | null {
+  if (!attemptType) return null;
+  return (
+    EXPLAIN_METHOD_GUIDE.find((entry) => entry.key === attemptType) || null
+  );
 }
 
 function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
@@ -775,10 +1038,19 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
 
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
+  const [selectedExplainFrame, setSelectedExplainFrame] = useState<{
+    frame: ArtifactFrame;
+    attemptTitle: string;
+    timestampLabel: string;
+    ocrExcerpt?: string;
+  } | null>(null);
   const [job, setJob] = useState<JobStatus | null>(null);
   const [result, setResult] = useState<ResultRow[] | null>(null);
   const [events, setEvents] = useState<string[]>([]);
   const [artifacts, setArtifacts] = useState<JobArtifacts | null>(null);
+  const [explanation, setExplanation] = useState<JobExplanation | null>(null);
+  const [explanationLoading, setExplanationLoading] = useState(false);
+  const [explanationError, setExplanationError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>("signals");
@@ -935,6 +1207,10 @@ export function JobDetail() {
     }
     return map;
   }, [events, stageSequenceForEvents]);
+  const localExplanation = useMemo(
+    () => buildLocalExplanation(job, result, artifacts, events),
+    [job, result, artifacts, events],
+  );
 
   const updateVideoSource = useCallback((currentJob: JobStatus) => {
     const rawUrl = (currentJob.url || "").trim();
@@ -1028,6 +1304,10 @@ export function JobDetail() {
   useEffect(() => {
     autoSelectVideoRef.current = false;
     setArtifactTab("signals");
+    setSelectedExplainFrame(null);
+    setExplanation(null);
+    setExplanationError("");
+    setExplanationLoading(false);
   }, [id]);
 
   useEffect(() => {
@@ -1064,6 +1344,39 @@ export function JobDetail() {
       cancelled = true;
     };
   }, [id, refreshJobSnapshot]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (
+      !id ||
+      artifactTab !== "explain" ||
+      explanation ||
+      explanationLoading ||
+      explanationError ||
+      localExplanation
+    ) {
+      return;
+    }
+
+    setExplanationLoading(true);
+    setExplanationError("");
+    getJobExplanation(id)
+      .then((payload) => {
+        if (cancelled) return;
+        setExplanation(payload.explanation || null);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        setExplanationError(err.message || "Failed to explain processing");
+      })
+      .finally(() => {
+        if (!cancelled) setExplanationLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [artifactTab, explanation, explanationError, explanationLoading, id, localExplanation]);
 
   useEffect(() => {
     if (!id || !job) return;
@@ -1266,6 +1579,44 @@ export function JobDetail() {
   const activeVectorPlot =
     effectiveVectorSpace === "visual" ? visualVectorPlot : mapperVectorPlot;
   const vectorPlotOption = buildSignalPlotOption(activeVectorPlot);
+  const effectiveExplanation = explanation || localExplanation;
+  const explanationAttempts = Array.isArray(effectiveExplanation?.attempts)
+    ? effectiveExplanation.attempts
+    : [];
+  const explanationSummary = effectiveExplanation?.summary || {};
+  const explanationFinal = effectiveExplanation?.final || {};
+  const explanationEvidence = effectiveExplanation?.evidence || {};
+  const acceptedExplanationAttempt =
+    [...explanationAttempts]
+      .reverse()
+      .find((attempt) => attempt.status === "accepted") || null;
+  const rawLlmCategory = (acceptedExplanationAttempt?.result?.category || "").trim();
+  const rawLlmConfidence =
+    typeof acceptedExplanationAttempt?.result?.confidence === "number"
+      ? acceptedExplanationAttempt.result.confidence
+      : null;
+  const operatorNotes = buildOperatorNotes(explanationAttempts, explanationFinal);
+  const acceptedMethodGuideEntry = getExplainMethodGuideEntry(
+    explanationSummary?.accepted_attempt_type,
+  );
+  const usedExplainMethodGuide = EXPLAIN_METHOD_GUIDE.filter((entry) =>
+    explanationAttempts.some((attempt) => attempt.attempt_type === entry.key),
+  );
+  const latestExplainFrames = Array.isArray(explanationEvidence?.latest_frames)
+    ? explanationEvidence.latest_frames
+    : [];
+  const explainFramesByTime = new Map<string, ArtifactFrame>();
+  for (const frame of latestExplainFrames) {
+    const key = extractFrameTimestampKey(frame);
+    if (key) explainFramesByTime.set(key, frame);
+  }
+  const maxAttemptElapsedMs = explanationAttempts.reduce((max, attempt) => {
+    const value =
+      typeof attempt.elapsed_ms === "number" && Number.isFinite(attempt.elapsed_ms)
+        ? attempt.elapsed_ms
+        : 0;
+    return Math.max(max, value);
+  }, 0);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
@@ -1565,6 +1916,13 @@ export function JobDetail() {
           </button>
           <button
             type="button"
+            onClick={() => setArtifactTab("explain")}
+            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "explain" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+          >
+            Explain
+          </button>
+          <button
+            type="button"
             onClick={() => setArtifactTab("ocr")}
             className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "ocr" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
           >
@@ -1836,6 +2194,738 @@ export function JobDetail() {
               >
                 Open vision board metadata
               </a>
+            )}
+          </div>
+        )}
+
+        {artifactTab === "explain" && (
+          <div className="p-4 space-y-4">
+            {explanationLoading && !effectiveExplanation && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                Building explanation from the saved execution trace…
+              </div>
+            )}
+
+            {!effectiveExplanation && !explanationLoading && explanationError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {explanationError}
+              </div>
+            )}
+
+            {effectiveExplanation && (
+              <>
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-4">
+                    <div className="space-y-1">
+                      <HelpHeading
+                        label="Processing Summary"
+                        help="A post-hoc explanation of what the pipeline tried for this job. It is assembled from structured execution trace data captured during the run and persisted with the job."
+                      />
+                      <div className="text-sm text-gray-700">
+                        {explanationSummary?.headline ||
+                          "No structured processing explanation is available for this job."}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Attempts
+                        </div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">
+                          {explanationSummary?.attempt_count ?? explanationAttempts.length}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Retries
+                        </div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">
+                          {explanationSummary?.retry_count ?? Math.max(0, explanationAttempts.length - 1)}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Accepted Path
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+                          <span>
+                            {acceptedMethodGuideEntry?.label ||
+                              formatReasonLabel(explanationSummary?.accepted_attempt_type) ||
+                              "—"}
+                          </span>
+                          {acceptedMethodGuideEntry ? (
+                            <HelpTooltip
+                              content={acceptedMethodGuideEntry.detail}
+                              widthClassName="w-72"
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Trigger
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-gray-900">
+                          {formatReasonLabel(explanationSummary?.trigger_reason) || "—"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 xl:col-span-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Final Brand
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
+                          {explanationFinal?.brand || "—"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 xl:col-span-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Final Category
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
+                          {explanationFinal?.category || "—"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Category ID
+                        </div>
+                        <div className="mt-1 text-sm font-mono font-semibold text-primary-700">
+                          {explanationFinal?.category_id || "—"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Mapper Method
+                        </div>
+                        <div className="mt-1 text-sm text-gray-900">
+                          {formatMatchMethod(explanationFinal?.mapper_method) || "—"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Mapper Score
+                        </div>
+                        <div className="mt-1 text-sm font-mono text-cyan-700">
+                          {typeof explanationFinal?.mapper_score === "number"
+                            ? explanationFinal.mapper_score.toFixed(4)
+                            : "—"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Final Confidence
+                        </div>
+                        <div className="mt-1 text-sm font-mono text-cyan-700">
+                          {typeof explanationFinal?.confidence === "number"
+                            ? explanationFinal.confidence.toFixed(2)
+                            : "—"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                        <div className="space-y-1">
+                          <HelpHeading
+                            label="Category Journey"
+                            help="Shows how the accepted LLM category was normalized into the final canonical taxonomy category and ID."
+                          />
+                          <div className="text-xs text-gray-500">
+                            Raw classifier label versus final mapped taxonomy output.
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center">
+                          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                            <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                              Raw LLM Category
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
+                              {rawLlmCategory || "—"}
+                            </div>
+                            <div className="mt-1 text-[11px] text-gray-500">
+                              Confidence: {rawLlmConfidence !== null ? rawLlmConfidence.toFixed(2) : "—"}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-center text-gray-300 text-lg font-bold">
+                            →
+                          </div>
+                          <div className="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2">
+                            <div className="text-[11px] uppercase tracking-wider text-primary-500 font-semibold">
+                              Canonical Taxonomy Category
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
+                              {explanationFinal?.category || "—"}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-primary-700">
+                              <span>ID: {explanationFinal?.category_id || "—"}</span>
+                              <span>Score: {typeof explanationFinal?.mapper_score === "number" ? explanationFinal.mapper_score.toFixed(4) : "—"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                        <div className="space-y-1">
+                          <HelpHeading
+                            label="Operator Notes"
+                            help="Deterministic notes generated from structured retry reasons and accepted paths. These notes explain why fallbacks were needed and why the final path was accepted."
+                          />
+                          <div className="text-xs text-gray-500">
+                            System-generated explanation of the important processing decisions.
+                          </div>
+                        </div>
+                        {operatorNotes.length > 0 ? (
+                          <div className="space-y-2">
+                            {operatorNotes.map((note, idx) => (
+                              <div
+                                key={`operator-note-${idx}`}
+                                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                              >
+                                {note}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-sm text-gray-500">
+                            No deterministic operator notes were available for this job.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+                    <div className="space-y-1">
+                      <HelpHeading
+                        label="Evidence Snapshot"
+                        help="Representative evidence captured during the completed run. This view reuses persisted OCR, frame, and event data; it does not trigger fresh OCR or another model call."
+                      />
+                      <div className="text-xs text-gray-500">
+                        Persisted evidence tied to the final result and fallback ladder.
+                      </div>
+                    </div>
+
+                    {explanationEvidence?.ocr_excerpt ? (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold mb-2">
+                          OCR Excerpt
+                        </div>
+                        <div className="text-xs font-mono leading-relaxed text-gray-700 whitespace-pre-wrap">
+                          {explanationEvidence.ocr_excerpt}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-xs text-gray-500">
+                        No persisted OCR excerpt was available for this job.
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      {latestExplainFrames.slice(0, 4).map((frame, idx) => {
+                        const timestampLabel =
+                          frame.label ||
+                          (typeof frame.timestamp === "number"
+                            ? `${frame.timestamp.toFixed(1)}s`
+                            : `Frame ${idx + 1}`);
+                        return (
+                          <button
+                            key={`${frame.url}-${idx}`}
+                            type="button"
+                            onClick={() =>
+                              setSelectedExplainFrame({
+                                frame,
+                                attemptTitle: "Evidence Snapshot",
+                                timestampLabel,
+                                ocrExcerpt: explanationEvidence?.ocr_excerpt || "",
+                              })
+                            }
+                            className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 text-left hover:border-primary-300 hover:shadow-sm transition"
+                          >
+                            <img
+                              src={toApiUrl(frame.url)}
+                              alt={timestampLabel}
+                              className="aspect-video w-full object-cover"
+                            />
+                            <div className="px-2 py-1.5 text-[11px] text-gray-600 border-t border-gray-200">
+                              {timestampLabel}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                          Recent Events
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          {explanationEvidence?.event_count ?? 0} total
+                        </div>
+                      </div>
+                      <div className="mt-2 max-h-40 overflow-auto space-y-1">
+                        {(explanationEvidence?.recent_events || []).length > 0 ? (
+                          (explanationEvidence?.recent_events || []).map((event, idx) => (
+                            <div
+                              key={`${idx}-${event}`}
+                              className="rounded border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] text-gray-600"
+                            >
+                              {event}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-xs text-gray-500">
+                            No event history captured for this job.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {usedExplainMethodGuide.length > 0 && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+                    <div className="space-y-1">
+                      <HelpHeading
+                        label="Method Guide"
+                        help="Definitions for the processing paths that were used on this job. These are deterministic product explanations, not generated by an LLM."
+                      />
+                      <div className="text-xs text-gray-500">
+                        Technical meaning of the fallback paths shown below.
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {usedExplainMethodGuide.map((entry) => (
+                        <div
+                          key={entry.key}
+                          className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3"
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-gray-900">
+                                {entry.label}
+                              </div>
+                              <div className="mt-1 text-xs text-gray-600">
+                                {entry.short}
+                              </div>
+                            </div>
+                            <HelpTooltip
+                              content={entry.detail}
+                              widthClassName="w-72"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+                  <div className="space-y-1">
+                    <HelpHeading
+                      label="Decision Flow"
+                      help="The exact route the classifier took. Each node is a processing attempt. Rejected nodes show paths that were tried and discarded. The accepted node is the path that produced the final answer."
+                    />
+                    <div className="text-xs text-gray-500">
+                      End-to-end decision path for this job.
+                    </div>
+                  </div>
+
+                  {explanationAttempts.length > 0 ? (
+                    <>
+                      <div className="overflow-x-auto pb-2">
+                        <div className="flex min-w-max items-center gap-3">
+                          {explanationAttempts.map((attempt: ProcessingTraceAttempt, idx) => {
+                            const tone = attemptTone(attempt.status);
+                            const isAccepted = attempt.status === "accepted";
+                            const guideEntry = getExplainMethodGuideEntry(attempt.attempt_type);
+                            return (
+                              <Fragment key={`flow-${attempt.attempt_type}-${idx}`}>
+                                {idx > 0 && (
+                                  <div className="h-px w-10 bg-gradient-to-r from-gray-300 to-gray-200" />
+                                )}
+                                <div
+                                  className={`min-w-[190px] rounded-xl border px-4 py-3 shadow-sm ${tone.card}`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+                                      <span>{guideEntry?.label || attempt.title}</span>
+                                      {guideEntry ? (
+                                        <HelpTooltip
+                                          content={guideEntry.detail}
+                                          widthClassName="w-72"
+                                        />
+                                      ) : null}
+                                    </div>
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}
+                                    >
+                                      {isAccepted ? "Accepted" : attempt.status}
+                                    </span>
+                                  </div>
+                                  <div className="mt-2 text-xs text-gray-600">
+                                    {attempt.detail || "No additional detail"}
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-gray-500">
+                                    <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5">
+                                      {attempt.frame_count ?? 0} frame{attempt.frame_count === 1 ? "" : "s"}
+                                    </span>
+                                    <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5">
+                                      {formatElapsedMs(attempt.elapsed_ms)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </Fragment>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold mb-3">
+                          Timing Bar
+                        </div>
+                        <div className="flex h-3 overflow-hidden rounded-full bg-gray-200">
+                          {explanationAttempts.map((attempt: ProcessingTraceAttempt, idx) => {
+                            const elapsed =
+                              typeof attempt.elapsed_ms === "number" && Number.isFinite(attempt.elapsed_ms)
+                                ? Math.max(attempt.elapsed_ms, 1)
+                                : 1;
+                            const width = `${(elapsed / Math.max(maxAttemptElapsedMs, 1)) * 100}%`;
+                            const segmentClass =
+                              attempt.status === "accepted"
+                                ? "bg-emerald-500"
+                                : attempt.status === "rejected"
+                                  ? "bg-red-400"
+                                  : "bg-gray-400";
+                            return (
+                              <div
+                                key={`timing-${attempt.attempt_type}-${idx}`}
+                                className={`${segmentClass} ${idx > 0 ? "border-l border-white/70" : ""}`}
+                                style={{ width }}
+                                title={`${attempt.title}: ${formatElapsedMs(attempt.elapsed_ms)}`}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-500">
+                          {explanationAttempts.map((attempt: ProcessingTraceAttempt, idx) => (
+                            <span
+                              key={`timing-label-${attempt.attempt_type}-${idx}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5"
+                            >
+                              <span
+                                className={`inline-block h-2 w-2 rounded-full ${
+                                  attempt.status === "accepted"
+                                    ? "bg-emerald-500"
+                                    : attempt.status === "rejected"
+                                      ? "bg-red-400"
+                                      : "bg-gray-400"
+                                }`}
+                              />
+                              <span>{attempt.title}</span>
+                              <span className="font-mono">{formatElapsedMs(attempt.elapsed_ms)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-sm text-gray-500">
+                      No structured attempt trace is available for this job.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div className="space-y-1 mb-4">
+                    <HelpHeading
+                      label="Attempt Timeline"
+                      help="Each card represents a pipeline attempt or fallback stage. Accepted cards produced the final usable result. Rejected cards explain why that path did not provide enough signal."
+                    />
+                    <div className="text-xs text-gray-500">
+                      Decision trail from the initial pass through any fallback stages.
+                    </div>
+                  </div>
+
+                  {explanationAttempts.length > 0 ? (
+                    <div className="space-y-4">
+                      {explanationAttempts.map((attempt: ProcessingTraceAttempt, idx) => {
+                        const tone = attemptTone(attempt.status);
+                        const guideEntry = getExplainMethodGuideEntry(attempt.attempt_type);
+                        const frameTimes =
+                          Array.isArray(attempt.frame_times) && attempt.frame_times.length > 0
+                            ? attempt.frame_times
+                            : [];
+                        const confidence =
+                          typeof attempt.result?.confidence === "number"
+                            ? attempt.result.confidence
+                            : null;
+                        const previousAttempt =
+                          idx > 0 ? explanationAttempts[idx - 1] : null;
+                        const deltas = summarizeAttemptDelta(previousAttempt, attempt);
+                        const linkedFrames = frameTimes.map((timeValue) => {
+                          const key = timeValue.toFixed(1);
+                          return {
+                            key,
+                            timeValue,
+                            frame: explainFramesByTime.get(key) || null,
+                          };
+                        });
+                        return (
+                          <div key={`${attempt.attempt_type}-${idx}`} className="relative pl-7">
+                            {idx < explanationAttempts.length - 1 && (
+                              <div className="absolute left-[9px] top-5 bottom-[-18px] w-px bg-gray-200" />
+                            )}
+                            <div
+                              className={`absolute left-0 top-2 h-5 w-5 rounded-full border-2 ${tone.dot}`}
+                            />
+                            <div
+                              className={`rounded-xl border px-4 py-3 shadow-sm ${tone.card}`}
+                            >
+                              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+                                      <span>
+                                        {guideEntry?.label ||
+                                          attempt.title ||
+                                          formatReasonLabel(attempt.attempt_type)}
+                                      </span>
+                                      {guideEntry ? (
+                                        <HelpTooltip
+                                          content={guideEntry.detail}
+                                          widthClassName="w-72"
+                                        />
+                                      ) : null}
+                                    </span>
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}
+                                    >
+                                      {attempt.status === "accepted"
+                                        ? "Accepted"
+                                        : attempt.status === "rejected"
+                                          ? "Rejected"
+                                          : attempt.status || "attempt"}
+                                    </span>
+                                    {attempt.llm_mode && (
+                                      <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-600">
+                                        LLM: {attempt.llm_mode}
+                                      </span>
+                                    )}
+                                    {attempt.ocr_mode && (
+                                      <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-600">
+                                        OCR: {attempt.ocr_mode}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {attempt.detail && (
+                                    <div className="text-sm text-gray-700">
+                                      {attempt.detail}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-2 text-[11px] text-gray-500">
+                                  <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5">
+                                    Frames: {attempt.frame_count ?? 0}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5">
+                                    Duration: {formatElapsedMs(attempt.elapsed_ms)}
+                                  </span>
+                                  {attempt.trigger_reason && (
+                                    <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5">
+                                      Trigger: {formatReasonLabel(attempt.trigger_reason)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {linkedFrames.length > 0 && (
+                                <div className="mt-4">
+                                  <div className="mb-2 text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
+                                    Frame Filmstrip
+                                  </div>
+                                  <div className="flex gap-3 overflow-x-auto pb-1">
+                                    {linkedFrames.map(({ key, timeValue, frame }) => {
+                                      const timestampLabel = `${timeValue.toFixed(1)}s`;
+                                      return frame ? (
+                                        <button
+                                          key={`${attempt.attempt_type}-${key}`}
+                                          type="button"
+                                          onClick={() =>
+                                            setSelectedExplainFrame({
+                                              frame,
+                                              attemptTitle: attempt.title,
+                                              timestampLabel,
+                                              ocrExcerpt: attempt.ocr_excerpt,
+                                            })
+                                          }
+                                          className="w-28 shrink-0 rounded-lg overflow-hidden border border-gray-200 bg-white text-left hover:border-primary-300 hover:shadow-sm transition"
+                                        >
+                                          <img
+                                            src={toApiUrl(frame.url)}
+                                            alt={`${attempt.title} ${timestampLabel}`}
+                                            className="aspect-video w-full object-cover"
+                                          />
+                                          <div className="px-2 py-1.5 text-[11px] text-gray-600 border-t border-gray-200">
+                                            {timestampLabel}
+                                          </div>
+                                        </button>
+                                      ) : (
+                                        <div
+                                          key={`${attempt.attempt_type}-${key}`}
+                                          className="w-28 shrink-0 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center"
+                                        >
+                                          <div className="text-[11px] font-mono text-gray-700">
+                                            {timestampLabel}
+                                          </div>
+                                          <div className="mt-2 text-[10px] text-gray-400">
+                                            Frame not persisted
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {deltas.length > 0 && (
+                                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                  <div className="text-[11px] uppercase tracking-wider text-amber-700 font-semibold mb-2">
+                                    Before / After Delta
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {deltas.map((delta) => (
+                                      <span
+                                        key={`${attempt.attempt_type}-${delta}`}
+                                        className="inline-flex items-center rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[11px] text-amber-800"
+                                      >
+                                        {delta}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {(attempt.result?.brand ||
+                                attempt.result?.category ||
+                                confidence !== null) && (
+                                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                                  <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">
+                                      Brand
+                                    </div>
+                                    <div className="mt-1 text-xs font-semibold text-gray-900 break-words">
+                                      {attempt.result?.brand || "—"}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">
+                                      Category
+                                    </div>
+                                    <div className="mt-1 text-xs font-semibold text-gray-900 break-words">
+                                      {attempt.result?.category || "—"}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">
+                                      Confidence
+                                    </div>
+                                    <div className="mt-1 text-xs font-mono text-cyan-700">
+                                      {confidence !== null ? confidence.toFixed(2) : "—"}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {attempt.ocr_excerpt && (
+                                <div className="mt-3 rounded-lg border border-gray-200 bg-slate-950 px-3 py-2">
+                                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1">
+                                    OCR Snippet
+                                  </div>
+                                  <div className="text-xs font-mono leading-relaxed text-cyan-200 whitespace-pre-wrap">
+                                    {attempt.ocr_excerpt}
+                                  </div>
+                                </div>
+                              )}
+
+                              {attempt.evidence_note && (
+                                <div className="mt-3 text-xs text-gray-500">
+                                  {attempt.evidence_note}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-sm text-gray-500">
+                      No structured attempt trace is available for this job. Older jobs can still show their final result, but not the step-by-step fallback history.
+                    </div>
+                  )}
+                </div>
+
+                {selectedExplainFrame && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4">
+                    <div className="relative w-full max-w-4xl rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedExplainFrame(null)}
+                        className="absolute right-4 top-4 rounded-full border border-slate-600 bg-slate-900 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                      >
+                        Close
+                      </button>
+                      <div className="grid gap-0 md:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+                        <div className="border-b border-slate-800 md:border-b-0 md:border-r">
+                          <img
+                            src={toApiUrl(selectedExplainFrame.frame.url)}
+                            alt={selectedExplainFrame.timestampLabel}
+                            className="h-full w-full object-contain bg-black rounded-t-2xl md:rounded-l-2xl md:rounded-tr-none"
+                          />
+                        </div>
+                        <div className="p-5 space-y-4 text-slate-200">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                              Attempt
+                            </div>
+                            <div className="mt-1 text-lg font-semibold">
+                              {selectedExplainFrame.attemptTitle}
+                            </div>
+                            <div className="mt-2 inline-flex items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-mono text-cyan-200">
+                              {selectedExplainFrame.timestampLabel}
+                            </div>
+                          </div>
+
+                          {selectedExplainFrame.ocrExcerpt ? (
+                            <div className="rounded-xl border border-slate-700 bg-slate-900 p-3">
+                              <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
+                                OCR / Evidence
+                              </div>
+                              <div className="text-xs font-mono leading-relaxed text-cyan-200 whitespace-pre-wrap">
+                                {selectedExplainFrame.ocrExcerpt}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400">
+                              No OCR snippet was attached to this attempt.
+                            </div>
+                          )}
+
+                          <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400">
+                            This overlay shows persisted evidence only. Opening it does not re-run OCR, vision scoring, or the classifier.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

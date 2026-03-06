@@ -523,6 +523,12 @@ def process_single_video(
     stage_callback=None,
     enable_vision=None,  # Deprecated alias
 ):
+    processing_trace: dict[str, object] = {
+        "mode": "pipeline",
+        "attempts": [],
+        "summary": {},
+    }
+    pipeline_started_at = time.perf_counter()
     if enable_vision is not None:
         if enable_vision_board is None:
             enable_vision_board = bool(enable_vision)
@@ -539,7 +545,118 @@ def process_single_video(
         logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
         express_mode = bool(express_mode)
         send_llm_frame = bool(enable_llm_frame or express_mode)
+        processing_trace.update(
+            {
+                "provider": p,
+                "model": m,
+                "ocr_engine": oe,
+                "ocr_mode": om,
+                "scan_mode": "Express" if express_mode else sm,
+            }
+        )
         visual_debug: dict[str, object] | None = None
+        initial_frames: list[dict[str, object]] = []
+
+        def _frame_times_snapshot(source_frames: list[dict[str, object]]) -> list[float]:
+            times: list[float] = []
+            for frame in source_frames or []:
+                try:
+                    times.append(round(float(frame.get("time", 0.0)), 1))
+                except Exception:
+                    continue
+            return times
+
+        def _ocr_excerpt(text: str, limit: int = 220) -> str:
+            compact = " ".join((text or "").split())
+            if len(compact) <= limit:
+                return compact
+            return f"{compact[:limit].rstrip()}..."
+
+        def _result_snapshot(payload: dict[str, object] | None) -> dict[str, object]:
+            if not isinstance(payload, dict):
+                return {"brand": "", "category": "", "confidence": 0.0}
+            try:
+                confidence = float(payload.get("confidence", 0.0) or 0.0)
+            except Exception:
+                confidence = 0.0
+            return {
+                "brand": str(payload.get("brand", "") or ""),
+                "category": str(payload.get("category", "") or ""),
+                "confidence": confidence,
+            }
+
+        def _append_trace_attempt(
+            *,
+            attempt_type: str,
+            title: str,
+            status: str,
+            source_frames: list[dict[str, object]] | None,
+            detail: str = "",
+            trigger_reason: str = "",
+            ocr_text_value: str = "",
+            result_payload: dict[str, object] | None = None,
+            ocr_mode_used: str = "",
+            llm_mode: str = "standard",
+            evidence_note: str = "",
+            elapsed_ms: float | None = None,
+        ) -> None:
+            attempts = processing_trace.setdefault("attempts", [])
+            if not isinstance(attempts, list):
+                return
+            attempts.append(
+                {
+                    "attempt_type": attempt_type,
+                    "title": title,
+                    "status": status,
+                    "detail": detail,
+                    "trigger_reason": trigger_reason,
+                    "frame_count": len(source_frames or []),
+                    "frame_times": _frame_times_snapshot(source_frames or []),
+                    "ocr_excerpt": _ocr_excerpt(ocr_text_value),
+                    "ocr_signal": _ocr_text_has_signal(ocr_text_value),
+                    "ocr_mode": ocr_mode_used,
+                    "llm_mode": llm_mode,
+                    "evidence_note": evidence_note,
+                    "elapsed_ms": round(float(elapsed_ms), 1) if elapsed_ms is not None else None,
+                    "result": _result_snapshot(result_payload),
+                }
+            )
+
+        def _finalize_processing_trace() -> None:
+            attempts = processing_trace.get("attempts")
+            if not isinstance(attempts, list):
+                attempts = []
+            accepted = next(
+                (
+                    attempt
+                    for attempt in reversed(attempts)
+                    if isinstance(attempt, dict) and attempt.get("status") == "accepted"
+                ),
+                None,
+            )
+            trigger_reason = next(
+                (
+                    str(attempt.get("trigger_reason") or "")
+                    for attempt in attempts
+                    if isinstance(attempt, dict) and attempt.get("trigger_reason")
+                ),
+                "",
+            )
+            if isinstance(accepted, dict):
+                accepted_title = str(accepted.get("title") or "Processing Path")
+                if accepted.get("attempt_type") == "initial":
+                    headline = f"Completed on {accepted_title.lower()}."
+                else:
+                    headline = f"Recovered via {accepted_title.lower()}."
+            else:
+                headline = "No successful processing path was recorded."
+            processing_trace["summary"] = {
+                "headline": headline,
+                "attempt_count": len(attempts),
+                "retry_count": max(0, len(attempts) - 1),
+                "accepted_attempt_type": accepted.get("attempt_type") if isinstance(accepted, dict) else "",
+                "trigger_reason": trigger_reason,
+            }
         if express_mode:
             if stage_callback:
                 stage_callback("frame_extract", "express mode enabled; extracting static tail frame")
@@ -567,6 +684,7 @@ def process_single_video(
             frames, cap = extract_frames_for_pipeline(url, scan_mode=sm, job_id=job_id)
             if cap and cap.isOpened():
                 cap.release()
+        initial_frames = list(frames)
         
         if not frames: 
             logger.warning(f"[{url}] Extraction yielded no frames.")
@@ -926,6 +1044,8 @@ def process_single_video(
             fallback_frames: list[dict[str, object]],
             fallback_ocr_text: str,
             fallback_res: dict[str, object],
+            detail: str = "",
+            reason: str = "",
         ) -> None:
             nonlocal frames, ocr_text, res, sorted_vision, per_frame_vision
             frames = fallback_frames
@@ -934,6 +1054,18 @@ def process_single_video(
             if enable_vision_board:
                 sorted_vision, per_frame_vision = _do_vision()
             logger.info("[%s] fallback_accepted type=%s", url, fallback_type)
+            _append_trace_attempt(
+                attempt_type=fallback_type,
+                title=fallback_type.replace("_", " ").title(),
+                status="accepted",
+                source_frames=fallback_frames,
+                detail=detail,
+                trigger_reason=reason,
+                ocr_text_value=fallback_ocr_text,
+                result_payload=fallback_res,
+                ocr_mode_used="image-only" if fallback_type == "express_rescue" else "",
+                llm_mode="express" if fallback_type == "express_rescue" else "standard",
+            )
 
         def _run_text_fallback(
             fallback_type: str,
@@ -942,12 +1074,24 @@ def process_single_video(
             reason: str,
             ocr_mode_override: str | None = None,
         ) -> tuple[bool, str]:
+            attempt_started_at = time.perf_counter()
             if not fallback_frames:
                 logger.info(
                     "[%s] fallback_rejected type=%s reason=no_frames trigger=%s",
                     url,
                     fallback_type,
                     reason,
+                )
+                _append_trace_attempt(
+                    attempt_type=fallback_type,
+                    title=fallback_type.replace("_", " ").title(),
+                    status="rejected",
+                    source_frames=[],
+                    detail=detail,
+                    trigger_reason=reason,
+                    ocr_mode_used=ocr_mode_override or "",
+                    evidence_note="No candidate frames were available.",
+                    elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
                 )
                 return False, ""
             logger.info(
@@ -973,6 +1117,18 @@ def process_single_video(
                     fallback_type,
                     reason,
                 )
+                _append_trace_attempt(
+                    attempt_type=fallback_type,
+                    title=fallback_type.replace("_", " ").title(),
+                    status="rejected",
+                    source_frames=fallback_frames,
+                    detail=detail,
+                    trigger_reason=reason,
+                    ocr_text_value=fallback_ocr_text,
+                    ocr_mode_used=ocr_mode_override or "",
+                    evidence_note="OCR remained too weak to retry the classifier.",
+                    elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
+                )
                 return False, fallback_ocr_text
             fallback_tail_image = get_pil_image(fallback_frames[-1]) if send_llm_frame else None
             if stage_callback:
@@ -997,8 +1153,31 @@ def process_single_video(
                     fallback_blank_reason,
                     reason,
                 )
+                _append_trace_attempt(
+                    attempt_type=fallback_type,
+                    title=fallback_type.replace("_", " ").title(),
+                    status="rejected",
+                    source_frames=fallback_frames,
+                    detail=detail,
+                    trigger_reason=reason,
+                    ocr_text_value=fallback_ocr_text,
+                    result_payload=fallback_res,
+                    ocr_mode_used=ocr_mode_override or "",
+                    evidence_note=f"Classifier response was rejected: {fallback_blank_reason}.",
+                    elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
+                )
                 return False, fallback_ocr_text
-            _apply_fallback_result(fallback_type, fallback_frames, fallback_ocr_text, fallback_res)
+            _apply_fallback_result(
+                fallback_type,
+                fallback_frames,
+                fallback_ocr_text,
+                fallback_res,
+                detail=detail,
+                reason=reason,
+            )
+            attempts = processing_trace.get("attempts")
+            if isinstance(attempts, list) and attempts:
+                attempts[-1]["elapsed_ms"] = round((time.perf_counter() - attempt_started_at) * 1000.0, 1)
             return True, fallback_ocr_text
 
         def _run_express_fallback(
@@ -1006,12 +1185,23 @@ def process_single_video(
             reason: str,
             fallback_ocr_text: str = "",
         ) -> bool:
+            attempt_started_at = time.perf_counter()
             if not _express_rescue_enabled():
                 logger.info(
                     "[%s] fallback_rejected type=%s reason=disabled trigger=%s",
                     url,
                     fallback_type,
                     reason,
+                )
+                _append_trace_attempt(
+                    attempt_type=fallback_type,
+                    title=fallback_type.replace("_", " ").title(),
+                    status="rejected",
+                    source_frames=[],
+                    trigger_reason=reason,
+                    llm_mode="express",
+                    evidence_note="Express rescue is disabled.",
+                    elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
                 )
                 return False
             logger.info("[%s] fallback_triggered type=%s reason=%s", url, fallback_type, reason)
@@ -1029,6 +1219,16 @@ def process_single_video(
                     url,
                     fallback_type,
                     reason,
+                )
+                _append_trace_attempt(
+                    attempt_type=fallback_type,
+                    title=fallback_type.replace("_", " ").title(),
+                    status="rejected",
+                    source_frames=[],
+                    trigger_reason=reason,
+                    llm_mode="express",
+                    evidence_note="Express rescue could not extract a representative frame.",
+                    elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
                 )
                 return False
             express_bgr = cv2.cvtColor(np.array(express_frame), cv2.COLOR_RGB2BGR)
@@ -1063,13 +1263,29 @@ def process_single_video(
                     express_blank_reason,
                     reason,
                 )
+                _append_trace_attempt(
+                    attempt_type=fallback_type,
+                    title=fallback_type.replace("_", " ").title(),
+                    status="rejected",
+                    source_frames=express_frames,
+                    trigger_reason=reason,
+                    result_payload=express_res,
+                    llm_mode="express",
+                    evidence_note=f"Express classifier response was rejected: {express_blank_reason}.",
+                    elapsed_ms=(time.perf_counter() - attempt_started_at) * 1000.0,
+                )
                 return False
             _apply_fallback_result(
                 fallback_type,
                 express_frames,
                 fallback_ocr_text if _ocr_text_has_signal(fallback_ocr_text) else "",
                 express_res,
+                detail="static tail frame",
+                reason=reason,
             )
+            attempts = processing_trace.get("attempts")
+            if isinstance(attempts, list) and attempts:
+                attempts[-1]["elapsed_ms"] = round((time.perf_counter() - attempt_started_at) * 1000.0, 1)
             return True
 
         def _extract_full_video_rescue_frames() -> list[dict[str, object]]:
@@ -1087,6 +1303,23 @@ def process_single_video(
             express_mode=express_mode,
             ocr_text=ocr_text,
             res=res,
+        )
+        initial_blank, initial_blank_reason = _llm_result_is_blank(res)
+        initial_detail = "express image-only path" if express_mode else (
+            "ocr skipped after high-confidence multimodal result" if not ocr_text and res is not None else "tail scan"
+        )
+        _append_trace_attempt(
+            attempt_type="initial",
+            title="Initial Express Pass" if express_mode else "Initial Tail Pass",
+            status="accepted" if not initial_blank else "rejected",
+            source_frames=initial_frames,
+            detail=initial_detail,
+            trigger_reason="" if not initial_blank else initial_blank_reason,
+            ocr_text_value=ocr_text,
+            result_payload=res,
+            ocr_mode_used="" if express_mode else om,
+            llm_mode="express" if express_mode else "standard",
+            elapsed_ms=(time.perf_counter() - pipeline_started_at) * 1000.0,
         )
         if rescue_needed:
             if stage_callback:
@@ -1166,6 +1399,7 @@ def process_single_video(
         signal_artifacts = {
             "mapper_plot": None,
             "visual_plot": None,
+            "processing_trace": None,
         }
         if hasattr(category_mapper, "build_mapper_vector_plot"):
             try:
@@ -1192,6 +1426,8 @@ def process_single_video(
                 )
             except Exception as exc:
                 logger.debug("[%s] visual_vector_plot_failed: %s", url, exc)
+        _finalize_processing_trace()
+        signal_artifacts["processing_trace"] = processing_trace
         row = [
             url,
             res.get("brand", "Unknown"),
@@ -1207,7 +1443,14 @@ def process_single_video(
         
     except Exception as e: 
         logger.error(f"[{url}] Pipeline Worker Crash: {str(e)}", exc_info=True)
-        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None}
+        processing_trace["summary"] = {
+            "headline": "Processing crashed before a usable result was produced.",
+            "attempt_count": len(processing_trace.get("attempts", [])) if isinstance(processing_trace.get("attempts"), list) else 0,
+            "retry_count": max(0, len(processing_trace.get("attempts", [])) - 1) if isinstance(processing_trace.get("attempts"), list) else 0,
+            "accepted_attempt_type": "",
+            "trigger_reason": "pipeline_exception",
+        }
+        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace}
 
 def run_pipeline_job(
     src,

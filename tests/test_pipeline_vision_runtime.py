@@ -634,7 +634,7 @@ def test_pipeline_skips_ocr_when_multimodal_tail_is_high_confidence(monkeypatch)
         pipeline_module.categories_runtime, "siglip_processor", _DummyProcessor()
     )
 
-    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",
@@ -754,7 +754,7 @@ def test_pipeline_runs_ocr_when_multimodal_tail_confidence_is_too_low(monkeypatc
         pipeline_module.categories_runtime, "siglip_processor", _DummyProcessor()
     )
 
-    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",
@@ -903,7 +903,7 @@ def test_pipeline_edge_rescue_retries_extended_tail_ocr_only_after_blank_initial
     monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
     monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
 
-    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",
@@ -987,7 +987,7 @@ def test_pipeline_edge_rescue_falls_back_to_image_first_when_rescue_ocr_is_blank
     monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
     monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
 
-    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
+    _, _, ocr_text, _, _, row, signal_artifacts = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",
@@ -1006,6 +1006,15 @@ def test_pipeline_edge_rescue_falls_back_to_image_first_when_rescue_ocr_is_blank
     assert llm_calls == [("", False), ("", True)]
     assert ocr_text == ""
     assert row[1] == "Visual Brand"
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "express_rescue"
+    assert [attempt["attempt_type"] for attempt in processing_trace["attempts"]] == [
+        "initial",
+        "ocr_rescue",
+        "express_rescue",
+    ]
+    assert processing_trace["attempts"][-1]["status"] == "accepted"
+    assert processing_trace["attempts"][-1]["elapsed_ms"] is not None
 
 
 def test_pipeline_edge_rescue_runs_express_before_extended_tail(monkeypatch):

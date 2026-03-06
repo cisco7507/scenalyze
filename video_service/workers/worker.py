@@ -113,6 +113,7 @@ def _build_default_artifacts(job_id: str) -> dict:
             "confidence": None,
             "vector_plot": None,
         },
+        "processing_trace": None,
         "extras": {"events_url": f"/jobs/{job_id}/events"},
     }
 
@@ -724,6 +725,8 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         latest_scores,
         latest_signal_artifacts.get("visual_plot") if isinstance(latest_signal_artifacts, dict) else None,
     )
+    if isinstance(latest_signal_artifacts, dict):
+        artifacts_payload["processing_trace"] = latest_signal_artifacts.get("processing_trace")
 
     if final_df is not None and not final_df.empty:
         rows = final_df.to_dict(orient="records")

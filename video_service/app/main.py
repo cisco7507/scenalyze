@@ -1527,6 +1527,7 @@ def _default_job_artifacts(job_id: str) -> dict:
             "confidence": None,
             "vector_plot": None,
         },
+        "processing_trace": None,
         "extras": {
             "events_url": f"/jobs/{job_id}/events",
         },
@@ -1570,6 +1571,9 @@ def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
         payload["category_mapper"]["confidence"] = mapper_payload.get("confidence")
         payload["category_mapper"]["vector_plot"] = mapper_payload.get("vector_plot")
 
+    if isinstance(artifacts.get("processing_trace"), dict):
+        payload["processing_trace"] = artifacts.get("processing_trace")
+
     extras = artifacts.get("extras")
     if isinstance(extras, dict):
         payload["extras"].update(extras)
@@ -1578,6 +1582,64 @@ def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
         if key not in payload:
             payload[key] = value
     return payload
+
+
+def _build_job_explanation(job_id: str, job_row, artifacts: dict, result_payload: list | None, events: list[str]) -> dict:
+    trace = artifacts.get("processing_trace")
+    attempts = trace.get("attempts") if isinstance(trace, dict) else []
+    summary = trace.get("summary") if isinstance(trace, dict) else {}
+    if not isinstance(attempts, list):
+        attempts = []
+    if not isinstance(summary, dict):
+        summary = {}
+
+    first_result = result_payload[0] if isinstance(result_payload, list) and result_payload else {}
+    if not isinstance(first_result, dict):
+        first_result = {}
+
+    category_mapper = artifacts.get("category_mapper") if isinstance(artifacts.get("category_mapper"), dict) else {}
+    ocr_payload = artifacts.get("ocr_text") if isinstance(artifacts.get("ocr_text"), dict) else {}
+    latest_frames = artifacts.get("latest_frames") if isinstance(artifacts.get("latest_frames"), list) else []
+    row_brand = job_row["brand"] if "brand" in job_row.keys() else ""
+    row_category = job_row["category"] if "category" in job_row.keys() else ""
+    row_category_id = job_row["category_id"] if "category_id" in job_row.keys() else ""
+
+    if attempts:
+        headline = summary.get("headline") or "Processing explanation generated from structured execution trace."
+    elif result_payload:
+        headline = "This job completed before structured explanation traces were available."
+    else:
+        headline = "No structured explanation is available for this job yet."
+
+    return {
+        "job_id": job_id,
+        "mode": job_row["mode"] if "mode" in job_row.keys() else None,
+        "status": job_row["status"],
+        "stage": job_row["stage"] if "stage" in job_row.keys() else None,
+        "stage_detail": job_row["stage_detail"] if "stage_detail" in job_row.keys() else None,
+        "summary": {
+            "headline": headline,
+            "attempt_count": summary.get("attempt_count", len(attempts)),
+            "retry_count": summary.get("retry_count", max(0, len(attempts) - 1)),
+            "accepted_attempt_type": summary.get("accepted_attempt_type", ""),
+            "trigger_reason": summary.get("trigger_reason", ""),
+        },
+        "attempts": attempts,
+        "final": {
+            "brand": first_result.get("Brand") or first_result.get("brand") or row_brand,
+            "category": first_result.get("Category") or first_result.get("category") or row_category,
+            "category_id": first_result.get("Category ID") or first_result.get("category_id") or row_category_id,
+            "confidence": first_result.get("Confidence") or first_result.get("confidence"),
+            "mapper_method": category_mapper.get("method") if isinstance(category_mapper, dict) else "",
+            "mapper_score": category_mapper.get("score") if isinstance(category_mapper, dict) else None,
+        },
+        "evidence": {
+            "ocr_excerpt": " ".join((ocr_payload.get("text") or "").split())[:400],
+            "latest_frames": latest_frames[:4],
+            "event_count": len(events),
+            "recent_events": events[-8:],
+        },
+    }
 
 
 def _append_recovery_event(conn, job_id: str, message: str) -> None:
@@ -1983,6 +2045,41 @@ async def get_job_events(req: Request, job_id: str):
     if not row or not row["events"]:
         return {"events": []}
     return {"events": json.loads(row["events"])}
+
+
+@app.get("/jobs/{job_id}/explanation", tags=["jobs"])
+async def get_job_explanation(req: Request, job_id: str):
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
+    with closing(get_db()) as conn:
+        row = conn.execute(
+            "SELECT id, status, stage, stage_detail, mode, brand, category, category_id, result_json, artifacts_json, events FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Job not found")
+
+    try:
+        artifacts_raw = json.loads(row["artifacts_json"]) if row["artifacts_json"] else None
+    except Exception:
+        artifacts_raw = None
+    artifacts = _normalize_job_artifacts(job_id, artifacts_raw)
+
+    try:
+        result_payload = json.loads(row["result_json"]) if row["result_json"] else None
+    except Exception:
+        result_payload = None
+
+    try:
+        events = json.loads(row["events"]) if row["events"] else []
+        if not isinstance(events, list):
+            events = []
+    except Exception:
+        events = []
+
+    explanation = _build_job_explanation(job_id, row, artifacts, result_payload, events)
+    return {"explanation": explanation}
 
 
 @app.get("/jobs/{job_id}/stream", tags=["jobs"], response_model=None)
