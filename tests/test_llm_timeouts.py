@@ -11,6 +11,7 @@ if "ddgs" not in sys.modules:
     sys.modules["ddgs"] = ddgs_stub
 
 from video_service.core.llm import (
+    ClassificationPipeline,
     HybridLLM,
     OpenAICompatibleProvider,
     OllamaQwenProvider,
@@ -287,3 +288,139 @@ def test_ollama_pipeline_omits_categories_from_prompt_and_sends_no_schema(monkey
     assert "Categories:" not in call["json"]["messages"][1]["content"]
     assert 'OCR Text: "sample"' in call["json"]["messages"][1]["content"]
     assert "response_format" not in call["json"]
+
+
+class _FakeProvider:
+    supports_vision = False
+
+    def __init__(self, responses: list[dict]) -> None:
+        self.responses = responses
+        self.calls: list[dict] = []
+
+    def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+        self.calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "images": images,
+            }
+        )
+        return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
+
+
+class _FakeSearchClient:
+    def __init__(self, snippets: str | None) -> None:
+        self.snippets = snippets
+        self.queries: list[str] = []
+
+    def search(self, query: str, timeout: int = 45):
+        self.queries.append(query)
+        return self.snippets
+
+
+def test_brand_ambiguity_guard_triggers_web_disambiguation(monkeypatch):
+    provider = _FakeProvider(
+        [
+            {
+                "brand": "Telus",
+                "category": "Telecommunications",
+                "confidence": 0.99,
+                "reasoning": "This slogan is famously associated with Telus and matches its advertising style.",
+            },
+            {
+                "brand": "Telstra",
+                "category": "Telecommunications",
+                "confidence": 0.93,
+                "reasoning": "Web snippets explicitly tie the slogan to Telstra.",
+            },
+        ]
+    )
+    search_client = _FakeSearchClient("Telstra wherever we go mobile network official slogan")
+    pipeline = ClassificationPipeline(provider=provider, search_client=search_client, validation_threshold=0.7)
+
+    monkeypatch.setenv("BRAND_AMBIGUITY_GUARD", "true")
+    monkeypatch.setenv("BRAND_AMBIGUITY_CONFIDENCE_THRESHOLD", "0.85")
+
+    result = pipeline.classify(
+        system_prompt="sys",
+        user_prompt="user",
+        raw_ocr_text="whereverwego",
+        enable_search=True,
+        include_image=False,
+        image_b64=None,
+    )
+
+    assert result["brand"] == "Telstra"
+    assert result["brand_ambiguity_flag"] is True
+    assert result["brand_ambiguity_resolved"] is True
+    assert result["brand_disambiguation_reason"] == "brand_corrected_by_web"
+    assert len(provider.calls) == 2
+    assert len(search_client.queries) == 1
+    assert "Telus" not in search_client.queries[0]
+    assert "whereverwego" in search_client.queries[0]
+
+
+def test_brand_ambiguity_guard_skips_when_exact_brand_anchor_present(monkeypatch):
+    provider = _FakeProvider(
+        [
+            {
+                "brand": "Telstra",
+                "category": "Telecommunications",
+                "confidence": 0.99,
+                "reasoning": "Direct OCR brand anchor.",
+            }
+        ]
+    )
+    search_client = _FakeSearchClient("unused")
+    pipeline = ClassificationPipeline(provider=provider, search_client=search_client, validation_threshold=0.7)
+
+    monkeypatch.setenv("BRAND_AMBIGUITY_GUARD", "true")
+    monkeypatch.setenv("BRAND_AMBIGUITY_CONFIDENCE_THRESHOLD", "0.85")
+
+    result = pipeline.classify(
+        system_prompt="sys",
+        user_prompt="user",
+        raw_ocr_text="Telstra whereverwego",
+        enable_search=True,
+        include_image=False,
+        image_b64=None,
+    )
+
+    assert result["brand"] == "Telstra"
+    assert "brand_ambiguity_flag" not in result
+    assert len(provider.calls) == 1
+    assert search_client.queries == []
+
+
+def test_brand_ambiguity_guard_fails_closed_when_search_unavailable(monkeypatch):
+    provider = _FakeProvider(
+        [
+            {
+                "brand": "Telus",
+                "category": "Telecommunications",
+                "confidence": 0.99,
+                "reasoning": "This slogan is famously associated with Telus and matches its advertising style.",
+            }
+        ]
+    )
+    search_client = _FakeSearchClient(None)
+    pipeline = ClassificationPipeline(provider=provider, search_client=search_client, validation_threshold=0.7)
+
+    monkeypatch.setenv("BRAND_AMBIGUITY_GUARD", "true")
+    monkeypatch.setenv("BRAND_AMBIGUITY_CONFIDENCE_THRESHOLD", "0.85")
+
+    result = pipeline.classify(
+        system_prompt="sys",
+        user_prompt="user",
+        raw_ocr_text="whereverwego",
+        enable_search=True,
+        include_image=False,
+        image_b64=None,
+    )
+
+    assert result["brand"] == "Telus"
+    assert result["brand_ambiguity_flag"] is True
+    assert result["brand_ambiguity_resolved"] is False
+    assert result["brand_disambiguation_reason"] == "search_unavailable"
+    assert len(provider.calls) == 1
+    assert len(search_client.queries) == 1

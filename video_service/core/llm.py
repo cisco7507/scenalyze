@@ -475,6 +475,115 @@ def create_provider(provider: str, backend_model: str, context_size: int = 8192)
     raise ValueError(f"Unsupported provider: {provider}")
 
 
+_BRAND_MEMORY_REASON_PATTERNS = (
+    "famously associated",
+    "typical of",
+    "advertising style",
+    "brand messaging",
+    "core part of",
+    "often emphasizes",
+    "widely associated",
+)
+_GENERIC_SEARCH_STOPWORDS = {
+    "official",
+    "brand",
+    "company",
+    "product",
+    "service",
+    "services",
+    "offer",
+    "offers",
+    "promotion",
+    "promo",
+}
+
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_brand_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _extract_domains(text: str) -> list[str]:
+    return re.findall(r"\b([a-z0-9-]+\.[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b", text or "", flags=re.IGNORECASE)
+
+
+def _brand_tokens(brand: str) -> list[str]:
+    return [token for token in _normalize_brand_text(brand).split() if len(token) >= 3]
+
+
+def _ocr_tokens(text: str) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for token in re.findall(r"[A-Za-zÀ-ÿ0-9]{4,}", text or ""):
+        normalized = token.lower()
+        if normalized in _GENERIC_SEARCH_STOPWORDS or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(token)
+    return ordered
+
+
+def _has_exact_brand_anchor(text: str, brand: str) -> bool:
+    normalized_text = set(_normalize_brand_text(text).split())
+    brand_parts = _brand_tokens(brand)
+    return bool(brand_parts and any(part in normalized_text for part in brand_parts))
+
+
+def _has_domain_anchor(text: str) -> bool:
+    return bool(_extract_domains(text))
+
+
+def _has_market_cue(text: str) -> bool:
+    normalized = _normalize_brand_text(text)
+    if any(marker in normalized for marker in {" canada ", " canadian ", " australia ", " australian "}):
+        return True
+    for domain in _extract_domains(text):
+        host = domain.split("/", 1)[0]
+        tld = host.rsplit(".", 1)[-1]
+        if len(tld) == 2:
+            return True
+    return False
+
+
+def _ocr_is_sparse_or_slogan_like(text: str) -> tuple[bool, str]:
+    tokens = _ocr_tokens(text)
+    compact = _normalize_brand_text(text)
+    if len(tokens) <= 6:
+        return True, f"sparse_tokens={len(tokens)}"
+    if len(compact) <= 80:
+        return True, f"short_chars={len(compact)}"
+    return False, "rich_ocr"
+
+
+def _reasoning_looks_memory_led(reasoning: str) -> bool:
+    normalized = (reasoning or "").lower()
+    return any(pattern in normalized for pattern in _BRAND_MEMORY_REASON_PATTERNS)
+
+
+def _brand_confirmed_by_web(brand: str, snippets: str) -> bool:
+    normalized_snippets = set(_normalize_brand_text(snippets).split())
+    brand_parts = _brand_tokens(brand)
+    if not brand_parts:
+        return False
+    return any(part in normalized_snippets for part in brand_parts)
+
+
 class ClassificationPipeline:
     def __init__(
         self,
@@ -485,6 +594,105 @@ class ClassificationPipeline:
         self.provider = provider
         self.search_client = search_client
         self.validation_threshold = validation_threshold
+
+    def _brand_ambiguity_guard_enabled(self) -> bool:
+        return _env_truthy("BRAND_AMBIGUITY_GUARD", default=True)
+
+    def _brand_ambiguity_confidence_threshold(self) -> float:
+        return _env_float("BRAND_AMBIGUITY_CONFIDENCE_THRESHOLD", 0.85)
+
+    def _build_brand_disambiguation_query(self, raw_ocr_text: str) -> str:
+        query_parts: list[str] = []
+        domains = _extract_domains(raw_ocr_text)
+        if domains:
+            first_domain = domains[0]
+            host = first_domain.split("/", 1)[0]
+            query_parts.extend([f"site:{host}", f"\"{host}\""])
+        ocr_tokens = _ocr_tokens(raw_ocr_text)
+        if ocr_tokens:
+            query_parts.extend(f"\"{token}\"" if idx == 0 else token for idx, token in enumerate(ocr_tokens[:6]))
+        query_parts.extend(["official", "brand", "slogan"])
+        return " ".join(dict.fromkeys(part for part in query_parts if part))
+
+    def _should_trigger_brand_ambiguity_guard(
+        self,
+        result_payload: dict,
+        raw_ocr_text: str,
+    ) -> tuple[bool, str]:
+        if not self._brand_ambiguity_guard_enabled():
+            return False, "disabled"
+
+        brand = str(result_payload.get("brand", "") or "").strip()
+        if brand.lower() in {"", "unknown", "none", "n/a"}:
+            return False, "blank_brand"
+
+        try:
+            confidence = float(result_payload.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        threshold = self._brand_ambiguity_confidence_threshold()
+        if confidence < threshold:
+            return False, f"confidence={confidence:.2f}<threshold={threshold:.2f}"
+
+        if _has_exact_brand_anchor(raw_ocr_text, brand):
+            return False, "exact_brand_anchor"
+        if _has_domain_anchor(raw_ocr_text):
+            return False, "domain_anchor"
+        if _has_market_cue(raw_ocr_text):
+            return False, "market_cue"
+
+        sparse_ocr, sparse_reason = _ocr_is_sparse_or_slogan_like(raw_ocr_text)
+        memory_led = _reasoning_looks_memory_led(str(result_payload.get("reasoning", "") or ""))
+        if sparse_ocr or memory_led:
+            reasons = [sparse_reason] if sparse_ocr else []
+            if memory_led:
+                reasons.append("memory_led_reasoning")
+            return True, ";".join(reasons) or "weak_anchor"
+        return False, "evidence_rich"
+
+    def _attempt_brand_disambiguation(
+        self,
+        system_prompt: str,
+        current_result: dict,
+        raw_ocr_text: str,
+    ) -> tuple[dict | None, str]:
+        current_brand = str(current_result.get("brand", "") or "").strip()
+        query = self._build_brand_disambiguation_query(raw_ocr_text)
+        if not query:
+            return None, "no_search_query"
+
+        logger.info("brand_disambiguation_triggered query=%r current_brand=%r", query, current_brand)
+        snippets = self.search_client.search(query)
+        if not snippets:
+            return None, "search_unavailable"
+
+        val_res = self.provider.generate_json(
+            system_prompt + "\nBRAND DISAMBIGUATION MODE",
+            (
+                f"OCR: {raw_ocr_text}\n"
+                f"Current Brand Guess: {current_brand}\n"
+                f"Current Category: {current_result.get('category', '')}\n"
+                f"Web Evidence: {snippets}\n"
+                "Confirm or correct the brand. Slogan-only matches are low-trust unless corroborated by exact brand text, a domain, market/country cues, or explicit web evidence. "
+                "Keep the category unless a corrected brand clearly changes it."
+            ),
+        )
+        if not isinstance(val_res, dict) or "brand" not in val_res:
+            return None, "invalid_llm_response"
+
+        resolved_brand = str(val_res.get("brand", "") or "").strip()
+        if resolved_brand.lower() in {"", "unknown", "none", "n/a"}:
+            return None, "blank_brand_response"
+
+        if not _brand_confirmed_by_web(resolved_brand, snippets):
+            return None, f"web_unconfirmed_brand={resolved_brand!r}"
+
+        if resolved_brand.lower() == current_brand.lower():
+            val_res["reasoning"] = "(Brand confirmed) " + str(val_res.get("reasoning", "") or "")
+            return val_res, "brand_confirmed_by_web"
+
+        val_res["reasoning"] = "(Brand corrected) " + str(val_res.get("reasoning", "") or "")
+        return val_res, "brand_corrected_by_web"
 
     def classify(
         self,
@@ -501,6 +709,35 @@ class ClassificationPipeline:
         logger.debug("llm_pipeline_initial_result: %s", res)
         if express_mode:
             return res if isinstance(res, dict) else {"error": "Unexpected LLM response"}
+
+        if isinstance(res, dict):
+            guard_triggered, guard_reason = self._should_trigger_brand_ambiguity_guard(res, raw_ocr_text)
+            if guard_triggered:
+                logger.info("brand_ambiguity_guard_triggered: %s brand=%r", guard_reason, res.get("brand", ""))
+                res["brand_ambiguity_flag"] = True
+                res["brand_ambiguity_reason"] = guard_reason
+                res["brand_evidence_strength"] = "weak_anchor"
+                if enable_search:
+                    refined, refine_reason = self._attempt_brand_disambiguation(system_prompt, res, raw_ocr_text)
+                    if refined is not None:
+                        refined["brand_ambiguity_flag"] = True
+                        refined["brand_ambiguity_reason"] = guard_reason
+                        refined["brand_ambiguity_resolved"] = True
+                        refined["brand_disambiguation_reason"] = refine_reason
+                        logger.info(
+                            "brand_disambiguation_accepted: %s old_brand=%r new_brand=%r",
+                            refine_reason,
+                            res.get("brand", ""),
+                            refined.get("brand", ""),
+                        )
+                        res = refined
+                    else:
+                        res["brand_ambiguity_resolved"] = False
+                        res["brand_disambiguation_reason"] = refine_reason
+                        logger.info("brand_disambiguation_rejected: %s", refine_reason)
+                else:
+                    res["brand_ambiguity_resolved"] = False
+                    res["brand_disambiguation_reason"] = "search_disabled"
 
         brand = res.get("brand", "Unknown") if isinstance(res, dict) else "Unknown"
         if brand.lower() in ["unknown", "none", "n/a", ""] and enable_search:
@@ -719,7 +956,8 @@ class HybridLLM:
             system_prompt = (
                 "You are a Senior Marketing Analyst and Global Brand Expert. "
                 "Your goal is to categorize video advertisements by examining the final frame of the commercial and using your vast internal knowledge of companies, slogans, and industries. "
-                "Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this internal database as your absolute primary source of truth. "
+                "Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this knowledge as a strong prior, but direct on-frame brand text, logos, domains, and market cues override memory when they conflict. "
+                "Slogan-only matches are low-trust unless the frame also shows an explicit brand name, branded domain, country/market cue, or other direct brand anchor. "
                 "IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are legitimate content. Use them to identify brands, products, and categories just as you would English text. "
                 "Determine the most appropriate product or service category. If Override Allowed is True, you may generate a professional category when the ad does not fit neatly into a standard industry label. "
                 "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
@@ -729,9 +967,10 @@ class HybridLLM:
             system_prompt = (
                 "You are a Senior Marketing Analyst and Global Brand Expert. "
                 "Your goal is to categorize video advertisements by combining extracted text (OCR) with your vast internal knowledge of companies, slogans, and industries. "
-                "Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this internal database as your absolute primary source of truth. "
+                "Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this knowledge as a strong prior, but direct OCR brand text, domains, explicit market cues, and on-frame evidence override memory when they conflict. "
                 "Treat OCR as Noisy Hints: The extracted OCR text is machine-generated and may contain typos, missing letters, and random artifacts. DO NOT blindly trust or copy the OCR text. Use your knowledge to autocorrect obvious errors. "
                 "When multiple OCR lines are present, treat them as a combined evidence set. Do not over-weight a single brand- or store-like token if surrounding product, retail, offer, or usage context points elsewhere. "
+                "Slogan-only brand matches are low-trust unless corroborated by an exact brand token, branded domain, country/market cue, or explicit web confirmation. "
                 "IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are NOT OCR errors — they are legitimate content. Use them to identify brands, products, and categories just as you would English text. "
                 "(e.g., if OCR says 'Strbcks' or 'Star bucks co', you know the true brand is 'Starbucks'. But if OCR says 'Économisez avec Desjardins' or 'Assurance auto', those are valid French — do NOT treat them as typos). "
                 "IGNORE TIMESTAMPS: The OCR and Scene data text will be prefixed with bracketed timestamps like '[71.7s]' or '[12.5s]'. THESE ARE NOT PART OF THE AD. Do NOT use these numbers to identify brands or products (e.g. do not guess 'Boeing 717' just because you see '[71.7s]'). Ignore them completely. "
