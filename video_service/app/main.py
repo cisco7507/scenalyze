@@ -2284,3 +2284,22 @@ async def bulk_delete_jobs(body: BulkDeleteRequest):
 def get_admin_jobs():
     """Per-node job list — called by cluster dashboard fan-out."""
     return _get_jobs_from_db()
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("invalid_env_value name=%s value=%r fallback=%d", name, raw, default)
+        return default
+
+
+if __name__ == "__main__":  # pragma: no cover - manual launch path
+    import uvicorn
+
+    bind_host = (os.environ.get("BIND_HOST") or "0.0.0.0").strip() or "0.0.0.0"
+    port = _env_int("PORT", 8000)
+    uvicorn.run(app, host=bind_host, port=port)

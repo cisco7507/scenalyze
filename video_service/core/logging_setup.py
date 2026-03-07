@@ -3,6 +3,7 @@ import os
 import asyncio
 import threading
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from collections import deque
@@ -16,6 +17,7 @@ _configured = False
 _env_loaded = False
 _debug_enabled = False
 _memory_handler: "MemoryListHandler | None" = None
+_file_handler: RotatingFileHandler | None = None
 
 _NOISY_LOGGERS = (
     "uvicorn",
@@ -147,6 +149,85 @@ class NoisyLibraryFilter(logging.Filter):
         )
 
 
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_log_file_path(repo_root: Path) -> Path:
+    log_dir_raw = (os.environ.get("LOG_DIR") or "logs").strip() or "logs"
+    log_filename = (os.environ.get("LOG_FILENAME") or "video_service.log").strip() or "video_service.log"
+
+    log_dir = Path(log_dir_raw).expanduser()
+    if not log_dir.is_absolute():
+        log_dir = (repo_root / log_dir).resolve()
+
+    return log_dir / log_filename
+
+
+def _configure_file_handler(root: logging.Logger, formatter: logging.Formatter) -> None:
+    global _file_handler
+
+    managed_handlers = [
+        handler
+        for handler in list(root.handlers)
+        if getattr(handler, "_video_service_file_handler", False)
+    ]
+
+    file_logging_enabled = _env_truthy("LOG_TO_FILE", default=False)
+    if not file_logging_enabled:
+        for handler in managed_handlers:
+            root.removeHandler(handler)
+            handler.close()
+        _file_handler = None
+        return
+
+    log_path = _resolve_log_file_path(_repo_root())
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    max_bytes = _env_int("LOG_MAX_BYTES", 10 * 1024 * 1024)
+    backup_count = _env_int("LOG_BACKUP_COUNT", 5)
+
+    current_path = None
+    if _file_handler is not None:
+        current_path = Path(_file_handler.baseFilename)
+
+    if _file_handler is None or current_path != log_path:
+        for handler in managed_handlers:
+            root.removeHandler(handler)
+            handler.close()
+        _file_handler = RotatingFileHandler(
+            log_path,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        setattr(_file_handler, "_video_service_file_handler", True)
+        root.addHandler(_file_handler)
+    else:
+        _file_handler.maxBytes = max_bytes
+        _file_handler.backupCount = backup_count
+
+    _file_handler.setFormatter(formatter)
+
+
 def configure_logging(force: bool = False) -> None:
     global _configured, _env_loaded, _debug_enabled, _memory_handler
     if _configured and not force:
@@ -186,6 +267,8 @@ def configure_logging(force: bool = False) -> None:
     if _memory_handler not in root.handlers:
         root.addHandler(_memory_handler)
     _memory_handler.setFormatter(formatter)
+
+    _configure_file_handler(root, formatter)
 
     context_filter = ContextEnricherFilter()
     noisy_filter = NoisyLibraryFilter()

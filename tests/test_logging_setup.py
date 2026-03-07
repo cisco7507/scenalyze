@@ -152,3 +152,51 @@ def test_memory_log_buffer_and_subscription(monkeypatch):
             unsubscribe()
 
     asyncio.run(_verify())
+
+
+def test_configure_logging_can_write_rotating_file_logs(monkeypatch, tmp_path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "video_service" / "core").mkdir(parents=True)
+    fake_file = repo_root / "video_service" / "core" / "logging_setup.py"
+    fake_file.write_text("# test\n", encoding="utf-8")
+
+    monkeypatch.setattr(logging_setup, "__file__", str(fake_file))
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+    monkeypatch.setattr(logging_setup, "_file_handler", None)
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("LOG_TO_FILE", "true")
+    monkeypatch.setenv("LOG_DIR", "logs")
+    monkeypatch.setenv("LOG_FILENAME", "service.log")
+    monkeypatch.setenv("LOG_MAX_BYTES", "2048")
+    monkeypatch.setenv("LOG_BACKUP_COUNT", "3")
+
+    logging_setup.configure_logging(force=True)
+    logger = logging.getLogger("tests.file-logging")
+    logger.info("file logging smoke test")
+
+    log_path = repo_root / "logs" / "service.log"
+    assert log_path.exists()
+    assert "file logging smoke test" in log_path.read_text(encoding="utf-8")
+
+
+def test_configure_logging_can_disable_file_logging(monkeypatch, tmp_path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "video_service" / "core").mkdir(parents=True)
+    fake_file = repo_root / "video_service" / "core" / "logging_setup.py"
+    fake_file.write_text("# test\n", encoding="utf-8")
+
+    monkeypatch.setattr(logging_setup, "__file__", str(fake_file))
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+    monkeypatch.setattr(logging_setup, "_file_handler", None)
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+    monkeypatch.setenv("LOG_TO_FILE", "true")
+    monkeypatch.setenv("LOG_DIR", "logs")
+    monkeypatch.setenv("LOG_FILENAME", "service.log")
+    logging_setup.configure_logging(force=True)
+
+    monkeypatch.setenv("LOG_TO_FILE", "false")
+    logging_setup.configure_logging(force=True)
+
+    assert logging_setup._file_handler is None
