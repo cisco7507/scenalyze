@@ -457,6 +457,15 @@ def _specificity_search_broad_categories() -> set[str]:
     return values or {"Financial Services"}
 
 
+def _specificity_search_generic_raw_categories() -> set[str]:
+    raw = os.environ.get(
+        "SPECIFICITY_SEARCH_GENERIC_RAW_CATEGORIES",
+        "Movie,Film,Entertainment,Financial Services,Banking,Insurance,Retail,Technology,Educational,Healthcare,Travel,Automotive",
+    )
+    values = {value.strip() for value in raw.split(",") if value.strip()}
+    return values or {"Movie"}
+
+
 def _extract_ocr_domains(text: str) -> list[str]:
     matches = re.findall(r"\b([a-z0-9-]+\.[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b", text or "", flags=re.IGNORECASE)
     return list(dict.fromkeys(match for match in matches if match))
@@ -480,11 +489,15 @@ def _should_run_specificity_search_rescue(
         return False, "invalid_result"
 
     brand = str(result_payload.get("brand", "") or "").strip()
+    raw_category = str(result_payload.get("category", "") or "").strip()
     canonical = str(category_match.get("canonical_category", "") or "").strip()
     if not brand or brand.lower() in {"unknown", "none", "n/a"}:
         return False, "brand_missing"
-    if canonical not in _specificity_search_broad_categories():
-        return False, f"category_not_broad={canonical!r}"
+
+    broad_canonical = canonical in _specificity_search_broad_categories()
+    generic_raw = raw_category in _specificity_search_generic_raw_categories()
+    if not broad_canonical and not generic_raw:
+        return False, f"category_not_generic raw={raw_category!r} canonical={canonical!r}"
 
     score_raw = category_match.get("category_match_score", 0.0)
     try:
@@ -492,20 +505,25 @@ def _should_run_specificity_search_rescue(
     except (TypeError, ValueError):
         mapper_score = 0.0
 
+    category_descriptor = f"raw={raw_category!r};canonical={canonical!r}"
     domain_hints = _extract_ocr_domains(ocr_text)
-    if mapper_score < _resolve_specificity_search_mapper_threshold() and domain_hints:
-        return True, f"broad_category={canonical!r};mapper_score={mapper_score:.4f};domain_hint={domain_hints[0]!r}"
+    mapper_threshold = _resolve_specificity_search_mapper_threshold()
+    if mapper_score < mapper_threshold and domain_hints:
+        return True, f"{category_descriptor};mapper_score={mapper_score:.4f};domain_hint={domain_hints[0]!r}"
 
-    if domain_hints:
-        return True, f"broad_category={canonical!r};domain_hint={domain_hints[0]!r}"
+    if generic_raw and mapper_score < mapper_threshold:
+        return True, f"{category_descriptor};mapper_score={mapper_score:.4f};generic_raw_category"
+
+    if domain_hints and broad_canonical:
+        return True, f"{category_descriptor};domain_hint={domain_hints[0]!r}"
 
     visual_matches = _top_visual_matches(sorted_vision, limit=1)
     if visual_matches:
         top_label, top_score = visual_matches[0]
         if top_label != canonical and float(top_score) >= _resolve_specificity_search_vision_threshold():
-            return True, f"broad_category={canonical!r};vision_hint={top_label!r}@{float(top_score):.4f}"
+            return True, f"{category_descriptor};vision_hint={top_label!r}@{float(top_score):.4f}"
 
-    return False, f"broad_category={canonical!r};no_specificity_signal"
+    return False, f"{category_descriptor};no_specificity_signal"
 
 
 def _accept_specificity_search_result(
@@ -2074,7 +2092,7 @@ def process_single_video(
                 p,
                 m,
                 brand=str(res.get("brand", "") or ""),
-                current_category=str(category_match.get("canonical_category", "") or res.get("category", "") or ""),
+                current_category=str(res.get("category", "") or category_match.get("canonical_category", "") or ""),
                 ocr_text=ocr_text,
                 visual_matches=visual_matches,
                 context_size=ctx,

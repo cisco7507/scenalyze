@@ -2049,3 +2049,93 @@ def test_pipeline_fails_closed_when_specificity_search_is_unavailable(monkeypatc
     assert processing_trace["summary"]["accepted_attempt_type"] == "initial"
     assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
     assert processing_trace["attempts"][-1]["status"] == "rejected"
+
+
+def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak_mapper(monkeypatch):
+    class _DummyMapper:
+        categories = ["Comedy", "Action/Thriller Cinema"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            if raw == "Movie":
+                return {
+                    "canonical_category": "Comedy",
+                    "category_id": "5297",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.6108,
+                }
+            if raw == "Action/Thriller Cinema":
+                return {
+                    "canonical_category": "Action/Thriller Cinema",
+                    "category_id": "5281",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.89,
+                }
+            return {
+                "canonical_category": raw or "Comedy",
+                "category_id": "5297",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Mercy Movie.ca FILMED FOR IMAX NOW PLAYING"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Mercy",
+                "category": "Movie",
+                "confidence": 0.99,
+                "reasoning": "generic film label",
+            }
+
+        @staticmethod
+        def query_specificity_rescue(*args, **kwargs):
+            return (
+                {
+                    "brand": "Mercy",
+                    "category": "Action/Thriller Cinema",
+                    "confidence": 0.94,
+                    "reasoning": "search refinement found theatrical positioning",
+                },
+                "ok",
+            )
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/mercy.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-specificity-search-3",
+    )
+
+    assert row[2] == "5281"
+    assert row[3] == "Action/Thriller Cinema"
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["attempts"][-1]["status"] == "accepted"
