@@ -43,6 +43,7 @@ from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from video_service.core.logging_setup import (
+    clear_recent_log_lines,
     configure_logging,
     get_recent_log_lines,
     subscribe_log_stream,
@@ -2423,6 +2424,12 @@ async def stream_admin_logs(req: Request):
 def admin_recent_logs(limit: int = 200):
     bounded_limit = max(1, min(limit, 1000))
     return {"lines": get_recent_log_lines(limit=bounded_limit)}
+
+
+@app.post("/admin/logs/clear", tags=["admin"])
+def admin_clear_logs():
+    clear_recent_log_lines()
+    return {"status": "cleared"}
 
 
 @app.delete("/jobs/{job_id}", tags=["jobs"])

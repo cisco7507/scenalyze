@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sqlite3
 
 import pytest
@@ -46,6 +47,22 @@ def test_job_artifacts_endpoint_returns_required_keys_when_empty(monkeypatch):
     assert "processing_trace" in payload["artifacts"]
     assert "vector_plot" in payload["artifacts"]["vision_board"]
     assert "vector_plot" in payload["artifacts"]["category_mapper"]
+
+
+def test_admin_clear_logs_endpoint_empties_recent_buffer(monkeypatch):
+    from video_service.core import logging_setup
+
+    logging_setup.configure_logging(force=True)
+    logger = logging.getLogger("tests.admin-clear-logs")
+    logger.info("admin clear logs smoke test")
+    assert any(
+        "admin clear logs smoke test" in line
+        for line in logging_setup.get_recent_log_lines(limit=20)
+    )
+
+    payload = main.admin_clear_logs()
+    assert payload == {"status": "cleared"}
+    assert logging_setup.get_recent_log_lines(limit=20) == []
 
 
 def test_job_settings_accept_enable_web_search_alias():

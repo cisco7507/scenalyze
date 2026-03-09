@@ -77,6 +77,10 @@ class MemoryListHandler(logging.Handler):
             lines = list(self._lines)
         return lines[-bounded_limit:]
 
+    def clear(self) -> None:
+        with self._lines_lock:
+            self._lines.clear()
+
     def subscribe(
         self,
         max_queue_size: int = 1000,
@@ -330,6 +334,12 @@ def subscribe_log_stream(
         configure_logging()
     assert _memory_handler is not None
     return _memory_handler.subscribe(max_queue_size=max_queue_size)
+
+
+def clear_recent_log_lines() -> None:
+    if _memory_handler is None:
+        return
+    _memory_handler.clear()
 
 
 def set_job_context(job_id: str) -> Token:

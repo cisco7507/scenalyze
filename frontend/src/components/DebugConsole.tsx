@@ -172,6 +172,19 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
 
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
 
+  const clearLogs = async () => {
+    const apiRoot = API_BASE_URL.replace(/\/$/, '');
+    try {
+      await fetch(`${apiRoot}/admin/logs/clear`, { method: 'POST' });
+    } catch {
+      // Keep the clear action best-effort; local UI should still reset.
+    }
+    setLogs([]);
+    lineCounter.current = 1;
+    setStickToBottom(true);
+    setReconnectTrigger((x) => x + 1);
+  };
+
   const appendLogs = (rawLines: string[]) => {
     if (!rawLines.length) return;
     setLogs((prev) => {
@@ -377,10 +390,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
           <button
             type="button"
             onClick={() => {
-              setLogs([]);
-              lineCounter.current = 1;
-              setStickToBottom(true);
-              setReconnectTrigger((x) => x + 1);
+              void clearLogs();
             }}
             className="inline-flex h-8 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 text-xs font-semibold text-gray-600 hover:bg-gray-100"
           >

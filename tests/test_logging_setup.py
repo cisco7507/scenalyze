@@ -154,6 +154,22 @@ def test_memory_log_buffer_and_subscription(monkeypatch):
     asyncio.run(_verify())
 
 
+def test_memory_log_buffer_can_be_cleared(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+
+    logging_setup.configure_logging(force=True)
+    logger = logging.getLogger("tests.clear-log-buffer")
+    logger.info("clear-log-buffer smoke log")
+
+    recent = logging_setup.get_recent_log_lines(limit=20)
+    assert any("clear-log-buffer smoke log" in item for item in recent)
+
+    logging_setup.clear_recent_log_lines()
+    assert logging_setup.get_recent_log_lines(limit=20) == []
+
+
 def test_configure_logging_can_write_rotating_file_logs(monkeypatch, tmp_path):
     repo_root = tmp_path / "repo"
     (repo_root / "video_service" / "core").mkdir(parents=True)

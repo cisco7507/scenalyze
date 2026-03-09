@@ -519,6 +519,21 @@ class CategoryMapper:
         predicted_brand="",
         ocr_summary="",
     ):
+        raw_value = str(raw_category or "").strip()
+        if raw_value.lower() in {"", "unknown", "none", "n/a", "null"}:
+            logger.info(
+                "category_map job_id=%s raw=%r skipped=unknown_or_empty",
+                job_id or "",
+                raw_category,
+            )
+            return {
+                "canonical_category": raw_value or "Unknown",
+                "category_id": "",
+                "category_match_method": "skipped_unknown",
+                "category_match_score": None,
+                "mapping_query_text": "",
+            }
+
         if not self.active and CATEGORY_MAPPING_STATE.enabled:
             self._attempt_reactivate()
         if not self.active:

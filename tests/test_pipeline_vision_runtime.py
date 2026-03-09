@@ -260,6 +260,19 @@ def test_extract_ocr_focus_region_returns_smaller_crop_for_text_band():
     assert roi.shape[1] < frame.shape[1]
 
 
+def test_real_category_mapper_skips_unknown_without_embeddings():
+    mapper_cls = type(pipeline_module.category_mapper)
+    mapper = mapper_cls.__new__(mapper_cls)
+
+    result = mapper.map_category(raw_category="Unknown", job_id="job-unknown")
+
+    assert result["canonical_category"] == "Unknown"
+    assert result["category_id"] == ""
+    assert result["category_match_method"] == "skipped_unknown"
+    assert result["category_match_score"] is None
+    assert result["mapping_query_text"] == ""
+
+
 def test_pipeline_easyocr_roi_falls_back_to_full_frame_when_crop_text_is_weak(monkeypatch):
     class _DummyMapper:
         categories = ["Category One"]
