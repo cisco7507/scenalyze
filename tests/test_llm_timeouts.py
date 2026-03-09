@@ -142,6 +142,19 @@ def test_specificity_search_query_uses_anchor_terms_not_visual_labels():
     assert "Filmed Entertainment" not in query
 
 
+def test_specificity_search_query_skips_malformed_www_anchor():
+    llm = HybridLLM()
+    query = llm._build_specificity_search_query(
+        brand="Historica Canada",
+        current_category="Non-profit / Educational Organization",
+        ocr_text="WWW.HISTORICACANADA Heritage Minute brought to you by Historica Canada",
+    )
+
+    assert "site:www.historicacanada" not in query
+    assert '"www.historicacanada"' not in query
+    assert '"Historica Canada"' in query
+
+
 def test_create_provider_routes_qwen_models_to_qwen_plugin():
     provider = create_provider("Ollama", "qwen3-vl:8b-instruct", context_size=8192)
     assert isinstance(provider, OllamaQwenProvider)

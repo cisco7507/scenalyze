@@ -19,6 +19,15 @@ from video_service.core import pipeline as pipeline_module
 pytestmark = pytest.mark.unit
 
 
+def test_extract_ocr_domains_ignores_malformed_two_label_www_anchor():
+    domains = pipeline_module._extract_ocr_domains(
+        "WWW.HISTORICACANADA Heritage Minute www.historicacanada.ca"
+    )
+
+    assert "WWW.HISTORICACANADA" not in domains
+    assert "www.historicacanada.ca" in domains
+
+
 def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monkeypatch):
     class _DummyMapper:
         categories = ["Category One", "Category Two"]
