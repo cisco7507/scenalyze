@@ -113,6 +113,91 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
+function formatJsonPrimitive(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return `"${value}"`;
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  return JSON.stringify(value);
+}
+
+function JsonTreeNode({
+  value,
+  nodeKey,
+  depth = 0,
+}: {
+  value: unknown;
+  nodeKey?: string;
+  depth?: number;
+}) {
+  const indentStyle = { paddingLeft: `${depth * 16}px` };
+  const keyLabel = nodeKey ? (
+    <span className="text-sky-300">"{nodeKey}"</span>
+  ) : null;
+
+  if (value === null || typeof value !== "object") {
+    return (
+      <div
+        className="py-1 font-mono text-[12px] leading-6 text-slate-200"
+        style={indentStyle}
+      >
+        {keyLabel ? <>{keyLabel}: </> : null}
+        <span
+          className={
+            value === null
+              ? "text-fuchsia-300"
+              : typeof value === "string"
+                ? "text-emerald-300"
+                : typeof value === "number"
+                  ? "text-amber-300"
+                  : typeof value === "boolean"
+                    ? "text-violet-300"
+                    : "text-slate-200"
+          }
+        >
+          {formatJsonPrimitive(value)}
+        </span>
+      </div>
+    );
+  }
+
+  const isArray = Array.isArray(value);
+  const entries = isArray
+    ? value.map((item, index) => [String(index), item] as const)
+    : Object.entries(value as Record<string, unknown>);
+  const isLeafCollection = entries.every(([, item]) => item === null || typeof item !== "object");
+
+  return (
+    <details open={depth < 1 || (depth < 2 && isLeafCollection)} className="group" style={indentStyle}>
+      <summary className="list-none cursor-pointer py-1 font-mono text-[12px] leading-6 text-slate-200">
+        <span className="inline-flex items-center gap-2">
+          <span className="text-slate-500 transition-transform group-open:rotate-90">›</span>
+          {keyLabel ? <>{keyLabel}: </> : null}
+          <span className="text-cyan-200">
+            {isArray ? "[" : "{"}
+          </span>
+          <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+            {entries.length} {isArray ? "items" : "keys"}
+          </span>
+          <span className="text-cyan-200">
+            {isArray ? "]" : "}"}
+          </span>
+        </span>
+      </summary>
+      <div className="border-l border-slate-800/80 ml-3">
+        {entries.map(([childKey, childValue]) => (
+          <JsonTreeNode
+            key={`${nodeKey || "root"}-${childKey}`}
+            value={childValue}
+            nodeKey={isArray ? undefined : childKey}
+            depth={depth + 1}
+          />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 type ArtifactTab = "video" | "signals" | "ocr" | "frames" | "explain";
 type VideoSource = { type: "local" | "youtube" | "remote"; url: string };
 type ScratchTool = "OCR" | "SEARCH" | "VISION" | "FINAL" | "ERROR";
@@ -1308,6 +1393,7 @@ export function JobDetail() {
   const [videoError, setVideoError] = useState("");
   const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
+  const [showRawJsonContext, setShowRawJsonContext] = useState(false);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -1777,6 +1863,8 @@ export function JobDetail() {
     artifacts && typeof artifacts.category_mapper === "object"
       ? artifacts.category_mapper
       : null;
+  const rawContextObject = { settings: job.settings, result, artifacts };
+  const rawContextString = JSON.stringify(rawContextObject, null, 2);
   const frameCount = frameItems.length;
   const frameVisionByIndex = new Map<
     number,
@@ -3551,18 +3639,53 @@ export function JobDetail() {
         </div>
       )}
 
-      <details className="bg-white border border-gray-200 rounded-xl overflow-hidden cursor-pointer shadow-sm group">
+      <details
+        className="bg-white border border-gray-200 rounded-xl overflow-hidden cursor-pointer shadow-sm group"
+        onToggle={(event) =>
+          setShowRawJsonContext((event.currentTarget as HTMLDetailsElement).open)
+        }
+      >
         <summary className="px-6 py-4 font-semibold text-gray-500 group-hover:bg-gray-100/50 transition-colors list-none flex items-center gap-2">
           <DownloadIcon /> Raw JSON Context
         </summary>
-        <div className="p-6 bg-gray-50 border-t border-gray-200 font-mono text-xs text-emerald-400/70 overflow-x-auto">
-          <pre>
-            {JSON.stringify(
-              { settings: job.settings, result, artifacts },
-              null,
-              2,
-            )}
-          </pre>
+        <div className="border-t border-gray-200 bg-slate-950/95">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-6 py-4">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                Structured viewer
+              </div>
+              <p className="mt-1 text-sm text-slate-300">
+                Read the saved job context as a collapsible JSON tree. This is a frontend-only viewer and does not add any work to processing.
+              </p>
+            </div>
+            <CopyButton text={rawContextString} label="Copy JSON" />
+          </div>
+          {showRawJsonContext ? (
+            <div className="grid gap-0 xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
+              <div className="border-b border-slate-800 px-6 py-5 xl:border-b-0 xl:border-r">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Tree view
+                </div>
+                <div className="max-h-[32rem] overflow-auto rounded-[20px] border border-slate-800 bg-slate-950 px-4 py-4 shadow-inner">
+                  <JsonTreeNode value={rawContextObject} />
+                </div>
+              </div>
+              <div className="px-6 py-5">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Raw source
+                </div>
+                <div className="max-h-[32rem] overflow-auto rounded-[20px] border border-slate-800 bg-[#071120] px-4 py-4 shadow-inner">
+                  <pre className="font-mono text-[12px] leading-6 text-slate-100 whitespace-pre-wrap break-words">
+                    {rawContextString}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="px-6 py-5 text-sm text-slate-300">
+              Expand this section to inspect the saved job payload as a structured JSON tree.
+            </div>
+          )}
         </div>
       </details>
     </div>

@@ -158,6 +158,102 @@ def _compute_duration_analytics(points: list[dict], bucket_count: int = 48) -> t
     return duration_percentiles, series
 
 
+def _empty_path_metrics() -> dict:
+    return {
+        "jobs_with_trace": 0,
+        "accepted_paths": [],
+        "transit_paths": [],
+    }
+
+
+def _extract_processing_trace(artifacts_json: str | None) -> dict | None:
+    if not artifacts_json:
+        return None
+    try:
+        parsed = json.loads(artifacts_json)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    trace = parsed.get("processing_trace")
+    return trace if isinstance(trace, dict) else None
+
+
+def _humanize_attempt_type(value: str) -> str:
+    labels = {
+        "initial": "Initial Tail Pass",
+        "ocr_context_rescue": "OCR Context Rescue",
+        "ocr_rescue": "OCR Rescue",
+        "express_rescue": "Express Rescue",
+        "extended_tail": "Extended Tail",
+        "full_video": "Full Video",
+        "specificity_search_rescue": "Specificity Search Rescue",
+    }
+    key = str(value or "").strip().lower()
+    return labels.get(key, value.replace("_", " ").title() if value else "Unknown")
+
+
+def _build_path_metrics(artifact_rows: list) -> dict:
+    accepted_path_counts: dict[str, int] = defaultdict(int)
+    transit_path_counts: dict[str, int] = defaultdict(int)
+    path_titles: dict[str, str] = {}
+    jobs_with_trace = 0
+
+    for row in artifact_rows:
+        trace = _extract_processing_trace(row["artifacts_json"])
+        if not trace:
+            continue
+        jobs_with_trace += 1
+        summary = trace.get("summary")
+        if isinstance(summary, dict):
+            accepted_type = str(summary.get("accepted_attempt_type") or "").strip()
+            if accepted_type:
+                accepted_path_counts[accepted_type] += 1
+                path_titles.setdefault(accepted_type, _humanize_attempt_type(accepted_type))
+        attempts = trace.get("attempts")
+        if isinstance(attempts, list):
+            seen_attempt_types: set[str] = set()
+            for attempt in attempts:
+                if not isinstance(attempt, dict):
+                    continue
+                attempt_type = str(attempt.get("attempt_type") or "").strip()
+                if not attempt_type or attempt_type in seen_attempt_types:
+                    continue
+                seen_attempt_types.add(attempt_type)
+                transit_path_counts[attempt_type] += 1
+                title = str(attempt.get("title") or "").strip()
+                path_titles.setdefault(
+                    attempt_type,
+                    title or _humanize_attempt_type(attempt_type),
+                )
+
+    return {
+        "jobs_with_trace": jobs_with_trace,
+        "accepted_paths": [
+            {
+                "attempt_type": attempt_type,
+                "title": path_titles.get(attempt_type, _humanize_attempt_type(attempt_type)),
+                "count": count,
+            }
+            for attempt_type, count in sorted(
+                accepted_path_counts.items(),
+                key=lambda item: (-item[1], path_titles.get(item[0], item[0])),
+            )
+        ],
+        "transit_paths": [
+            {
+                "attempt_type": attempt_type,
+                "title": path_titles.get(attempt_type, _humanize_attempt_type(attempt_type)),
+                "count": count,
+            }
+            for attempt_type, count in sorted(
+                transit_path_counts.items(),
+                key=lambda item: (-item[1], path_titles.get(item[0], item[0])),
+            )
+        ],
+    }
+
+
 def _merge_analytics_payloads(payloads: list[dict]) -> dict:
     if not payloads:
         return {
@@ -182,6 +278,7 @@ def _merge_analytics_payloads(payloads: list[dict]) -> dict:
             },
             "duration_series": [],
             "recent_duration_points": [],
+            "path_metrics": _empty_path_metrics(),
         }
 
     brand_counts: dict[str, int] = defaultdict(int)
@@ -203,6 +300,10 @@ def _merge_analytics_payloads(payloads: list[dict]) -> dict:
     completed_duration_count = 0
 
     merged_duration_points: list[dict] = []
+    accepted_path_counts: dict[str, int] = defaultdict(int)
+    transit_path_counts: dict[str, int] = defaultdict(int)
+    path_titles: dict[str, str] = {}
+    jobs_with_trace = 0
 
     for payload in payloads:
         for row in payload.get("top_brands", []):
@@ -264,6 +365,29 @@ def _merge_analytics_payloads(payloads: list[dict]) -> dict:
                         "duration_seconds": float(duration),
                     }
                 )
+
+        path_metrics = payload.get("path_metrics") or {}
+        jobs_with_trace += int(path_metrics.get("jobs_with_trace") or 0)
+        for row in path_metrics.get("accepted_paths", []):
+            attempt_type = str(row.get("attempt_type") or "").strip()
+            if not attempt_type:
+                continue
+            accepted_path_counts[attempt_type] += int(row.get("count") or 0)
+            title = str(row.get("title") or "").strip()
+            path_titles.setdefault(
+                attempt_type,
+                title or _humanize_attempt_type(attempt_type),
+            )
+        for row in path_metrics.get("transit_paths", []):
+            attempt_type = str(row.get("attempt_type") or "").strip()
+            if not attempt_type:
+                continue
+            transit_path_counts[attempt_type] += int(row.get("count") or 0)
+            title = str(row.get("title") or "").strip()
+            path_titles.setdefault(
+                attempt_type,
+                title or _humanize_attempt_type(attempt_type),
+            )
 
     merged_duration_points.sort(key=lambda row: row["completed_at"])
     merged_duration_points = merged_duration_points[-1200:]
@@ -337,6 +461,31 @@ def _merge_analytics_payloads(payloads: list[dict]) -> dict:
         "duration_percentiles": duration_percentiles,
         "duration_series": duration_series,
         "recent_duration_points": merged_duration_points,
+        "path_metrics": {
+            "jobs_with_trace": jobs_with_trace,
+            "accepted_paths": [
+                {
+                    "attempt_type": attempt_type,
+                    "title": path_titles.get(attempt_type, _humanize_attempt_type(attempt_type)),
+                    "count": count,
+                }
+                for attempt_type, count in sorted(
+                    accepted_path_counts.items(),
+                    key=lambda item: (-item[1], path_titles.get(item[0], item[0])),
+                )
+            ],
+            "transit_paths": [
+                {
+                    "attempt_type": attempt_type,
+                    "title": path_titles.get(attempt_type, _humanize_attempt_type(attempt_type)),
+                    "count": count,
+                }
+                for attempt_type, count in sorted(
+                    transit_path_counts.items(),
+                    key=lambda item: (-item[1], path_titles.get(item[0], item[0])),
+                )
+            ],
+        },
     }
 
 
@@ -702,6 +851,17 @@ def get_analytics():
             LIMIT 600
             """
         ).fetchall()
+        try:
+            artifact_rows = conn.execute(
+                """
+                SELECT artifacts_json
+                FROM jobs
+                WHERE status = 'completed'
+                  AND TRIM(COALESCE(artifacts_json, '')) != ''
+                """
+            ).fetchall()
+        except Exception:
+            artifact_rows = []
     recent_duration_points = [
         {
             "completed_at": row["completed_at"],
@@ -713,6 +873,7 @@ def get_analytics():
     duration_percentiles, duration_series = _compute_duration_analytics(
         recent_duration_points
     )
+    path_metrics = _build_path_metrics(artifact_rows)
 
     return {
         "top_brands": [{"brand": r["brand"], "count": r["count"]} for r in top_brands],
@@ -747,6 +908,7 @@ def get_analytics():
         "duration_percentiles": duration_percentiles,
         "duration_series": duration_series,
         "recent_duration_points": recent_duration_points,
+        "path_metrics": path_metrics,
     }
 
 
@@ -1454,6 +1616,7 @@ def get_benchmark_suite_results(suite_id: str):
         "completed_jobs": suite["completed_jobs"] if suite else evaluation.get("completed_jobs"),
         "failed_jobs": suite["failed_jobs"] if suite else evaluation.get("failed_jobs"),
         "points": scatter_points,
+        "path_metrics": evaluation.get("path_metrics", {}),
     }
 
 

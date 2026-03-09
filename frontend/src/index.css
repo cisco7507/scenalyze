@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap");
 @import "tailwindcss";
 
 @theme {
@@ -15,13 +15,41 @@
   --color-primary-950: #1e1b4b;
 }
 
+:root {
+  color-scheme: light;
+}
+
 body {
-  @apply bg-gray-50 text-gray-900 antialiased selection:bg-primary-100 selection:text-primary-900;
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  @apply text-gray-900 antialiased selection:bg-primary-100 selection:text-primary-900;
+  font-family: "Manrope", system-ui, -apple-system, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 26%),
+    radial-gradient(circle at top right, rgba(129, 140, 248, 0.10), transparent 22%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-display {
+  font-family: "Space Grotesk", "Manrope", system-ui, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 input,
 select,
 textarea {
-  @apply bg-white border-gray-300 text-gray-900 focus:border-primary-500 focus:ring-primary-500/30 rounded-md shadow-sm;
+  @apply rounded-xl border-gray-300/80 bg-white/90 text-gray-900 shadow-sm focus:border-primary-500 focus:ring-primary-500/25;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
 }

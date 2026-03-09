@@ -29,6 +29,15 @@ def _build_conn(path: str) -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            artifacts_json TEXT
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -55,6 +64,9 @@ def test_get_analytics_returns_expected_shape_when_empty(tmp_path, monkeypatch):
     assert payload["totals"]["completed"] == 0
     assert payload["totals"]["failed"] == 0
     assert payload["totals"]["avg_duration"] is None
+    assert payload["path_metrics"]["jobs_with_trace"] == 0
+    assert payload["path_metrics"]["accepted_paths"] == []
+    assert payload["path_metrics"]["transit_paths"] == []
 
 
 def test_get_analytics_aggregates_and_filters_unknown_brand(tmp_path, monkeypatch):
@@ -115,6 +127,27 @@ def test_get_analytics_aggregates_and_filters_unknown_brand(tmp_path, monkeypatc
             ),
         ],
     )
+    conn.executemany(
+        """
+        INSERT INTO jobs (id, status, artifacts_json) VALUES (?, ?, ?)
+        """,
+        [
+            (
+                "node-a-1",
+                "completed",
+                """
+                {"processing_trace":{"summary":{"accepted_attempt_type":"initial"},"attempts":[{"attempt_type":"initial","title":"Initial Tail Pass"},{"attempt_type":"ocr_rescue","title":"OCR Rescue"}]}}
+                """.strip(),
+            ),
+            (
+                "node-a-2",
+                "completed",
+                """
+                {"processing_trace":{"summary":{"accepted_attempt_type":"express_rescue"},"attempts":[{"attempt_type":"initial","title":"Initial Tail Pass"},{"attempt_type":"express_rescue","title":"Express Rescue"}]}}
+                """.strip(),
+            ),
+        ],
+    )
     conn.commit()
     conn.close()
 
@@ -133,3 +166,13 @@ def test_get_analytics_aggregates_and_filters_unknown_brand(tmp_path, monkeypatc
     assert payload["providers"] == [{"provider": "Ollama", "count": 2}]
     assert payload["avg_duration_by_mode"][0]["avg_duration"] in {18.5, 31.0}
     assert payload["daily_outcomes"][0]["day"] == "2026-02-27"
+    assert payload["path_metrics"]["jobs_with_trace"] == 2
+    assert payload["path_metrics"]["accepted_paths"] == [
+        {"attempt_type": "express_rescue", "title": "Express Rescue", "count": 1},
+        {"attempt_type": "initial", "title": "Initial Tail Pass", "count": 1},
+    ]
+    assert payload["path_metrics"]["transit_paths"] == [
+        {"attempt_type": "initial", "title": "Initial Tail Pass", "count": 2},
+        {"attempt_type": "express_rescue", "title": "Express Rescue", "count": 1},
+        {"attempt_type": "ocr_rescue", "title": "OCR Rescue", "count": 1},
+    ]

@@ -28,6 +28,15 @@ def test_analytics_includes_duration_percentiles_and_series(monkeypatch):
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT,
+                artifacts_json TEXT
+            )
+            """
+        )
         conn.executemany(
             """
             INSERT INTO job_stats (

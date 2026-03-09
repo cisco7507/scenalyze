@@ -1,5 +1,6 @@
 import json
 import re
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -144,6 +145,33 @@ def _extract_job_events(events_json: str | None) -> list[str]:
     return parsed if isinstance(parsed, list) else []
 
 
+def _extract_processing_trace(artifacts_json: str | None) -> dict[str, Any] | None:
+    if not artifacts_json:
+        return None
+    try:
+        parsed = json.loads(artifacts_json)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    trace = parsed.get("processing_trace")
+    return trace if isinstance(trace, dict) else None
+
+
+def _humanize_attempt_type(value: str) -> str:
+    labels = {
+        "initial": "Initial Tail Pass",
+        "ocr_context_rescue": "OCR Context Rescue",
+        "ocr_rescue": "OCR Rescue",
+        "express_rescue": "Express Rescue",
+        "extended_tail": "Extended Tail",
+        "full_video": "Full Video",
+        "specificity_search_rescue": "Specificity Search Rescue",
+    }
+    key = str(value or "").strip().lower()
+    return labels.get(key, value.replace("_", " ").title() if value else "Unknown")
+
+
 def evaluate_benchmark_suite(suite_id: str) -> dict[str, Any]:
     with get_db() as conn:
         suite = conn.execute(
@@ -184,6 +212,10 @@ def evaluate_benchmark_suite(suite_id: str) -> dict[str, Any]:
         completed_jobs = 0
         failed_jobs = 0
         evaluated_rows = []
+        accepted_path_counts: Counter[str] = Counter()
+        transit_path_counts: Counter[str] = Counter()
+        path_titles: dict[str, str] = {}
+        jobs_with_trace = 0
 
         with conn:
             conn.execute("DELETE FROM benchmark_result WHERE suite_id = ?", (suite_id,))
@@ -194,6 +226,35 @@ def evaluate_benchmark_suite(suite_id: str) -> dict[str, Any]:
                     completed_jobs += 1
                 if status == "failed":
                     failed_jobs += 1
+
+                trace = _extract_processing_trace(row["artifacts_json"])
+                if trace:
+                    jobs_with_trace += 1
+                    summary = trace.get("summary")
+                    if isinstance(summary, dict):
+                        accepted_type = str(summary.get("accepted_attempt_type") or "").strip()
+                        if accepted_type:
+                            accepted_path_counts[accepted_type] += 1
+                            path_titles.setdefault(
+                                accepted_type,
+                                _humanize_attempt_type(accepted_type),
+                            )
+                    attempts = trace.get("attempts")
+                    if isinstance(attempts, list):
+                        seen_attempt_types: set[str] = set()
+                        for attempt in attempts:
+                            if not isinstance(attempt, dict):
+                                continue
+                            attempt_type = str(attempt.get("attempt_type") or "").strip()
+                            if not attempt_type or attempt_type in seen_attempt_types:
+                                continue
+                            seen_attempt_types.add(attempt_type)
+                            transit_path_counts[attempt_type] += 1
+                            title = str(attempt.get("title") or "").strip()
+                            path_titles.setdefault(
+                                attempt_type,
+                                title or _humanize_attempt_type(attempt_type),
+                            )
 
                 if status != "completed":
                     continue
@@ -272,4 +333,29 @@ def evaluate_benchmark_suite(suite_id: str) -> dict[str, Any]:
         "completed_jobs": completed_jobs,
         "failed_jobs": failed_jobs,
         "results": evaluated_rows,
+        "path_metrics": {
+            "jobs_with_trace": jobs_with_trace,
+            "accepted_paths": [
+                {
+                    "attempt_type": attempt_type,
+                    "title": path_titles.get(attempt_type, _humanize_attempt_type(attempt_type)),
+                    "count": count,
+                }
+                for attempt_type, count in sorted(
+                    accepted_path_counts.items(),
+                    key=lambda item: (-item[1], path_titles.get(item[0], item[0])),
+                )
+            ],
+            "transit_paths": [
+                {
+                    "attempt_type": attempt_type,
+                    "title": path_titles.get(attempt_type, _humanize_attempt_type(attempt_type)),
+                    "count": count,
+                }
+                for attempt_type, count in sorted(
+                    transit_path_counts.items(),
+                    key=lambda item: (-item[1], path_titles.get(item[0], item[0])),
+                )
+            ],
+        },
     }

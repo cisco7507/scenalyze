@@ -26,6 +26,7 @@ import {
 } from '../lib/api';
 import type {
   BenchmarkPoint,
+  BenchmarkPathCount,
   BenchmarkSuiteDetail,
   BenchmarkSuiteResults,
   BenchmarkSuiteSummary,
@@ -33,6 +34,11 @@ import type {
   ModelCombo,
   SystemProfile,
 } from '../lib/api';
+
+const panelClass =
+  'rounded-[30px] border border-slate-200/80 bg-white/82 shadow-[0_18px_45px_rgba(15,23,42,0.06)] backdrop-blur';
+const controlClass =
+  'h-10 w-full rounded-2xl border border-slate-200 bg-white/90 px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15';
 
 function formatSeconds(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
@@ -160,6 +166,63 @@ function PerformanceTable({ points }: { points: BenchmarkPoint[] }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PathMetricList({
+  title,
+  subtitle,
+  items,
+  denominator,
+  accent,
+}: {
+  title: string;
+  subtitle: string;
+  items: BenchmarkPathCount[];
+  denominator: number;
+  accent: string;
+}) {
+  if (!items.length) {
+    return (
+      <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/80 p-4">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{title}</div>
+        <p className="mt-2 text-xs leading-5 text-slate-500">{subtitle}</p>
+        <div className="mt-4 text-sm text-slate-400">No saved trace data yet.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/80 p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{title}</div>
+      <p className="mt-2 text-xs leading-5 text-slate-500">{subtitle}</p>
+      <div className="mt-4 space-y-3">
+        {items.map((item) => {
+          const pct = denominator > 0 ? (item.count / denominator) * 100 : 0;
+          return (
+            <div key={`${title}-${item.attempt_type}`} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="truncate text-sm font-medium text-slate-700" title={item.title}>
+                  {item.title}
+                </span>
+                <span className="shrink-0 text-xs font-semibold text-slate-500">
+                  {item.count} job{item.count === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-white">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: accent }}
+                />
+              </div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                {pct.toFixed(1)}% of traced jobs
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -397,6 +460,7 @@ export function Benchmark() {
 
   const createTruthDisabled = running || !truthName.trim() || !truthVideoUrl.trim();
   const runDisabled = running || !runTruthId;
+  const tracedJobCount = suiteResults?.path_metrics?.jobs_with_trace || 0;
 
   const handleCreateTruth = async () => {
     setRunning(true);
@@ -619,7 +683,7 @@ export function Benchmark() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-8 text-gray-500 animate-pulse">
+      <div className={`${panelClass} flex items-center gap-3 p-8 text-slate-500 animate-pulse`}>
         <UpdateIcon className="animate-spin" /> Loading benchmark tools…
       </div>
     );
@@ -627,35 +691,57 @@ export function Benchmark() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center gap-2">
-        <RocketIcon className="h-6 w-6 text-primary-600" />
-        <h2 className="text-3xl font-bold tracking-tight text-gray-900">Benchmarking</h2>
+      <div className={`${panelClass} overflow-hidden p-6`}>
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-end">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-primary-700">
+              <RocketIcon className="h-3.5 w-3.5" />
+              Controlled trials
+            </div>
+            <h2 className="mt-4 text-3xl font-black tracking-[-0.05em] text-slate-950">Benchmark lab</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              Run repeatable suites across OCR, model hosts, and runtime modes. This screen is tuned for comparative readouts rather than day-to-day queue operations.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/80 px-4 py-4 shadow-sm">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Truth sets</div>
+              <div className="mt-2 text-lg font-black tracking-[-0.04em] text-slate-950">{truths.length}</div>
+              <div className="text-xs text-slate-500">Golden references loaded</div>
+            </div>
+            <div className="rounded-[22px] border border-slate-200/80 bg-slate-950 px-4 py-4 text-slate-50 shadow-[0_18px_36px_rgba(15,23,42,0.18)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Available models</div>
+              <div className="mt-2 text-lg font-black tracking-[-0.04em] text-white">{availableModels.length}</div>
+              <div className="text-xs text-slate-400">Selectable benchmark contenders</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+        <div className="flex items-center gap-3 rounded-[22px] border border-red-200 bg-red-50/90 p-4 text-red-700 shadow-sm">
           <ExclamationTriangleIcon className="h-4 w-4" />
           <span className="text-sm">{error}</span>
         </div>
       )}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className={`${panelClass} p-5`}>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Host Hardware Profile</h3>
-          <span className="text-[11px] text-gray-400">Detected at {profile?.timestamp || '—'}</span>
+          <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">Host hardware profile</h3>
+          <span className="text-[11px] text-slate-400">Detected at {profile?.timestamp || '—'}</span>
         </div>
         <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">CPU (logical): {profile?.hardware.cpu_count_logical ?? '—'}</div>
-          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">RAM: {formatGbFromMb(profile?.hardware.total_ram_mb)}</div>
-          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">Accelerator: {profile?.hardware.accelerator || 'cpu'}</div>
-          <div className="rounded border border-gray-200 bg-gray-50 p-2 text-gray-700">VRAM: {profile?.hardware.total_vram_mb ?? '—'} MB</div>
+          <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 text-slate-700">CPU (logical): {profile?.hardware.cpu_count_logical ?? '—'}</div>
+          <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 text-slate-700">RAM: {formatGbFromMb(profile?.hardware.total_ram_mb)}</div>
+          <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 text-slate-700">Accelerator: {profile?.hardware.accelerator || 'cpu'}</div>
+          <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-3 text-slate-700">VRAM: {profile?.hardware.total_vram_mb ?? '—'} MB</div>
         </div>
         {(profile?.warnings || []).length > 0 && (
           <div className="mt-3 space-y-2">
             {profile!.warnings.map((warning, idx) => (
               <div
                 key={`${warning.model}-${idx}`}
-                className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700"
+                className="rounded-[18px] border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700"
               >
                 {warning.message}
               </div>
@@ -666,81 +752,89 @@ export function Benchmark() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* Create Golden Video Truth */}
-        <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900">Create Golden Video Truth</h3>
+        <div className={`${panelClass} space-y-3 p-5`}>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Golden input</div>
+            <h3 className="mt-2 text-xl font-black tracking-[-0.04em] text-slate-950">Create truth reference</h3>
+            <p className="mt-1 text-sm text-slate-500">Define the expected brand, category, OCR, and reasoning for one benchmark asset.</p>
+          </div>
           <input
             value={truthName}
             onChange={(event) => setTruthName(event.target.value)}
             placeholder="Truth set name"
-            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+            className={controlClass}
           />
           <input
             value={truthVideoUrl}
             onChange={(event) => setTruthVideoUrl(event.target.value)}
             placeholder="Video URL or absolute server path"
-            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+            className={controlClass}
           />
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <input
               value={truthExpectedBrand}
               onChange={(event) => setTruthExpectedBrand(event.target.value)}
               placeholder="Expected brand"
-              className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+              className={controlClass}
             />
             <input
               value={truthExpectedCategory}
               onChange={(event) => setTruthExpectedCategory(event.target.value)}
               placeholder="Expected category"
-              className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+              className={controlClass}
             />
           </div>
           <input
             value={truthExpectedConfidence}
             onChange={(event) => setTruthExpectedConfidence(event.target.value)}
             placeholder="Expected confidence (0..1)"
-            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+            className={controlClass}
           />
           <textarea
             value={truthCategories}
             onChange={(event) => setTruthCategories(event.target.value)}
             placeholder="Expected categories (comma separated)"
-            className="h-20 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+            className="h-20 w-full rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
           />
           <textarea
             value={truthExpectedOcr}
             onChange={(event) => setTruthExpectedOcr(event.target.value)}
             placeholder="Expected OCR corpus"
-            className="h-20 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+            className="h-20 w-full rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
           />
           <textarea
             value={truthExpectedReasoning}
             onChange={(event) => setTruthExpectedReasoning(event.target.value)}
             placeholder="Expected reasoning"
-            className="h-20 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+            className="h-20 w-full rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
           />
           <button
             type="button"
             disabled={createTruthDisabled}
             onClick={handleCreateTruth}
-            className="h-10 rounded bg-primary-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#4f46e5,#2563eb)] px-4 text-sm font-bold uppercase tracking-[0.18em] text-white shadow-[0_18px_36px_rgba(79,70,229,0.22)] transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-50"
           >
             Create Truth
           </button>
         </div>
 
         {/* Run Benchmark Suite */}
-        <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900">Run Benchmark Suite</h3>
+        <div className={`${panelClass} space-y-3 p-5`}>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Execution</div>
+            <h3 className="mt-2 text-xl font-black tracking-[-0.04em] text-slate-950">Run comparison suite</h3>
+            <p className="mt-1 text-sm text-slate-500">Select the truth set, the contender models, and the execution profile you want to compare.</p>
+          </div>
 
           {/* ── Feature 1: Deletable truth list ────────────────────────────── */}
           <div>
-            <p className="mb-1.5 text-xs font-medium text-gray-500">Select Golden Truth</p>
+            <p className="mb-1.5 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Select golden truth</p>
             {truths.length === 0 ? (
-              <div className="rounded border border-dashed border-gray-300 py-3 text-center text-xs text-gray-400">
+              <div className="rounded-[18px] border border-dashed border-slate-300 py-3 text-center text-xs text-slate-400">
                 No golden truths yet — create one on the left.
               </div>
             ) : (
-              <div className="space-y-1 max-h-48 overflow-y-auto rounded border border-gray-200">
+              <div className="space-y-1 max-h-48 overflow-y-auto rounded-[20px] border border-slate-200 bg-slate-50/60 p-1.5">
                 {truths.map((truth) => {
                   const isSelected = runTruthId === truth.truth_id;
                   return (
@@ -855,7 +949,7 @@ export function Benchmark() {
               <select
                 value={manualProvider}
                 onChange={(e) => setManualProvider(e.target.value)}
-                className="h-8 rounded border border-gray-300 bg-white px-2 text-xs text-gray-700 focus:border-primary-500 focus:outline-none"
+                className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:border-primary-400 focus:outline-none"
               >
                 <option>Llama Server</option>
                 <option>Ollama</option>
@@ -868,13 +962,13 @@ export function Benchmark() {
                 onChange={(e) => setManualModelName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') addManualModel(); }}
                 placeholder="model name (e.g. llama3.3:70b)"
-                className="h-8 flex-1 rounded border border-gray-300 bg-white px-2 text-xs text-gray-700 focus:border-primary-500 focus:outline-none"
+                className="h-9 flex-1 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:border-primary-400 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={addManualModel}
                 disabled={!manualModelName.trim()}
-                className="h-8 rounded border border-primary-400 bg-primary-50 px-2.5 text-xs font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
+                className="h-9 rounded-xl border border-primary-200 bg-primary-50 px-2.5 text-xs font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
               >
                 + Add
               </button>
@@ -890,7 +984,7 @@ export function Benchmark() {
             value={runCategories}
             onChange={(event) => setRunCategories(event.target.value)}
             placeholder="Optional categories override"
-            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
+            className={controlClass}
           />
 
           {/* Express mode toggle */}
@@ -917,24 +1011,27 @@ export function Benchmark() {
             type="button"
             disabled={runDisabled}
             onClick={handleRunSuite}
-            className="h-10 rounded bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#059669,#0f766e)] px-4 text-sm font-bold uppercase tracking-[0.18em] text-white shadow-[0_18px_36px_rgba(5,150,105,0.18)] transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-50"
           >
             Launch Benchmark
           </button>
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-slate-500">
             Runs permutations across scan strategy, OCR engine/mode, and the selected models above.
           </div>
         </div>
       </div>
 
       {/* Benchmark Suites table */}
-      <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className={`${panelClass} space-y-3 p-5`}>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900">Benchmark Suites</h3>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Results archive</div>
+            <h3 className="mt-2 text-xl font-black tracking-[-0.04em] text-slate-950">Benchmark suites</h3>
+          </div>
           <select
             value={selectedSuiteId}
             onChange={(event) => setSelectedSuiteId(event.target.value)}
-            className="h-9 rounded border border-gray-300 bg-white px-2 text-xs text-gray-900 focus:border-primary-500 focus:outline-none"
+            className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700 focus:border-primary-400 focus:outline-none"
           >
             <option value="">Select suite</option>
             {suites.map((suite) => (
@@ -1088,6 +1185,40 @@ export function Benchmark() {
           <div className="text-sm text-gray-400">Select a suite to inspect its golden tests.</div>
         )}
       </div>
+
+      {suiteResults?.path_metrics && (
+        <div className={`${panelClass} p-5`}>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">
+                Path telemetry
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Derived from saved processing traces only. This does not add any work to live job execution.
+              </p>
+            </div>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              {tracedJobCount} traced job{tracedJobCount === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <PathMetricList
+              title="Accepted paths"
+              subtitle="Where jobs finished after the fallback ladder settled on a final answer."
+              items={suiteResults.path_metrics.accepted_paths || []}
+              denominator={tracedJobCount}
+              accent="linear-gradient(135deg, #4f46e5, #2563eb)"
+            />
+            <PathMetricList
+              title="Transit counts"
+              subtitle="How many jobs traversed each stage, including retries that were later rejected."
+              items={suiteResults.path_metrics.transit_paths || []}
+              denominator={tracedJobCount}
+              accent="linear-gradient(135deg, #0f766e, #14b8a6)"
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Scatter chart + Feature 3: Performance ranking table ─────────── */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">

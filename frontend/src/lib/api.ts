@@ -261,6 +261,18 @@ export interface DurationSamplePoint {
   duration_seconds: number;
 }
 
+export interface AnalyticsPathCount {
+  attempt_type: string;
+  title: string;
+  count: number;
+}
+
+export interface AnalyticsPathMetrics {
+  jobs_with_trace: number;
+  accepted_paths: AnalyticsPathCount[];
+  transit_paths: AnalyticsPathCount[];
+}
+
 export interface AnalyticsData {
   top_brands: { brand: string; count: number }[];
   categories: { category: string; count: number }[];
@@ -277,6 +289,7 @@ export interface AnalyticsData {
   duration_percentiles: DurationPercentiles;
   duration_series: DurationSeriesPoint[];
   recent_duration_points: DurationSamplePoint[];
+  path_metrics: AnalyticsPathMetrics;
 }
 
 export interface SystemProfileWarning {
@@ -360,6 +373,18 @@ export interface BenchmarkPoint {
   label: string;
 }
 
+export interface BenchmarkPathCount {
+  attempt_type: string;
+  title: string;
+  count: number;
+}
+
+export interface BenchmarkPathMetrics {
+  jobs_with_trace: number;
+  accepted_paths: BenchmarkPathCount[];
+  transit_paths: BenchmarkPathCount[];
+}
+
 export interface BenchmarkSuiteResults {
   suite_id: string;
   status: string;
@@ -367,6 +392,7 @@ export interface BenchmarkSuiteResults {
   completed_jobs: number;
   failed_jobs: number;
   points: BenchmarkPoint[];
+  path_metrics?: BenchmarkPathMetrics;
 }
 
 export interface ModelCombo {
@@ -398,6 +424,11 @@ export function emptyAnalytics(): AnalyticsData {
     },
     duration_series: [],
     recent_duration_points: [],
+    path_metrics: {
+      jobs_with_trace: 0,
+      accepted_paths: [],
+      transit_paths: [],
+    },
   };
 }
 
@@ -552,6 +583,31 @@ function mergeAnalytics(responses: AnalyticsData[]): AnalyticsData {
 
   const { durationPercentiles, durationSeries } = computeDurationAnalyticsFromPoints(mergedDurationPoints);
 
+  const mergePathCounts = (key: 'accepted_paths' | 'transit_paths'): AnalyticsPathCount[] => {
+    const counts = new Map<string, { count: number; title: string }>();
+    for (const response of responses) {
+      for (const row of response.path_metrics?.[key] || []) {
+        const attemptType = String(row.attempt_type || '').trim();
+        if (!attemptType) continue;
+        const current = counts.get(attemptType) || {
+          count: 0,
+          title: String(row.title || '').trim() || attemptType,
+        };
+        current.count += Number(row.count || 0);
+        if (!current.title) current.title = String(row.title || '').trim() || attemptType;
+        counts.set(attemptType, current);
+      }
+    }
+    return Array.from(counts.entries())
+      .map(([attempt_type, row]) => ({ attempt_type, title: row.title, count: row.count }))
+      .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
+  };
+
+  const jobsWithTrace = responses.reduce(
+    (sum, response) => sum + Number(response.path_metrics?.jobs_with_trace || 0),
+    0,
+  );
+
   return {
     top_brands: mergeCounts(
       'brand',
@@ -590,6 +646,11 @@ function mergeAnalytics(responses: AnalyticsData[]): AnalyticsData {
     duration_percentiles: durationPercentiles,
     duration_series: durationSeries,
     recent_duration_points: mergedDurationPoints,
+    path_metrics: {
+      jobs_with_trace: jobsWithTrace,
+      accepted_paths: mergePathCounts('accepted_paths'),
+      transit_paths: mergePathCounts('transit_paths'),
+    },
   };
 }
 
