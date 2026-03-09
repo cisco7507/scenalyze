@@ -11,3 +11,10 @@ requests
 ddgs
 watchdog>=4.0.0
 sse-starlette
+opencv-python
+pandas
+psutil
+python-multipart
+plotly
+easyocr
+yt-dlp

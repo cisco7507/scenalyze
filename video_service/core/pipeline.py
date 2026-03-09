@@ -466,9 +466,31 @@ def _specificity_search_generic_raw_categories() -> set[str]:
     return values or {"Movie"}
 
 
+def _is_valid_search_domain(domain: str) -> bool:
+    labels = [label for label in (domain or "").strip().lower().split(".") if label]
+    if len(labels) < 2:
+        return False
+    if labels[0] in {"www", "m", "amp"} and len(labels) < 3:
+        return False
+    tld = labels[-1]
+    if not re.fullmatch(r"[a-z]{2,24}", tld):
+        return False
+    if len(labels) == 2 and len(tld) > 10:
+        return False
+    return True
+
+
 def _extract_ocr_domains(text: str) -> list[str]:
-    matches = re.findall(r"\b([a-z0-9-]+\.[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b", text or "", flags=re.IGNORECASE)
-    return list(dict.fromkeys(match for match in matches if match))
+    matches = re.findall(
+        r"\b((?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b",
+        text or "",
+        flags=re.IGNORECASE,
+    )
+    return list(
+        dict.fromkeys(
+            match for match in matches if match and _is_valid_search_domain(match.split("/", 1)[0])
+        )
+    )
 
 
 def _top_visual_matches(sorted_vision: dict[str, float], limit: int = 3) -> list[tuple[str, float]]:

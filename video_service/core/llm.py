@@ -69,6 +69,20 @@ class SearchManager:
 search_manager = SearchManager()
 
 
+def _is_valid_search_domain(domain: str) -> bool:
+    labels = [label for label in (domain or "").strip().lower().split(".") if label]
+    if len(labels) < 2:
+        return False
+    if labels[0] in {"www", "m", "amp"} and len(labels) < 3:
+        return False
+    tld = labels[-1]
+    if not re.fullmatch(r"[a-z]{2,24}", tld):
+        return False
+    if len(labels) == 2 and len(tld) > 10:
+        return False
+    return True
+
+
 class LLMProvider(Protocol):
     @property
     def supports_vision(self) -> bool:
@@ -894,13 +908,18 @@ class HybridLLM:
     def _extract_search_domain(self, text: str) -> tuple[str, str]:
         if not text:
             return "", ""
-        match = re.search(r"\b([a-z0-9-]+\.[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b", text, flags=re.IGNORECASE)
-        if not match:
-            return "", ""
-        raw = match.group(1)
-        domain = raw.split("/", 1)[0].lower()
-        path = raw.split("/", 1)[1] if "/" in raw else ""
-        return domain, path
+        matches = re.findall(
+            r"\b((?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        for raw in matches:
+            domain = raw.split("/", 1)[0].lower()
+            if not _is_valid_search_domain(domain):
+                continue
+            path = raw.split("/", 1)[1] if "/" in raw else ""
+            return domain, path
+        return "", ""
 
     def _build_specificity_search_query(
         self,
