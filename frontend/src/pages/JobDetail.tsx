@@ -1984,6 +1984,48 @@ export function JobDetail() {
     typeof acceptedExplanationAttempt?.result?.confidence === "number"
       ? acceptedExplanationAttempt.result.confidence
       : null;
+  const normalizedJourneyRawCategory = (rawLlmCategory || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const normalizedJourneyFinalCategory = String(explanationFinal?.category || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const categoryJourneyUnchanged =
+    Boolean(normalizedJourneyRawCategory) &&
+    normalizedJourneyRawCategory === normalizedJourneyFinalCategory;
+  const renderExplainCategoryLabel = (
+    value: string | null | undefined,
+    tone: "default" | "primary" = "default",
+  ) => {
+    const text = String(value || "").trim();
+    if (!text) {
+      return <span>—</span>;
+    }
+
+    const segmentClassName =
+      tone === "primary"
+        ? "text-gray-900"
+        : "text-gray-900";
+    const slashClassName =
+      tone === "primary"
+        ? "text-primary-400"
+        : "text-gray-300";
+
+    return (
+      <span className="flex flex-wrap items-baseline gap-y-1">
+        {text.split("/").map((segment, index, segments) => (
+          <span key={`${segment}-${index}`} className="inline-flex items-baseline">
+            <span className={`break-normal ${segmentClassName}`}>{segment}</span>
+            {index < segments.length - 1 ? (
+              <span className={`px-1 ${slashClassName}`}>/</span>
+            ) : null}
+          </span>
+        ))}
+      </span>
+    );
+  };
   const operatorNotes = buildOperatorNotes(explanationAttempts, explanationFinal);
   const acceptedMethodGuideEntry = getExplainMethodGuideEntry(
     explanationSummary?.accepted_attempt_type,
@@ -2657,182 +2699,302 @@ export function JobDetail() {
 
             {effectiveExplanation && (
               <>
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-4">
-                    <div className="space-y-1">
-                      <HelpHeading
-                        label="Processing Summary"
-                        help="A post-hoc explanation of what the pipeline tried for this job. It is assembled from structured execution trace data captured during the run and persisted with the job."
-                      />
-                      <div className="text-sm text-gray-700">
-                        {explanationSummary?.headline ||
-                          "No structured processing explanation is available for this job."}
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.22fr)_minmax(320px,0.88fr)]">
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-4">
+                      <div className="space-y-1">
+                        <HelpHeading
+                          label="Processing Summary"
+                          help="A post-hoc explanation of what the pipeline tried for this job. It is assembled from structured execution trace data captured during the run and persisted with the job."
+                        />
+                        <div className="max-w-3xl text-sm leading-6 text-gray-700">
+                          {explanationSummary?.headline ||
+                            "No structured processing explanation is available for this job."}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Attempts
+                          </div>
+                          <div className="mt-2 text-3xl font-semibold text-gray-900">
+                            {explanationSummary?.attempt_count ?? explanationAttempts.length}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Retries
+                          </div>
+                          <div className="mt-2 text-3xl font-semibold text-gray-900">
+                            {explanationSummary?.retry_count ?? Math.max(0, explanationAttempts.length - 1)}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Final Confidence
+                          </div>
+                          <div className="mt-2 text-3xl font-semibold text-cyan-700">
+                            {typeof explanationFinal?.confidence === "number"
+                              ? explanationFinal.confidence.toFixed(2)
+                              : "—"}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                        <div className="rounded-lg border border-primary-200 bg-primary-50 px-4 py-3">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-primary-500 font-semibold">
+                            Accepted Path
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-start gap-2">
+                            <div className="inline-flex items-center gap-1.5 rounded-full border border-primary-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-900">
+                              <span>
+                                {acceptedMethodGuideEntry?.label ||
+                                  formatReasonLabel(explanationSummary?.accepted_attempt_type) ||
+                                  "—"}
+                              </span>
+                              {acceptedMethodGuideEntry ? (
+                                <HelpTooltip
+                                  content={acceptedMethodGuideEntry.detail}
+                                  widthClassName="w-72"
+                                />
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="mt-3 text-xs leading-5 text-gray-600">
+                            This is the processing route that produced the final accepted classification.
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-amber-700 font-semibold">
+                            Why this branch ran
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {(formatReasonLabel(explanationSummary?.trigger_reason) || "No trigger recorded")
+                              .split(";")
+                              .map((reason) => reason.trim())
+                              .filter(Boolean)
+                              .map((reason, idx) => {
+                                const [rawKey, ...rawValueParts] = reason.split("=");
+                                const hasStructuredKey = rawValueParts.length > 0;
+                                const key = hasStructuredKey ? rawKey.trim() : "signal";
+                                const value = hasStructuredKey
+                                  ? rawValueParts.join("=").trim()
+                                  : reason;
+
+                                return (
+                                  <div
+                                    key={`trigger-reason-${idx}`}
+                                    className="rounded-lg border border-amber-200 bg-white px-3 py-2"
+                                  >
+                                    <div className="text-[10px] uppercase tracking-[0.2em] text-amber-700 font-semibold">
+                                      {key}
+                                    </div>
+                                    <div className="mt-1 text-sm leading-6 text-amber-950 break-all">
+                                      {value}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                          <div className="mt-3 text-xs leading-5 text-amber-900/80">
+                            Trigger reasons are deterministic signals from the trace. They explain why the pipeline escalated instead of accepting the first pass.
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Attempts
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+                      <div className="space-y-1">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                          Final Outcome
                         </div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">
-                          {explanationSummary?.attempt_count ?? explanationAttempts.length}
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Retries
-                        </div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">
-                          {explanationSummary?.retry_count ?? Math.max(0, explanationAttempts.length - 1)}
+                        <div className="text-sm text-gray-500">
+                          The accepted result after the fallback ladder and taxonomy normalization finished.
                         </div>
                       </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Accepted Path
-                        </div>
-                        <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-gray-900">
-                          <span>
-                            {acceptedMethodGuideEntry?.label ||
-                              formatReasonLabel(explanationSummary?.accepted_attempt_type) ||
-                              "—"}
-                          </span>
-                          {acceptedMethodGuideEntry ? (
-                            <HelpTooltip
-                              content={acceptedMethodGuideEntry.detail}
-                              widthClassName="w-72"
-                            />
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Trigger
-                        </div>
-                        <div className="mt-1 text-sm font-semibold text-gray-900">
-                          {formatReasonLabel(explanationSummary?.trigger_reason) || "—"}
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 xl:col-span-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Final Brand
+                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(320px,1.85fr)]">
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 min-h-[116px] flex flex-col justify-between">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Final Brand
+                          </div>
+                          <div className="mt-3 text-[1.05rem] font-semibold text-gray-900 break-words">
+                            {explanationFinal?.brand || "—"}
+                          </div>
                         </div>
-                        <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
-                          {explanationFinal?.brand || "—"}
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 xl:col-span-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Final Category
-                        </div>
-                        <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
-                          {explanationFinal?.category || "—"}
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Category ID
-                        </div>
-                        <div className="mt-1 text-sm font-mono font-semibold text-primary-700">
-                          {explanationFinal?.category_id || "—"}
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 min-h-[116px] flex flex-col justify-between">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Final Category
+                          </div>
+                          <div className="mt-3 text-[1.05rem] font-semibold leading-7">
+                            {renderExplainCategoryLabel(explanationFinal?.category, "primary")}
+                          </div>
                         </div>
                       </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Mapper Method
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 min-h-[102px] flex flex-col justify-between">
+                          <div className="text-[10px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Taxonomy ID
+                          </div>
+                          <div className="mt-3 text-center text-[1.35rem] font-mono font-semibold text-primary-700">
+                            {explanationFinal?.category_id || "—"}
+                          </div>
                         </div>
-                        <div className="mt-1 text-sm text-gray-900">
-                          {formatMatchMethod(explanationFinal?.mapper_method) || "—"}
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 min-h-[102px] flex flex-col justify-between">
+                          <div className="text-[10px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Mapper Method
+                          </div>
+                          <div className="mt-3 text-center text-base text-gray-900">
+                            {formatMatchMethod(explanationFinal?.mapper_method) || "—"}
+                          </div>
                         </div>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Mapper Score
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 min-h-[102px] flex flex-col justify-between">
+                          <div className="text-[10px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Mapper Score
+                          </div>
+                          <div className="mt-3 text-center text-[1.35rem] font-mono text-cyan-700">
+                            {typeof explanationFinal?.mapper_score === "number"
+                              ? explanationFinal.mapper_score.toFixed(4)
+                              : "—"}
+                          </div>
                         </div>
-                        <div className="mt-1 text-sm font-mono text-cyan-700">
-                          {typeof explanationFinal?.mapper_score === "number"
-                            ? explanationFinal.mapper_score.toFixed(4)
-                            : "—"}
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Final Confidence
-                        </div>
-                        <div className="mt-1 text-sm font-mono text-cyan-700">
-                          {typeof explanationFinal?.confidence === "number"
-                            ? explanationFinal.confidence.toFixed(2)
-                            : "—"}
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 min-h-[102px] flex flex-col justify-between">
+                          <div className="text-[10px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Final Confidence
+                          </div>
+                          <div className="mt-3 text-center text-[1.35rem] font-mono text-cyan-700">
+                            {typeof explanationFinal?.confidence === "number"
+                              ? explanationFinal.confidence.toFixed(2)
+                              : "—"}
+                          </div>
                         </div>
                       </div>
                       {explanationFinal?.brand_ambiguity_flag ? (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 xl:col-span-2">
-                          <div className="text-[11px] uppercase tracking-wider text-amber-700 font-semibold">
-                            Brand Review
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-amber-700 font-semibold">
+                              Brand Review
+                            </div>
+                            <div className="mt-2 text-sm font-semibold text-amber-900">
+                              {explanationFinal?.brand_ambiguity_resolved
+                                ? "Web-assisted brand disambiguation ran"
+                                : "Weak-anchor brand guess was kept"}
+                            </div>
+                            <div className="mt-2 text-xs leading-5 text-amber-800">
+                              {explanationFinal?.brand_ambiguity_resolved
+                                ? formatBrandDisambiguationReason(
+                                    explanationFinal?.brand_disambiguation_reason,
+                                    explanationFinal?.brand,
+                                  )
+                                : formatBrandAmbiguityReason(explanationFinal?.brand_ambiguity_reason)}
+                            </div>
                           </div>
-                          <div className="mt-1 text-sm font-semibold text-amber-900">
-                            {explanationFinal?.brand_ambiguity_resolved
-                              ? "Web-assisted brand disambiguation ran"
-                              : "Weak-anchor brand guess was kept"}
-                          </div>
-                          <div className="mt-1 text-xs text-amber-800 leading-5">
-                            {explanationFinal?.brand_ambiguity_resolved
-                              ? formatBrandDisambiguationReason(
-                                  explanationFinal?.brand_disambiguation_reason,
-                                  explanationFinal?.brand,
-                                )
-                              : formatBrandAmbiguityReason(explanationFinal?.brand_ambiguity_reason)}
-                          </div>
-                        </div>
-                      ) : null}
+                        ) : null}
                     </div>
 
-                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-                      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
+                      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
                         <div className="space-y-1">
                           <HelpHeading
                             label="Category Journey"
                             help="Shows how the accepted LLM category was normalized into the final canonical taxonomy category and ID."
                           />
                           <div className="text-xs text-gray-500">
-                            Raw classifier label versus final mapped taxonomy output.
+                            Raw classifier label versus the final canonical taxonomy landing.
                           </div>
                         </div>
 
-                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center">
-                          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                            <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                              Raw LLM Category
+                        {categoryJourneyUnchanged ? (
+                          <div className="rounded-lg border border-primary-200 bg-primary-50/70 p-4 space-y-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center rounded-full border border-primary-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary-500">
+                                Retained Category
+                              </span>
+                              <span className="text-xs text-primary-700/80">
+                                The accepted LLM category already matched the canonical taxonomy landing.
+                              </span>
                             </div>
-                            <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
-                              {rawLlmCategory || "—"}
+
+                            <div className="rounded-lg border border-primary-200/80 bg-white px-4 py-4">
+                              <div className="text-[10px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                                Canonical Taxonomy Category
+                              </div>
+                              <div className="mt-2 text-base font-semibold leading-7 text-gray-900">
+                                {renderExplainCategoryLabel(
+                                  explanationFinal?.category || rawLlmCategory || "—",
+                                  "primary",
+                                )}
+                              </div>
                             </div>
-                            <div className="mt-1 text-[11px] text-gray-500">
-                              Confidence: {rawLlmConfidence !== null ? rawLlmConfidence.toFixed(2) : "—"}
+
+                            <div className="flex flex-wrap gap-2">
+                              <div className="inline-flex items-center gap-2 rounded-full border border-primary-200/70 bg-white px-3 py-1.5 text-sm text-primary-900">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-500">
+                                  Confidence
+                                </span>
+                                <span className="font-mono">
+                                  {rawLlmConfidence !== null ? rawLlmConfidence.toFixed(2) : "—"}
+                                </span>
+                              </div>
+                              <div className="inline-flex items-center gap-2 rounded-full border border-primary-200/70 bg-white px-3 py-1.5 text-sm text-primary-900">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-500">
+                                  ID
+                                </span>
+                                <span className="font-mono">{explanationFinal?.category_id || "—"}</span>
+                              </div>
+                              <div className="inline-flex items-center gap-2 rounded-full border border-primary-200/70 bg-white px-3 py-1.5 text-sm text-primary-900">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-500">
+                                  Score
+                                </span>
+                                <span className="font-mono">
+                                  {typeof explanationFinal?.mapper_score === "number"
+                                    ? explanationFinal.mapper_score.toFixed(4)
+                                    : "—"}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex items-center justify-center text-gray-300 text-lg font-bold">
-                            →
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                                Step 1 · Raw LLM Category
+                              </div>
+                              <div className="mt-2 text-base font-semibold leading-7">
+                                {renderExplainCategoryLabel(rawLlmCategory || "—")}
+                              </div>
+                              <div className="mt-2 text-[11px] text-gray-500">
+                                Confidence: {rawLlmConfidence !== null ? rawLlmConfidence.toFixed(2) : "—"}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 pl-2 text-xs uppercase tracking-[0.22em] text-gray-300">
+                              <span className="h-px flex-1 bg-gray-200" />
+                              <span>normalized into taxonomy</span>
+                              <span className="h-px flex-1 bg-gray-200" />
+                            </div>
+
+                            <div className="rounded-lg border border-primary-200 bg-primary-50 px-4 py-3">
+                              <div className="text-[11px] uppercase tracking-[0.22em] text-primary-500 font-semibold">
+                                Step 2 · Canonical Taxonomy Category
+                              </div>
+                              <div className="mt-2 text-base font-semibold leading-7">
+                                {renderExplainCategoryLabel(explanationFinal?.category || "—", "primary")}
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-primary-700">
+                                <span>ID: {explanationFinal?.category_id || "—"}</span>
+                                <span>
+                                  Score: {typeof explanationFinal?.mapper_score === "number" ? explanationFinal.mapper_score.toFixed(4) : "—"}
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2">
-                            <div className="text-[11px] uppercase tracking-wider text-primary-500 font-semibold">
-                              Canonical Taxonomy Category
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-gray-900 break-words">
-                              {explanationFinal?.category || "—"}
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-primary-700">
-                              <span>ID: {explanationFinal?.category_id || "—"}</span>
-                              <span>Score: {typeof explanationFinal?.mapper_score === "number" ? explanationFinal.mapper_score.toFixed(4) : "—"}</span>
-                            </div>
-                          </div>
-                        </div>
+                        )}
                       </div>
 
-                      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
                         <div className="space-y-1">
                           <HelpHeading
                             label="Operator Notes"
@@ -2843,11 +3005,11 @@ export function JobDetail() {
                           </div>
                         </div>
                         {operatorNotes.length > 0 ? (
-                          <div className="space-y-2">
+                          <div className="space-y-3">
                             {operatorNotes.map((note, idx) => (
                               <div
                                 key={`operator-note-${idx}`}
-                                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                                className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm leading-6 text-gray-700"
                               >
                                 {note}
                               </div>
@@ -2862,81 +3024,93 @@ export function JobDetail() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
-                    <div className="space-y-1">
-                      <HelpHeading
-                        label="Evidence Snapshot"
-                        help="Representative evidence captured during the completed run. This view reuses persisted OCR, frame, and event data; it does not trigger fresh OCR or another model call."
-                      />
-                      <div className="text-xs text-gray-500">
-                        Persisted evidence tied to the final result and fallback ladder.
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+                      <div className="space-y-1">
+                        <HelpHeading
+                          label="Evidence Snapshot"
+                          help="Representative evidence captured during the completed run. This view reuses persisted OCR, frame, and event data; it does not trigger fresh OCR or another model call."
+                        />
+                        <div className="text-xs text-gray-500">
+                          Persisted evidence tied to the final result and fallback ladder.
+                        </div>
+                      </div>
+
+                      {explanationEvidence?.ocr_excerpt ? (
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold mb-2">
+                            OCR Excerpt
+                          </div>
+                          <div className="max-h-40 overflow-auto rounded-md bg-white/80 px-3 py-2 text-xs font-mono leading-relaxed text-gray-700 whitespace-pre-wrap">
+                            {explanationEvidence.ocr_excerpt}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-xs text-gray-500">
+                          No persisted OCR excerpt was available for this job.
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                          Evidence Frames
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          {latestExplainFrames.slice(0, 4).map((frame, idx) => {
+                            const timestampLabel =
+                              frame.label ||
+                              (typeof frame.timestamp === "number"
+                                ? `${frame.timestamp.toFixed(1)}s`
+                                : `Frame ${idx + 1}`);
+                            return (
+                              <button
+                                key={`${frame.url}-${idx}`}
+                                type="button"
+                                onClick={() =>
+                                  setSelectedExplainFrame({
+                                    frame,
+                                    attemptTitle: "Evidence Snapshot",
+                                    timestampLabel,
+                                    ocrExcerpt: explanationEvidence?.ocr_excerpt || "",
+                                  })
+                                }
+                                className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 text-left hover:border-primary-300 hover:shadow-sm transition"
+                              >
+                                <img
+                                  src={toApiUrl(frame.url)}
+                                  alt={timestampLabel}
+                                  className="aspect-video w-full object-cover"
+                                />
+                                <div className="px-2 py-1.5 text-[11px] text-gray-600 border-t border-gray-200">
+                                  {timestampLabel}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
-                    {explanationEvidence?.ocr_excerpt ? (
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold mb-2">
-                          OCR Excerpt
-                        </div>
-                        <div className="text-xs font-mono leading-relaxed text-gray-700 whitespace-pre-wrap">
-                          {explanationEvidence.ocr_excerpt}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-xs text-gray-500">
-                        No persisted OCR excerpt was available for this job.
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-3">
-                      {latestExplainFrames.slice(0, 4).map((frame, idx) => {
-                        const timestampLabel =
-                          frame.label ||
-                          (typeof frame.timestamp === "number"
-                            ? `${frame.timestamp.toFixed(1)}s`
-                            : `Frame ${idx + 1}`);
-                        return (
-                          <button
-                            key={`${frame.url}-${idx}`}
-                            type="button"
-                            onClick={() =>
-                              setSelectedExplainFrame({
-                                frame,
-                                attemptTitle: "Evidence Snapshot",
-                                timestampLabel,
-                                ocrExcerpt: explanationEvidence?.ocr_excerpt || "",
-                              })
-                            }
-                            className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 text-left hover:border-primary-300 hover:shadow-sm transition"
-                          >
-                            <img
-                              src={toApiUrl(frame.url)}
-                              alt={timestampLabel}
-                              className="aspect-video w-full object-cover"
-                            />
-                            <div className="px-2 py-1.5 text-[11px] text-gray-600 border-t border-gray-200">
-                              {timestampLabel}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">
-                          Recent Events
+                        <div className="space-y-1">
+                          <div className="text-[11px] uppercase tracking-[0.22em] text-gray-400 font-semibold">
+                            Recent Events
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            The latest stage messages emitted during processing.
+                          </div>
                         </div>
                         <div className="text-[11px] text-gray-500">
                           {explanationEvidence?.event_count ?? 0} total
                         </div>
                       </div>
-                      <div className="mt-2 max-h-40 overflow-auto space-y-1">
+                      <div className="max-h-[22rem] overflow-auto space-y-1">
                         {(explanationEvidence?.recent_events || []).length > 0 ? (
                           (explanationEvidence?.recent_events || []).map((event, idx) => (
                             <div
                               key={`${idx}-${event}`}
-                              className="rounded border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] text-gray-600"
+                              className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2 text-[11px] leading-5 text-gray-600"
                             >
                               {event}
                             </div>
