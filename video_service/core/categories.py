@@ -1,6 +1,7 @@
 import threading
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,12 @@ import numpy as np
 from sentence_transformers import SentenceTransformer, util
 from video_service.core.logging_setup import job_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
+from video_service.core.embedding_models import (
+    DEFAULT_CATEGORY_EMBEDDING_MODEL as DEFAULT_ALLOWED_CATEGORY_EMBEDDING_MODEL,
+    category_embedding_model_requires_remote_code,
+    resolve_category_embedding_model,
+    resolve_category_embedding_device,
+)
 from video_service.core.category_mapping import (
     CATEGORY_MAPPING_STATE,
     load_category_mapping,
@@ -31,10 +38,22 @@ _siglip_error_logged = None
 SIGLIP_ID = "google/siglip-so400m-patch14-384"
 DEFAULT_CATEGORY_EMBEDDING_MODEL = os.environ.get(
     "CATEGORY_EMBEDDING_MODEL",
-    "BAAI/bge-large-en-v1.5",
+    DEFAULT_ALLOWED_CATEGORY_EMBEDDING_MODEL,
 )
 _BGE_LARGE_EN_V15_MODEL = "BAAI/bge-large-en-v1.5"
 _BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+
+def _should_prefix_bge_query(query_text: str) -> bool:
+    normalized_query = str(query_text or "").strip()
+    if not normalized_query:
+        return False
+
+    token_count = len(re.findall(r"[A-Za-zÀ-ÿ0-9]+", normalized_query))
+    has_multiline_evidence = "\n" in normalized_query
+    is_long_query = len(normalized_query) >= 80 or token_count >= 10
+
+    return has_multiline_evidence and is_long_query
 
 
 def _prepare_query_text_for_embedding(query_text: str, model_name: str) -> str:
@@ -44,7 +63,7 @@ def _prepare_query_text_for_embedding(query_text: str, model_name: str) -> str:
         return ""
     if normalized_query.startswith(_BGE_QUERY_PREFIX):
         return normalized_query
-    if normalized_model == _BGE_LARGE_EN_V15_MODEL:
+    if normalized_model == _BGE_LARGE_EN_V15_MODEL and _should_prefix_bge_query(normalized_query):
         return f"{_BGE_QUERY_PREFIX}{normalized_query}"
     return normalized_query
 
@@ -229,6 +248,7 @@ class CategoryMapper:
         self.vision_text_features = None
         self._reinit_lock = threading.RLock()
         self.embedding_model_name = ""
+        self.embedding_device = ""
         self.requested_embedding_model = DEFAULT_CATEGORY_EMBEDDING_MODEL
         self._taxonomy_fingerprint = ""
         self._csv_signature: tuple[str, int, int] | None = None
@@ -310,7 +330,12 @@ class CategoryMapper:
     ) -> None:
         self.embedder = embedder
         self.embedding_model_name = model_name
-        self.category_embeddings = cache_entry["category_embeddings_cpu"].to(device)
+        model_device = resolve_category_embedding_device(
+            model_name,
+            preferred_device=device,
+        )
+        self.embedding_device = model_device
+        self.category_embeddings = cache_entry["category_embeddings_cpu"].to(model_device)
         self.has_nebula = bool(cache_entry.get("has_nebula"))
         self.coords_3d = cache_entry.get("coords_3d")
         self.max_range = float(cache_entry.get("max_range") or 0.0)
@@ -330,7 +355,14 @@ class CategoryMapper:
         self.ensure_vision_text_features()
 
     def configure_embedding_model(self, model_name: str | None = None) -> str:
-        requested = str(model_name or "").strip() or DEFAULT_CATEGORY_EMBEDDING_MODEL
+        requested_raw = str(model_name or "").strip() or DEFAULT_CATEGORY_EMBEDDING_MODEL
+        requested = resolve_category_embedding_model(requested_raw)
+        if requested != requested_raw:
+            logger.warning(
+                "unsupported_category_embedding_model requested=%r fallback=%r",
+                requested_raw,
+                requested,
+            )
         self.requested_embedding_model = requested
         self._refresh_mapping_state_if_needed()
         if not self.mapping_state.enabled:
@@ -363,11 +395,18 @@ class CategoryMapper:
                 logger.info(
                     "Initializing SentenceTransformer %s on %s",
                     requested,
-                    device,
+                    resolve_category_embedding_device(
+                        requested,
+                        preferred_device=device,
+                    ),
                 )
                 embedder = SentenceTransformer(
                     requested,
-                    device=device,
+                    device=resolve_category_embedding_device(
+                        requested,
+                        preferred_device=device,
+                    ),
+                    trust_remote_code=category_embedding_model_requires_remote_code(requested),
                 )
                 cache_entry = self._embedding_cache.get(cache_key)
                 if cache_entry is None:
@@ -389,6 +428,7 @@ class CategoryMapper:
                 self.active = False
                 self.embedder = None
                 self.embedding_model_name = ""
+                self.embedding_device = ""
                 self.has_nebula = False
                 self.vision_text_features = None
                 self.category_embeddings = None
@@ -712,6 +752,7 @@ class CategoryMapper:
                     "category_match_method": "skipped_unknown",
                     "category_match_score": None,
                     "mapping_query_text": "",
+                    "top_matches": [],
                 }
 
             if not self.active and CATEGORY_MAPPING_STATE.enabled:
@@ -722,6 +763,8 @@ class CategoryMapper:
                     "category_id": "",
                     "category_match_method": "disabled",
                     "category_match_score": None,
+                    "mapping_query_text": "",
+                    "top_matches": [],
                 }
 
             query_text = self._resolve_query_text(
@@ -743,6 +786,15 @@ class CategoryMapper:
             scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
             best_match_idx = torch.argmax(scores).item()
             score = float(scores[best_match_idx].item())
+            top_indices = torch.topk(scores, k=min(5, len(self.categories))).indices.tolist()
+            top_matches = [
+                {
+                    "label": self.categories[idx],
+                    "category_id": str(self.cat_to_id.get(self.categories[idx], "") or ""),
+                    "score": float(scores[idx].item()),
+                }
+                for idx in top_indices
+            ]
 
             canonical = self.categories[best_match_idx]
             category_id = str(self.cat_to_id.get(canonical, ""))
@@ -761,6 +813,7 @@ class CategoryMapper:
                 "category_match_method": "embeddings",
                 "category_match_score": score,
                 "mapping_query_text": query_text,
+                "top_matches": top_matches,
             }
 
     def get_closest_official_category(
@@ -798,6 +851,7 @@ class CategoryMapper:
             "category_mapping_count": len(self.cat_to_id),
             "category_csv_path_used": self.csv_path_used,
             "category_embedding_model": self.embedding_model_name or self.requested_embedding_model,
+            "category_embedding_device": self.embedding_device or device,
             "last_error": self.last_error if not self.active else None,
             "siglip_model_loaded": bool(siglip_model is not None and siglip_processor is not None),
             "vision_text_features_cached": bool(self.vision_text_features is not None),

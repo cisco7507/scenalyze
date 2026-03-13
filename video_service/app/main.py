@@ -1693,6 +1693,7 @@ def _default_job_artifacts(job_id: str) -> dict:
             "method": "",
             "score": None,
             "confidence": None,
+            "top_matches": [],
             "vector_plot": None,
         },
         "processing_trace": None,
@@ -1738,6 +1739,7 @@ def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
         payload["category_mapper"]["method"] = mapper_payload.get("method") or ""
         payload["category_mapper"]["score"] = mapper_payload.get("score")
         payload["category_mapper"]["confidence"] = mapper_payload.get("confidence")
+        payload["category_mapper"]["top_matches"] = mapper_payload.get("top_matches") or []
         payload["category_mapper"]["vector_plot"] = mapper_payload.get("vector_plot")
 
     if isinstance(artifacts.get("processing_trace"), dict):

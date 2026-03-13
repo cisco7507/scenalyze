@@ -8,6 +8,11 @@ from video_service.core.category_mapping import (
     select_mapping_input_text,
 )
 from video_service.core.categories import _prepare_query_text_for_embedding
+from video_service.core.embedding_models import (
+    category_embedding_model_requires_remote_code,
+    resolve_category_embedding_device,
+    resolve_category_embedding_model,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -96,6 +101,22 @@ def test_select_mapping_input_text_preserves_exact_taxonomy_match():
             exact_taxonomy_match=True,
         )
         == "Language Learning"
+    )
+
+
+def test_select_mapping_input_text_preserves_specific_exact_taxonomy_leaf():
+    assert (
+        select_mapping_input_text(
+            raw_category="Grocery Stores",
+            predicted_brand="No Frills",
+            ocr_summary="NOFRILLS Loblaws Inc Prices in effect until February 2026 YES SAVINGS",
+            reasoning_summary=(
+                "The OCR evidence explicitly references NOFRILLS and Loblaws Inc., "
+                "confirming it is a promotional ad for the No Frills grocery chain."
+            ),
+            exact_taxonomy_match=True,
+        )
+        == "Grocery Stores"
     )
 
 
@@ -234,14 +255,95 @@ def test_build_product_cue_query_text_drops_meta_reasoning_tokens_for_haircare()
     )
 
 
-def test_prepare_query_text_for_embedding_prefixes_only_bge_large_en_v15():
+def test_prepare_query_text_for_embedding_keeps_short_label_style_queries_raw():
     raw_query = "Over-the-Counter Medication"
 
     assert _prepare_query_text_for_embedding(
         raw_query,
         "BAAI/bge-large-en-v1.5",
-    ) == "Represent this sentence for searching relevant passages: Over-the-Counter Medication"
+    ) == raw_query
     assert _prepare_query_text_for_embedding(
         raw_query,
         "sentence-transformers/all-mpnet-base-v2",
     ) == raw_query
+
+
+def test_prepare_query_text_for_embedding_prefixes_long_multiline_bge_queries():
+    enriched_query = (
+        "Hair Care\n"
+        "Head & Shoulders frames bottle labeled specific name BARE slogan "
+        "Une protection antipelliculaire"
+    )
+
+    assert _prepare_query_text_for_embedding(
+        enriched_query,
+        "BAAI/bge-large-en-v1.5",
+    ) == (
+        "Represent this sentence for searching relevant passages: "
+        + enriched_query
+    )
+    assert _prepare_query_text_for_embedding(
+        enriched_query,
+        "sentence-transformers/all-mpnet-base-v2",
+    ) == enriched_query
+
+
+def test_category_embedding_model_allowlist_resolution():
+    assert resolve_category_embedding_model("google/embeddinggemma-300m") == "google/embeddinggemma-300m"
+    assert (
+        resolve_category_embedding_model("sentence-transformers/all-MiniLM-L6-v2")
+        == "sentence-transformers/all-MiniLM-L6-v2"
+    )
+    assert resolve_category_embedding_model("not/a-real-model") == "BAAI/bge-large-en-v1.5"
+
+
+def test_category_embedding_model_remote_code_allowlist():
+    assert category_embedding_model_requires_remote_code("Alibaba-NLP/gte-large-en-v1.5") is True
+    assert category_embedding_model_requires_remote_code("jinaai/jina-embeddings-v3") is True
+    assert category_embedding_model_requires_remote_code("google/embeddinggemma-300m") is False
+
+
+def test_category_embedding_device_policy_disables_mps_for_remote_code_models(monkeypatch):
+    monkeypatch.setattr("video_service.core.embedding_models.torch.cuda.is_available", lambda: False)
+    monkeypatch.setattr(
+        "video_service.core.embedding_models.torch.backends.mps.is_available",
+        lambda: True,
+    )
+
+    assert (
+        resolve_category_embedding_device(
+            "Alibaba-NLP/gte-large-en-v1.5",
+            preferred_device="mps",
+        )
+        == "cpu"
+    )
+    assert (
+        resolve_category_embedding_device(
+            "jinaai/jina-embeddings-v3",
+            preferred_device="mps",
+        )
+        == "cpu"
+    )
+
+
+def test_category_embedding_device_policy_uses_cuda_when_allowed(monkeypatch):
+    monkeypatch.setattr("video_service.core.embedding_models.torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr(
+        "video_service.core.embedding_models.torch.backends.mps.is_available",
+        lambda: False,
+    )
+
+    assert (
+        resolve_category_embedding_device(
+            "Alibaba-NLP/gte-large-en-v1.5",
+            preferred_device="cuda",
+        )
+        == "cuda"
+    )
+    assert (
+        resolve_category_embedding_device(
+            "google/embeddinggemma-300m",
+            preferred_device="cuda",
+        )
+        == "cuda"
+    )

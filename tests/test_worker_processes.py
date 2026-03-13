@@ -59,6 +59,7 @@ def test_run_pipeline_uses_pipeline_threads_per_job_env(monkeypatch):
     def _fake_run_pipeline_job(**kwargs):
         captured["workers"] = kwargs["workers"]
         captured["category_embedding_model"] = kwargs["category_embedding_model"]
+        captured["product_focus_guidance_enabled"] = kwargs["product_focus_guidance_enabled"]
         yield ({}, "", "", [], pd.DataFrame([{"Brand": "BrandX"}]))
 
     monkeypatch.setattr(worker, "run_pipeline_job", _fake_run_pipeline_job)
@@ -66,10 +67,14 @@ def test_run_pipeline_uses_pipeline_threads_per_job_env(monkeypatch):
     worker._run_pipeline(
         "job-1",
         "https://example.test/ad.mp4",
-        {"category_embedding_model": "BAAI/bge-large-en-v1.5"},
+        {
+            "category_embedding_model": "BAAI/bge-large-en-v1.5",
+            "product_focus_guidance_enabled": False,
+        },
     )
     assert captured["workers"] == 3
     assert captured["category_embedding_model"] == "BAAI/bge-large-en-v1.5"
+    assert captured["product_focus_guidance_enabled"] is False
 
 
 def test_extract_agent_ocr_text_supports_observation_without_scene_prefix():

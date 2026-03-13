@@ -49,6 +49,7 @@ def test_job_artifacts_endpoint_returns_required_keys_when_empty(monkeypatch):
     assert "processing_trace" in payload["artifacts"]
     assert "vector_plot" in payload["artifacts"]["vision_board"]
     assert "vector_plot" in payload["artifacts"]["category_mapper"]
+    assert "top_matches" in payload["artifacts"]["category_mapper"]
 
 
 def test_admin_clear_logs_endpoint_empties_recent_buffer(monkeypatch):
@@ -87,6 +88,25 @@ def test_job_settings_accept_enable_web_search_alias():
     assert settings.enable_vision_board is True
     assert settings.enable_llm_frame is True
     assert settings.category_embedding_model == "BAAI/bge-large-en-v1.5"
+
+
+def test_job_settings_accept_supported_category_embedding_model():
+    settings = JobSettings.model_validate(
+        {
+            "category_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+        }
+    )
+
+    assert settings.category_embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def test_job_settings_reject_unsupported_category_embedding_model():
+    with pytest.raises(ValueError, match="Unsupported category_embedding_model"):
+        JobSettings.model_validate(
+            {
+                "category_embedding_model": "not/a-real-model",
+            }
+        )
 
 
 def test_job_explanation_endpoint_returns_structured_trace(monkeypatch):
@@ -128,7 +148,7 @@ def test_job_explanation_endpoint_returns_structured_trace(monkeypatch):
                 "101",
                 '[{"Brand":"Brand X","Category":"Category One","Category ID":"101","Confidence":0.97}]',
                 '{"latest_frames":[{"url":"/artifacts/job-2/latest_frames/frame_001.jpg","label":"[29.4s]"}],'
-                '"ocr_text":{"text":"brand x save more"},"category_mapper":{"method":"embeddings","score":0.99},'
+                '"ocr_text":{"text":"brand x save more"},"category_mapper":{"method":"embeddings","score":0.99,"top_matches":[{"label":"Category One","score":0.99,"category_id":"101"}]},'
                 '"processing_trace":{"attempts":[{"attempt_type":"initial","title":"Initial Tail Pass","status":"rejected","detail":"tail scan","trigger_reason":"blank_brand_and_category","frame_count":3,"frame_times":[27.0,28.2,29.4],"ocr_excerpt":"","result":{"brand":"","category":"","confidence":0.0}},{"attempt_type":"express_rescue","title":"Express Rescue","status":"accepted","detail":"image-first retry","trigger_reason":"blank_brand_and_category","frame_count":1,"frame_times":[29.4],"ocr_excerpt":"","result":{"brand":"Brand X","category":"Category One","confidence":0.97}}],'
                 '"summary":{"headline":"Fallback ladder explanation.","attempt_count":2,"retry_count":1,"accepted_attempt_type":"express_rescue","trigger_reason":"blank_brand_and_category"}}}',
                 '["2026-03-06T10:35:29Z llm: blank initial result","2026-03-06T10:35:31Z llm: express rescue accepted"]',
@@ -149,6 +169,28 @@ def test_job_explanation_endpoint_returns_structured_trace(monkeypatch):
     assert explanation["final"]["category_id"] == "101"
     assert explanation["evidence"]["event_count"] == 2
     assert explanation["evidence"]["latest_frames"][0]["url"].endswith("frame_001.jpg")
+
+
+def test_job_artifacts_endpoint_returns_mapper_top_matches(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with conn:
+        conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, artifacts_json TEXT)")
+        conn.execute(
+            "INSERT INTO jobs (id, artifacts_json) VALUES (?, ?)",
+            (
+                "job-mapper",
+                '{"category_mapper":{"category":"Category One","category_id":"101","method":"embeddings","score":0.99,"top_matches":[{"label":"Category One","score":0.99,"category_id":"101"},{"label":"Category Two","score":0.75,"category_id":"102"}]}}',
+            ),
+        )
+
+    monkeypatch.setattr(main, "get_db", lambda: conn)
+    monkeypatch.setattr(main, "_maybe_proxy", _no_proxy)
+
+    payload = asyncio.run(main.get_job_artifacts(_Req(), "job-mapper"))
+
+    assert payload["artifacts"]["category_mapper"]["top_matches"][0]["label"] == "Category One"
+    assert payload["artifacts"]["category_mapper"]["top_matches"][1]["category_id"] == "102"
 
 
 def test_job_video_poster_endpoint_returns_jpeg(monkeypatch, tmp_path):

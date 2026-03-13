@@ -1,6 +1,10 @@
 from typing import List, Optional, Any
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
+from video_service.core.embedding_models import (
+    DEFAULT_CATEGORY_EMBEDDING_MODEL,
+    SUPPORTED_CATEGORY_EMBEDDING_MODELS,
+)
 
 class JobMode(str, Enum):
     pipeline = "pipeline"
@@ -20,7 +24,7 @@ class JobSettings(BaseModel):
     categories: str = ""
     provider: str = "Gemini CLI"
     model_name: str = "Gemini CLI Default"
-    category_embedding_model: str = "BAAI/bge-large-en-v1.5"
+    category_embedding_model: str = DEFAULT_CATEGORY_EMBEDDING_MODEL
     ocr_engine: str = "EasyOCR"
     ocr_mode: str = "Fast"
     scan_mode: str = "Tail Only"
@@ -31,6 +35,7 @@ class JobSettings(BaseModel):
     enable_agentic_search: Optional[bool] = None
     enable_vision_board: bool = True
     enable_llm_frame: bool = True
+    product_focus_guidance_enabled: bool = True
     context_size: int = 8192
 
     @model_validator(mode="before")
@@ -69,6 +74,17 @@ class JobSettings(BaseModel):
             data["enable_llm_frame"] = True
         data["ocr_mode"] = _normalize_ocr_mode_value(data.get("ocr_mode"))
         return data
+
+    @field_validator("category_embedding_model", mode="before")
+    @classmethod
+    def _validate_category_embedding_model(cls, value: Any) -> str:
+        text = str(value or "").strip() or DEFAULT_CATEGORY_EMBEDDING_MODEL
+        if text not in SUPPORTED_CATEGORY_EMBEDDING_MODELS:
+            supported = ", ".join(SUPPORTED_CATEGORY_EMBEDDING_MODELS)
+            raise ValueError(
+                f"Unsupported category_embedding_model {text!r}. Supported values: {supported}"
+            )
+        return text
 
 class JobSettingsForm(JobSettings):
     mode: JobMode = JobMode.pipeline

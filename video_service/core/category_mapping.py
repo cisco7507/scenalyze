@@ -295,22 +295,19 @@ def _exact_taxonomy_category_accepts_specificity_hint(value: str) -> bool:
     if not normalized or normalized in UNKNOWN_CATEGORY_VALUES:
         return False
 
-    hint_terms = {
-        "manufacture",
-        "sale",
-        "services",
-        "service",
-        "products",
-        "product",
-        "store",
-        "stores",
-        "providers",
-        "provider",
-        "pharmaceutical",
-        "pharmaceuticals",
-        "over the counter",
+    broad_exact_labels = {
+        "pharmaceutical manufacture and sale - over the counter",
+        "pharmaceutical manufacture and sale - prescription",
+        "pharmaceutical manufacture and sale",
+        "telecommunication services - all else",
+        "retail and general merchandise - all else",
+        "haircare products - all else",
+        "home products - all else",
     }
-    return any(term in normalized for term in hint_terms)
+    if normalized in broad_exact_labels:
+        return True
+
+    return normalized.endswith("- all else")
 
 
 def _looks_like_product_cue_token(token: str) -> bool:

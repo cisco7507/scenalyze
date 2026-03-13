@@ -114,6 +114,7 @@ def _build_default_artifacts(job_id: str) -> dict:
             "method": "",
             "score": None,
             "confidence": None,
+            "top_matches": [],
             "vector_plot": None,
         },
         "processing_trace": None,
@@ -233,6 +234,7 @@ def _category_mapper_from_row(row: dict | None) -> dict:
             "method": "",
             "score": None,
             "confidence": None,
+            "top_matches": [],
         }
     return {
         "category": str(row.get("Category") or row.get("category") or ""),
@@ -240,6 +242,7 @@ def _category_mapper_from_row(row: dict | None) -> dict:
         "method": str(row.get("category_match_method") or row.get("match_method") or ""),
         "score": row.get("category_match_score"),
         "confidence": row.get("Confidence") if "Confidence" in row else row.get("confidence"),
+        "top_matches": [],
         "vector_plot": None,
     }
 
@@ -685,6 +688,9 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         enable_search=enable_web_search,
         enable_vision_board=enable_vision_board,
         enable_llm_frame=enable_llm_frame,
+        product_focus_guidance_enabled=bool(
+            settings.get("product_focus_guidance_enabled", True)
+        ),
         category_embedding_model=settings.get(
             "category_embedding_model",
             "BAAI/bge-large-en-v1.5",
@@ -757,6 +763,9 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         )
         if isinstance(latest_signal_artifacts, dict):
             artifacts_payload["category_mapper"]["vector_plot"] = latest_signal_artifacts.get("mapper_plot")
+            artifacts_payload["category_mapper"]["top_matches"] = (
+                latest_signal_artifacts.get("mapper_top_matches") or []
+            )
         result = json.dumps(final_df.to_dict(orient="records"))
         logger.info("pipeline_done: rows=%d", len(final_df))
         return result, artifacts_payload
@@ -787,6 +796,9 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
         enable_search=enable_web_search,
         enable_vision_board=enable_vision_board,
         enable_llm_frame=enable_llm_frame,
+        product_focus_guidance_enabled=bool(
+            settings.get("product_focus_guidance_enabled", True)
+        ),
         category_embedding_model=settings.get(
             "category_embedding_model",
             "BAAI/bge-large-en-v1.5",

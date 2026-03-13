@@ -32,6 +32,7 @@ export interface JobSettings {
   enable_agentic_search?: boolean;
   enable_vision_board: boolean;
   enable_llm_frame: boolean;
+  product_focus_guidance_enabled?: boolean;
   enable_vision?: boolean;
   context_size:  number;
 }
@@ -115,6 +116,7 @@ export interface ArtifactCategoryMapper {
   method?: string;
   score?: number | null;
   confidence?: number | null;
+  top_matches?: ArtifactVisionMatch[];
   vector_plot?: SignalVectorPlot | null;
 }
 

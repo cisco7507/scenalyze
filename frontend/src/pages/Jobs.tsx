@@ -9,6 +9,14 @@ import { HelpTooltip } from '../components/HelpTooltip';
 
 type InputMode = 'urls' | 'filepath' | 'dirpath';
 const PROVIDER_OPTIONS = ['Ollama', 'LM Studio', 'Llama Server', 'Gemini CLI'] as const;
+const CATEGORY_EMBEDDING_MODEL_OPTIONS = [
+  'BAAI/bge-large-en-v1.5',
+  'jinaai/jina-embeddings-v3',
+  'Alibaba-NLP/gte-large-en-v1.5',
+  'sentence-transformers/all-mpnet-base-v2',
+  'sentence-transformers/all-MiniLM-L6-v2',
+  'google/embeddinggemma-300m',
+] as const;
 const panelClass =
   'bell-panel';
 const controlClass =
@@ -103,6 +111,7 @@ export function Jobs() {
   const [enableVisionBoard, setEnableVisionBoard] = useState(true);
   const [enableLlmFrame, setEnableLlmFrame] = useState(true);
   const [enableWebSearch, setEnableWebSearch] = useState(true);
+  const [productFocusGuidanceEnabled, setProductFocusGuidanceEnabled] = useState(true);
   const [contextSize, setContextSize] = useState(8192);
 
   // Filtering
@@ -183,6 +192,7 @@ export function Jobs() {
       enable_web_search: enableWebSearch,
       enable_vision_board: enableVisionBoard,
       enable_llm_frame: enableLlmFrame,
+      product_focus_guidance_enabled: productFocusGuidanceEnabled,
       context_size: contextSize,
     }),
     [
@@ -197,6 +207,7 @@ export function Jobs() {
       enableWebSearch,
       enableVisionBoard,
       enableLlmFrame,
+      productFocusGuidanceEnabled,
       contextSize,
     ]
   );
@@ -485,14 +496,32 @@ export function Jobs() {
             </div>
             <div className="space-y-1.5">
               <FieldLabel
-                label="Category Embedding Model"
-                help="Sentence-transformer model used by the taxonomy mapper. This affects semantic category matching, neighbor lookup, and mapper-space debug plots."
+                label="Product Focus Guidance"
+                help="Adds prompt guidance that prefers the promoted product family over the advertiser's broader industry when both appear. Disable this to evaluate the model without that bias."
               />
-              <input
+              <select
+                value={productFocusGuidanceEnabled ? 'true' : 'false'}
+                onChange={(e) => setProductFocusGuidanceEnabled(e.target.value === 'true')}
+                className={controlClass}
+              >
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel
+                label="Category Embedding Model"
+                help="Allowlisted sentence-transformer model used by the taxonomy mapper. This affects semantic category matching, neighbor lookup, and mapper-space debug plots."
+              />
+              <select
                 value={categoryEmbeddingModel}
                 onChange={(e) => setCategoryEmbeddingModel(e.target.value)}
                 className={controlClass}
-              />
+              >
+                {CATEGORY_EMBEDDING_MODEL_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1.5">
               <FieldLabel
