@@ -35,11 +35,13 @@ def test_job_artifacts_endpoint_returns_required_keys_when_empty(monkeypatch):
 
     assert "artifacts" in payload
     assert "latest_frames" in payload
+    assert "llm_frames" in payload
     assert "per_frame_vision" in payload
     assert "ocr_text" in payload
     assert "vision_board" in payload
     assert "category_mapper" in payload
     assert "latest_frames" in payload["artifacts"]
+    assert "llm_frames" in payload["artifacts"]
     assert "per_frame_vision" in payload["artifacts"]
     assert "ocr_text" in payload["artifacts"]
     assert "vision_board" in payload["artifacts"]

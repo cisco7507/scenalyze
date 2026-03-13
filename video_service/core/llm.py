@@ -1022,6 +1022,95 @@ class HybridLLM:
         query_parts.append("official site")
         return " ".join(dict.fromkeys(part for part in query_parts if part))
 
+    def _build_product_focus_guidance(
+        self,
+        *,
+        raw_category: str = "",
+        mapped_category: str = "",
+        ocr_text: str = "",
+        reasoning: str = "",
+        candidate_categories: list[str] | None = None,
+    ) -> str:
+        evidence_text = " ".join(
+            part for part in (raw_category, mapped_category, ocr_text, reasoning) if part
+        ).lower()
+        service_evidence_text = " ".join(
+            part for part in (ocr_text, reasoning) if part
+        ).lower()
+        if not evidence_text:
+            return ""
+
+        device_cues = {
+            "iphone",
+            "galaxy",
+            "pixel",
+            "smartphone",
+            "handset",
+            "camera",
+            "compared to",
+            "apple",
+            "device",
+            "phone",
+        }
+        service_cues = {
+            "5g",
+            "activation",
+            "carrier",
+            "coverage",
+            "data",
+            "monthly",
+            "network",
+            "plan",
+            "plans",
+            "provider",
+            "roaming",
+            "service",
+            "services",
+            "unlimited",
+            "wireless",
+        }
+        provider_terms = {
+            "provider",
+            "providers",
+            "service",
+            "services",
+            "telecommunication",
+            "telecommunications",
+            "wireless",
+            "internet",
+            "carrier",
+        }
+        device_candidate_terms = {
+            "device",
+            "devices",
+            "handset",
+            "mobile",
+            "phone",
+            "phones",
+            "smartphone",
+            "smartphones",
+        }
+
+        candidates = [str(candidate or "").strip() for candidate in (candidate_categories or []) if str(candidate or "").strip()]
+        provider_candidate_present = any(
+            any(term in candidate.casefold() for term in provider_terms)
+            for candidate in candidates
+        ) or any(term in evidence_text for term in provider_terms)
+        device_candidate_present = any(
+            any(term in candidate.casefold() for term in device_candidate_terms)
+            for candidate in candidates
+        )
+
+        device_signal_count = sum(1 for cue in device_cues if cue in evidence_text)
+        service_signal_count = sum(1 for cue in service_cues if cue in service_evidence_text)
+        if provider_candidate_present and device_signal_count >= 2 and device_candidate_present and service_signal_count <= 2:
+            return (
+                "If the ad centers on a named phone/device model or visible handset comparison, "
+                "choose the device/product category rather than the carrier/provider category "
+                "unless the evidence is mainly about plans, network coverage, pricing, or service benefits."
+            )
+        return ""
+
     def query_category_rerank(
         self,
         provider,
@@ -1057,11 +1146,20 @@ class HybridLLM:
         ocr_excerpt = " ".join((ocr_text or "").split())[:500]
         reasoning_excerpt = " ".join((reasoning or "").split())[:400]
         candidate_text = " | ".join(normalized_candidates.values())
+        product_focus_guidance = self._build_product_focus_guidance(
+            raw_category=raw_category,
+            mapped_category=mapped_category,
+            ocr_text=ocr_text,
+            reasoning=reasoning,
+            candidate_categories=list(normalized_candidates.values()),
+        )
         system_prompt = (
             "You are resolving a taxonomy mapping ambiguity for a video ad classification system. "
             "Choose exactly one category from the supplied candidate categories only. "
             "Use the brand, OCR evidence, prior category guess, model reasoning, and optional visual hints together. "
             "Prefer the category that best matches the ad's overall product or service domain, not a superficial keyword overlap. "
+            "The advertiser or provider brand does not automatically determine category. "
+            "If a seller, carrier, retailer, or provider is promoting a specific product model, classify the promoted product family unless the ad is primarily about the service/store/network offering itself. "
             "Do not invent a label. Do not choose a candidate whose domain contradicts the overall ad evidence. "
             "If the evidence is mixed, choose the safer in-family category from the list. "
             "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
@@ -1074,6 +1172,7 @@ class HybridLLM:
             f"OCR Evidence: {ocr_excerpt or 'None'}\n"
             f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
             f"Visual Hints: {visual_hint_text or 'None'}\n"
+            f"Decision Guidance: {product_focus_guidance or 'None'}\n"
             "Return the single best-supported category from the candidate list."
         )
         try:
@@ -1171,6 +1270,8 @@ class HybridLLM:
                 "Your goal is to categorize video advertisements by examining the final frame of the commercial and using your vast internal knowledge of companies, slogans, and industries. "
                 "Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this knowledge as a strong prior, but direct on-frame brand text, logos, domains, and market cues override memory when they conflict. "
                 "Slogan-only matches are low-trust unless the frame also shows an explicit brand name, branded domain, country/market cue, or other direct brand anchor. "
+                "Category follows the primary thing being promoted, not merely the advertiser's industry. If a carrier, retailer, or provider is promoting a specific device or packaged product, classify that product family unless the ad is mainly about plans, network/service benefits, store offers, or provider-wide messaging. "
+                "When reviewing multiple recent frames, do not over-weight isolated logo-only endcards, partner slides, or distributor/carrier branding if another frame clearly shows the promoted product, product model, packaging, or product comparison. "
                 "IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are legitimate content. Use them to identify brands, products, and categories just as you would English text. "
                 "Determine the most appropriate product or service category. If Override Allowed is True, you may generate a professional category when the ad does not fit neatly into a standard industry label. "
                 "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
@@ -1184,6 +1285,8 @@ class HybridLLM:
                 "Treat OCR as Noisy Hints: The extracted OCR text is machine-generated and may contain typos, missing letters, and random artifacts. DO NOT blindly trust or copy the OCR text. Use your knowledge to autocorrect obvious errors. "
                 "When multiple OCR lines are present, treat them as a combined evidence set. Do not over-weight a single brand- or store-like token if surrounding product, retail, offer, or usage context points elsewhere. "
                 "Slogan-only brand matches are low-trust unless corroborated by an exact brand token, branded domain, country/market cue, or explicit web confirmation. "
+                "Category follows the primary thing being promoted, not merely the advertiser's industry. If a carrier, retailer, or provider is promoting a specific device or packaged product, classify that product family unless the ad is mainly about plans, network/service benefits, store offers, or provider-wide messaging. "
+                "When reviewing multiple recent frames, do not over-weight isolated logo-only endcards, partner slides, or distributor/carrier branding if another frame clearly shows the promoted product, product model, packaging, or product comparison. "
                 "IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are NOT OCR errors — they are legitimate content. Use them to identify brands, products, and categories just as you would English text. "
                 "(e.g., if OCR says 'Strbcks' or 'Star bucks co', you know the true brand is 'Starbucks'. But if OCR says 'Économisez avec Desjardins' or 'Assurance auto', those are valid French — do NOT treat them as typos). "
                 "IGNORE TIMESTAMPS: The OCR and Scene data text will be prefixed with bracketed timestamps like '[71.7s]' or '[12.5s]'. THESE ARE NOT PART OF THE AD. Do NOT use these numbers to identify brands or products (e.g. do not guess 'Boeing 717' just because you see '[71.7s]'). Ignore them completely. "
@@ -1196,7 +1299,11 @@ class HybridLLM:
         if not image_objects and tail_image is not None:
             image_objects = [tail_image]
         if image_objects and len(image_objects) > 1:
-            user_prompt += "\nAttached Images: chronological recent frames from earlier evidence to the final frame."
+            user_prompt += (
+                "\nAttached Images: chronological recent frames from earlier evidence to the final frame. "
+                "Some later frames may be logo-only endcards, partner slides, or seller/carrier branding. "
+                "Do not assume the last or most logo-heavy frame defines the category if an earlier frame shows the specific promoted product or model."
+            )
         b64_img = [self._pil_to_base64(image) for image in image_objects if image is not None]
 
         try:

@@ -98,6 +98,7 @@ def _resolve_enable_llm_frame(settings: dict) -> bool:
 def _build_default_artifacts(job_id: str) -> dict:
     return {
         "latest_frames": [],
+        "llm_frames": [],
         "ocr_text": {"text": "", "lines": [], "url": None},
         "per_frame_vision": [],
         "vision_board": {
@@ -143,10 +144,10 @@ def _write_text_artifact(job_id: str, relative_name: str, text: str) -> str | No
     return f"/artifacts/{rel_path.as_posix()}"
 
 
-def _save_gallery_frames(job_id: str, gallery: list) -> list[dict]:
+def _save_gallery_frames(job_id: str, gallery: list, subdir: str = "latest_frames") -> list[dict]:
     frames: list[dict] = []
     safe_job = _sanitize_job_id(job_id)
-    rel_dir = Path(safe_job) / "latest_frames"
+    rel_dir = Path(safe_job) / subdir
     abs_dir = ARTIFACTS_DIR / rel_dir
     abs_dir.mkdir(parents=True, exist_ok=True)
     for idx, item in enumerate(gallery or []):
@@ -718,6 +719,18 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
 
     artifacts_payload = _build_default_artifacts(job_id)
     artifacts_payload["latest_frames"] = _save_gallery_frames(job_id, latest_gallery)
+    llm_gallery = (
+        latest_signal_artifacts.get("llm_evidence_gallery")
+        if isinstance(latest_signal_artifacts, dict)
+        else None
+    )
+    if not isinstance(llm_gallery, list):
+        llm_gallery = latest_gallery
+    artifacts_payload["llm_frames"] = _save_gallery_frames(
+        job_id,
+        llm_gallery,
+        subdir="llm_frames",
+    )
     artifacts_payload["ocr_text"]["text"] = latest_ocr_text
     artifacts_payload["ocr_text"]["lines"] = [
         line for line in (latest_ocr_text or "").splitlines() if line.strip()
@@ -794,6 +807,11 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
 
     artifacts_payload = _build_default_artifacts(job_id)
     artifacts_payload["latest_frames"] = _save_gallery_frames(job_id, latest_gallery)
+    artifacts_payload["llm_frames"] = _save_gallery_frames(
+        job_id,
+        latest_gallery,
+        subdir="llm_frames",
+    )
     ocr_text = _extract_agent_ocr_text(events)
     artifacts_payload["ocr_text"]["text"] = ocr_text
     artifacts_payload["ocr_text"]["lines"] = [line for line in ocr_text.split(" | ") if line.strip()]

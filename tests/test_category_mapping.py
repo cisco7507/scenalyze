@@ -160,3 +160,22 @@ def test_build_product_cue_query_text_prefers_compact_reasoning_over_noisy_ocr()
         )
         == "Pantene Miracle Rescue Biotin Collagen Keratin Vitamin shampoo conditioner"
     )
+
+
+def test_build_product_cue_query_text_drops_marketing_language_for_laundry_family():
+    reasoning = (
+        "The OCR text and attached images clearly show a promotional contest for Tide and "
+        "Downy, two well-known household cleaning and laundry brands. The ad is promoting "
+        "a back-to-school contest offering study bursaries, but the products shown are "
+        "laundry detergent and fabric softener."
+    )
+
+    assert (
+        build_product_cue_query_text(
+            predicted_brand="Tide & Downy",
+            ocr_summary="Tfde Tide n fto PaBLer unstopables",
+            reasoning_summary=reasoning,
+            family_context="Consumer Goods / Household Cleaning & Laundry",
+        )
+        == "Tide & Downy laundry detergent fabric softener"
+    )

@@ -524,6 +524,130 @@ def _top_visual_matches(sorted_vision: dict[str, float], limit: int = 3) -> list
     return list(sorted_vision.items())[:limit]
 
 
+def _looks_broad_family_taxonomy_label(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized.endswith("- all else"):
+        return True
+
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    if not tokens:
+        return False
+
+    broad_tokens = {
+        "cleaner",
+        "cleaners",
+        "product",
+        "products",
+        "provider",
+        "providers",
+        "service",
+        "services",
+        "store",
+        "stores",
+    }
+    if tokens & broad_tokens:
+        return True
+
+    exact_broad_labels = {
+        "general merchandise",
+        "household cleaners",
+        "household products",
+        "media",
+        "pharmaceuticals",
+        "retail",
+    }
+    return normalized in exact_broad_labels
+
+
+def _local_family_evidence_preference(
+    *,
+    current_canonical: str,
+    primary_candidates: list[tuple[str, float]],
+    evidence_neighbors: list[tuple[str, float]],
+) -> str | None:
+    if not _looks_broad_family_taxonomy_label(current_canonical):
+        return None
+    if not primary_candidates or not evidence_neighbors:
+        return None
+
+    evidence_top_label, evidence_top_score_raw = evidence_neighbors[0]
+    evidence_top_label = str(evidence_top_label or "").strip()
+    if not evidence_top_label or evidence_top_label == current_canonical:
+        return None
+    if _looks_broad_family_taxonomy_label(evidence_top_label):
+        return None
+
+    local_primary_labels = {
+        str(label or "").strip()
+        for label, _score in primary_candidates[:3]
+        if str(label or "").strip()
+    }
+    if evidence_top_label not in local_primary_labels:
+        return None
+
+    try:
+        evidence_top_score = float(evidence_top_score_raw or 0.0)
+    except (TypeError, ValueError):
+        evidence_top_score = 0.0
+    if evidence_top_score < _resolve_category_rerank_evidence_score_threshold():
+        return None
+
+    return f"family_evidence_prefers={evidence_top_label!r}@{evidence_top_score:.4f}"
+
+
+def _resolve_category_rerank_local_family_gap_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_LOCAL_FAMILY_GAP_THRESHOLD", "0.08")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning("invalid_category_rerank_local_family_gap_threshold value=%r fallback=0.08", raw)
+        return 0.08
+
+
+def _local_family_primary_preference(
+    *,
+    current_canonical: str,
+    raw_category: str,
+    exact_taxonomy_match: bool,
+    primary_candidates: list[tuple[str, float]],
+) -> str | None:
+    if exact_taxonomy_match:
+        return None
+    if not _looks_broad_family_taxonomy_label(current_canonical):
+        return None
+    if len(primary_candidates) < 2:
+        return None
+
+    try:
+        top1_score = float(primary_candidates[0][1] or 0.0)
+    except (TypeError, ValueError):
+        top1_score = 0.0
+
+    threshold = _resolve_category_rerank_evidence_score_threshold()
+    gap_threshold = _resolve_category_rerank_local_family_gap_threshold()
+    for label, score_raw in primary_candidates[1:4]:
+        candidate_label = str(label or "").strip()
+        if not candidate_label or candidate_label == current_canonical:
+            continue
+        if _looks_broad_family_taxonomy_label(candidate_label):
+            continue
+        try:
+            candidate_score = float(score_raw or 0.0)
+        except (TypeError, ValueError):
+            candidate_score = 0.0
+        if candidate_score < threshold:
+            continue
+        if (top1_score - candidate_score) > gap_threshold:
+            continue
+        return (
+            f"family_primary_prefers={candidate_label!r}@{candidate_score:.4f}"
+            f";raw={raw_category!r}"
+        )
+    return None
+
+
 def _category_rerank_enabled() -> bool:
     raw = os.environ.get("CATEGORY_RERANK_ENABLED", "true").strip().lower()
     return raw not in {"0", "false", "no", "off"}
@@ -584,9 +708,9 @@ def _build_category_rerank_candidates(
     primary_limit: int = 5,
     evidence_limit: int = 3,
     combined_limit: int = 8,
-) -> tuple[list[tuple[str, float]], list[tuple[str, float]]]:
+) -> tuple[list[tuple[str, float]], list[tuple[str, float]], list[tuple[str, float]]]:
     if not hasattr(category_mapper, "get_mapper_neighbor_categories"):
-        return [], []
+        return [], [], []
 
     def _merge_ranked_candidates(
         *candidate_lists: list[tuple[str, float]],
@@ -624,7 +748,7 @@ def _build_category_rerank_candidates(
         )
     except Exception as exc:
         logger.warning("category_rerank_candidates_failed: %s", exc)
-        return [], []
+        return [], [], []
 
     canonical = str(current_match.get("canonical_category", "") or "").strip()
     if canonical and canonical not in {label for label, _score in primary_candidates}:
@@ -640,6 +764,7 @@ def _build_category_rerank_candidates(
         brand=predicted_brand,
         ocr_text=ocr_text,
         reasoning=reasoning,
+        family_context=raw_category,
     )
     if evidence_query:
         try:
@@ -658,6 +783,7 @@ def _build_category_rerank_candidates(
     return (
         _merge_ranked_candidates(primary_candidates, evidence_neighbors, limit=combined_limit),
         evidence_neighbors,
+        primary_candidates,
     )
 
 
@@ -666,11 +792,13 @@ def _build_category_rerank_evidence_query(
     brand: str,
     ocr_text: str,
     reasoning: str,
+    family_context: str = "",
 ) -> str:
     compact_cues = build_product_cue_query_text(
         predicted_brand=brand,
         ocr_summary=ocr_text,
         reasoning_summary=reasoning,
+        family_context=family_context,
         max_chars=260,
     )
     if compact_cues:
@@ -680,6 +808,10 @@ def _build_category_rerank_evidence_query(
     brand_text = str(brand or "").strip()
     if brand_text and brand_text.lower() not in {"unknown", "none", "n/a"}:
         parts.append(brand_text)
+
+    family_text = str(family_context or "").strip()
+    if family_text and family_text.lower() not in {"unknown", "none", "n/a"}:
+        parts.append(family_text[:120])
 
     compact_ocr = " ".join((ocr_text or "").split())
     if compact_ocr:
@@ -713,7 +845,7 @@ def _should_run_category_rerank(
     if not raw_category or not canonical:
         return False, "missing_category", [], []
 
-    mapper_candidates, evidence_neighbors = _build_category_rerank_candidates(
+    mapper_candidates, evidence_neighbors, primary_candidates = _build_category_rerank_candidates(
         raw_category=raw_category,
         current_match=category_match,
         predicted_brand=brand,
@@ -734,13 +866,25 @@ def _should_run_category_rerank(
         uncertainty_reasons.append(f"top1_top2_gap={top1_score - top2_score:.4f}")
     if (top1_score - top3_score) < _resolve_category_rerank_top3_gap_threshold():
         uncertainty_reasons.append(f"top1_top3_gap={top1_score - top3_score:.4f}")
-    if not uncertainty_reasons:
-        return False, "mapping_confident", candidate_categories, []
 
-    contradiction_reasons: list[str] = []
+    family_preference_reason = _local_family_evidence_preference(
+        current_canonical=canonical,
+        primary_candidates=primary_candidates,
+        evidence_neighbors=evidence_neighbors,
+    )
     exact_taxonomy_match = hasattr(category_mapper, "categories") and raw_category in set(
         getattr(category_mapper, "categories", []) or []
     )
+    family_primary_reason = _local_family_primary_preference(
+        current_canonical=canonical,
+        raw_category=raw_category,
+        exact_taxonomy_match=exact_taxonomy_match,
+        primary_candidates=primary_candidates,
+    )
+    if not uncertainty_reasons and not family_preference_reason and not family_primary_reason:
+        return False, "mapping_confident", candidate_categories, []
+
+    contradiction_reasons: list[str] = []
     if not exact_taxonomy_match:
         contradiction_reasons.append("freeform_category_with_weak_mapping")
 
@@ -766,11 +910,20 @@ def _should_run_category_rerank(
             )
 
     if not contradiction_reasons:
+        if family_preference_reason:
+            return True, family_preference_reason, candidate_categories, visual_matches
+        if family_primary_reason:
+            return True, family_primary_reason, candidate_categories, visual_matches
         return False, ";".join(uncertainty_reasons), candidate_categories, visual_matches
 
+    reason_parts = [*uncertainty_reasons]
+    if family_preference_reason:
+        reason_parts.append(family_preference_reason)
+    if family_primary_reason:
+        reason_parts.append(family_primary_reason)
     return (
         True,
-        ";".join([*uncertainty_reasons, *contradiction_reasons]),
+        ";".join([*reason_parts, *contradiction_reasons]),
         candidate_categories,
         visual_matches,
     )
@@ -1441,6 +1594,107 @@ def _resolve_llm_recent_frame_count() -> int:
         return 4
 
 
+def _frame_visual_richness_metrics(frame: dict[str, object]) -> dict[str, float | bool]:
+    frame_bgr = frame.get("ocr_image")
+    if frame_bgr is None or not hasattr(frame_bgr, "shape"):
+        return {
+            "dark_ratio": 0.0,
+            "edge_density": 0.0,
+            "saturation_mean": 0.0,
+            "richness": 0.0,
+            "logo_like": False,
+        }
+
+    try:
+        resized = cv2.resize(frame_bgr, (96, 96), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+    except Exception:
+        return {
+            "dark_ratio": 0.0,
+            "edge_density": 0.0,
+            "saturation_mean": 0.0,
+            "richness": 0.0,
+            "logo_like": False,
+        }
+
+    dark_ratio = float(np.mean(gray < 28))
+    edges = cv2.Canny(gray, 80, 180)
+    edge_density = float(np.mean(edges > 0))
+    saturation_mean = float(np.mean(hsv[..., 1]) / 255.0)
+    richness = (edge_density * 3.0) + (saturation_mean * 0.7) + ((1.0 - dark_ratio) * 0.25)
+    logo_like = dark_ratio >= 0.7 and edge_density <= 0.035 and saturation_mean <= 0.18
+    return {
+        "dark_ratio": dark_ratio,
+        "edge_density": edge_density,
+        "saturation_mean": saturation_mean,
+        "richness": richness,
+        "logo_like": logo_like,
+    }
+
+
+def _select_llm_evidence_frames(source_frames: list[dict[str, object]], frame_limit: int) -> list[dict[str, object]]:
+    if frame_limit <= 0 or not source_frames:
+        return []
+
+    tail_like_types = {"tail", "backward_ext", "tail_rescue"}
+    if any(str(frame.get("type", "") or "").lower() in tail_like_types for frame in source_frames):
+        candidate_window = min(len(source_frames), max(frame_limit + 2, frame_limit))
+        candidate_frames = list(source_frames[-candidate_window:])
+    else:
+        candidate_frames = list(source_frames[-1:])
+    if len(candidate_frames) <= 2:
+        return candidate_frames
+
+    metrics_by_index = {
+        idx: _frame_visual_richness_metrics(frame)
+        for idx, frame in enumerate(candidate_frames)
+    }
+
+    selected_indices: set[int] = {len(candidate_frames) - 1}
+    latest_index = len(candidate_frames) - 1
+
+    non_logo_candidates = [
+        idx for idx, metrics in metrics_by_index.items()
+        if idx != latest_index and not bool(metrics.get("logo_like", False))
+    ]
+    if non_logo_candidates:
+        richest_product_idx = max(
+            non_logo_candidates,
+            key=lambda idx: (
+                float(metrics_by_index[idx].get("richness", 0.0)),
+                -abs(idx - latest_index),
+            ),
+        )
+        selected_indices.add(richest_product_idx)
+
+    max_logo_like_frames = 1
+    logo_like_selected = sum(
+        1 for idx in selected_indices if bool(metrics_by_index[idx].get("logo_like", False))
+    )
+
+    ranked_remaining = sorted(
+        (idx for idx in range(len(candidate_frames)) if idx not in selected_indices),
+        key=lambda idx: (
+            bool(metrics_by_index[idx].get("logo_like", False)),
+            -float(metrics_by_index[idx].get("richness", 0.0)),
+            -idx,
+        ),
+    )
+
+    for idx in ranked_remaining:
+        is_logo_like = bool(metrics_by_index[idx].get("logo_like", False))
+        if is_logo_like and logo_like_selected >= max_logo_like_frames:
+            continue
+        selected_indices.add(idx)
+        if is_logo_like:
+            logo_like_selected += 1
+        if len(selected_indices) >= frame_limit:
+            break
+
+    return [candidate_frames[idx] for idx in sorted(selected_indices)]
+
+
 def process_single_video(
     url,
     categories,
@@ -1510,11 +1764,7 @@ def process_single_video(
 
         def _llm_evidence_images(source_frames: list[dict[str, object]]) -> list[Image.Image]:
             frame_limit = _resolve_llm_recent_frame_count()
-            tail_like_types = {"tail", "backward_ext", "tail_rescue"}
-            if any(str(frame.get("type", "") or "").lower() in tail_like_types for frame in source_frames):
-                candidate_frames = source_frames[-frame_limit:]
-            else:
-                candidate_frames = source_frames[-1:] if source_frames else []
+            candidate_frames = _select_llm_evidence_frames(source_frames, frame_limit)
             images: list[Image.Image] = []
             for frame in candidate_frames:
                 try:
@@ -2694,6 +2944,7 @@ def process_single_video(
             "mapper_plot": None,
             "visual_plot": None,
             "processing_trace": None,
+            "llm_evidence_gallery": [],
         }
         if hasattr(category_mapper, "build_mapper_vector_plot"):
             try:
@@ -2723,6 +2974,16 @@ def process_single_video(
                 logger.debug("[%s] visual_vector_plot_failed: %s", url, exc)
         _finalize_processing_trace()
         signal_artifacts["processing_trace"] = processing_trace
+        if send_llm_frame:
+            selected_llm_frames = _select_llm_evidence_frames(
+                frames,
+                _resolve_llm_recent_frame_count(),
+            )
+            signal_artifacts["llm_evidence_gallery"] = [
+                (frame.get("ocr_image"), f"{frame.get('time')}s")
+                for frame in selected_llm_frames
+                if frame.get("ocr_image") is not None and frame.get("time") is not None
+            ]
         row = [
             url,
             res.get("brand", "Unknown"),
@@ -2745,7 +3006,7 @@ def process_single_video(
             "accepted_attempt_type": "",
             "trigger_reason": "pipeline_exception",
         }
-        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace}
+        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace, "llm_evidence_gallery": []}
 
 def run_pipeline_job(
     src,

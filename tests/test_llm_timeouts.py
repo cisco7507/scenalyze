@@ -390,6 +390,146 @@ def test_ollama_pipeline_omits_categories_from_prompt_and_sends_no_schema(monkey
     assert "response_format" not in call["json"]
 
 
+def test_query_category_rerank_includes_device_over_provider_guidance(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            captured["system_prompt"] = system_prompt
+            captured["user_prompt"] = user_prompt
+            return {
+                "brand": "TELUS",
+                "category": "Handset/Mobile",
+                "confidence": 0.92,
+                "reasoning": "The ad is centered on the iPhone device, not the carrier service plan.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_category_rerank(
+        provider="LM Studio",
+        backend_model="local-model",
+        brand="TELUS",
+        raw_category="Mobile Phone Service Provider",
+        mapped_category="Wireless Telecommunications Services",
+        ocr_text="TELUS iPhone 17e Compared to iPhone 16e",
+        reasoning="The ad shows a TELUS-branded iPhone handset comparison.",
+        candidate_categories=[
+            "Wireless Telecommunications Services",
+            "Telecommunication Services",
+            "Handset/Mobile",
+        ],
+    )
+
+    assert status == "ok"
+    assert result["category"] == "Handset/Mobile"
+    assert "advertiser or provider brand does not automatically determine category" in captured["system_prompt"]
+    assert "Decision Guidance: If the ad centers on a named phone/device model" in captured["user_prompt"]
+
+
+def test_query_pipeline_prompt_prefers_promoted_product_over_provider_industry(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_classify(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        raw_ocr_text: str,
+        enable_search: bool,
+        include_image: bool,
+        image_b64,
+        express_mode: bool,
+    ):
+        captured["system_prompt"] = system_prompt
+        captured["user_prompt"] = user_prompt
+        return {
+            "brand": "TELUS",
+            "category": "Handset/Mobile",
+            "confidence": 0.91,
+            "reasoning": "Prompt guidance prefers the product being promoted.",
+        }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("video_service.core.llm.ClassificationPipeline.classify", _fake_classify)
+
+    llm = HybridLLM()
+    result = llm.query_pipeline(
+        provider="LM Studio",
+        backend_model="local-model",
+        text="TELUS iPhone 17e Compared to iPhone 16e",
+        enable_search=False,
+    )
+
+    assert result["category"] == "Handset/Mobile"
+    assert "Category follows the primary thing being promoted" in str(captured["system_prompt"])
+    assert 'OCR Text: "TELUS iPhone 17e Compared to iPhone 16e"' in str(captured["user_prompt"])
+
+
+def test_query_pipeline_prompt_warns_against_logo_endcard_overweighting(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_classify(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        raw_ocr_text: str,
+        enable_search: bool,
+        include_image: bool,
+        image_b64,
+        express_mode: bool,
+    ):
+        captured["system_prompt"] = system_prompt
+        captured["user_prompt"] = user_prompt
+        return {
+            "brand": "Apple",
+            "category": "Handset/Mobile",
+            "confidence": 0.9,
+            "reasoning": "The earlier frame shows the iPhone product even though later frames are logo endcards.",
+        }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: object())
+    monkeypatch.setattr("video_service.core.llm.ClassificationPipeline.classify", _fake_classify)
+
+    llm = HybridLLM()
+    result = llm.query_pipeline(
+        provider="LM Studio",
+        backend_model="local-model",
+        text="ROGERS APPLE",
+        evidence_images=[Image.new("RGB", (80, 80), color="orange"), Image.new("RGB", (80, 80), color="black")],
+        enable_search=False,
+        force_multimodal=True,
+    )
+
+    assert result["category"] == "Handset/Mobile"
+    assert "do not over-weight isolated logo-only endcards" in str(captured["system_prompt"]).lower()
+    assert "some later frames may be logo-only endcards" in str(captured["user_prompt"]).lower()
+
+
+def test_product_focus_guidance_skips_non_product_or_service_only_ads():
+    llm = HybridLLM()
+
+    charity_guidance = llm._build_product_focus_guidance(
+        raw_category="Charity / Nonprofit",
+        mapped_category="Non-profit Organizations",
+        ocr_text="Donate today to support local families",
+        reasoning="The ad is a fundraising appeal for a charity campaign.",
+        candidate_categories=["Non-profit Organizations", "Social Services"],
+    )
+    assert charity_guidance == ""
+
+    service_guidance = llm._build_product_focus_guidance(
+        raw_category="Mobile Phone Service Provider",
+        mapped_category="Wireless Telecommunications Services",
+        ocr_text="TELUS 5G unlimited data plan network coverage",
+        reasoning="The ad emphasizes TELUS wireless plans and coverage.",
+        candidate_categories=["Wireless Telecommunications Services", "Handset/Mobile"],
+    )
+    assert service_guidance == ""
+
+
 class _FakeProvider:
     supports_vision = False
 

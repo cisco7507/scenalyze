@@ -26,25 +26,34 @@ _PRODUCT_CUE_STOPWORDS = {
     "are",
     "attached",
     "bilingual",
+    "but",
     "brand",
     "branding",
+    "categories",
+    "category",
     "clear",
     "care",
     "clearly",
     "company",
+    "confirmation",
     "confirm",
     "confirms",
     "contains",
     "context",
     "corrupted",
     "corner",
+    "correct",
+    "correctly",
     "designed",
     "despite",
     "evidence",
     "explicit",
     "explicitly",
+    "educational",
     "english",
+    "enough",
     "final",
+    "financial",
     "five",
     "for",
     "frame",
@@ -57,6 +66,8 @@ _PRODUCT_CUE_STOPWORDS = {
     "heavily",
     "image",
     "images",
+    "identify",
+    "identified",
     "including",
     "its",
     "item",
@@ -65,23 +76,46 @@ _PRODUCT_CUE_STOPWORDS = {
     "labels",
     "line",
     "logo",
+    "logos",
+    "marketing",
     "multiple",
+    "not",
     "of",
+    "offering",
+    "offer",
+    "offers",
     "ocr",
     "overall",
+    "packaging",
     "parent",
     "point",
     "points",
+    "promotion",
+    "promotional",
+    "promotes",
     "product",
     "products",
+    "program",
+    "programs",
+    "proudly",
+    "school",
+    "schools",
+    "scholarship",
+    "scholarships",
+    "sponsored",
+    "support",
+    "supported",
     "reference",
     "references",
     "right",
     "set",
     "setting",
+    "service",
+    "services",
     "show",
     "showing",
     "shows",
+    "shown",
     "studio",
     "text",
     "that",
@@ -89,15 +123,38 @@ _PRODUCT_CUE_STOPWORDS = {
     "their",
     "them",
     "they",
+    "these",
     "this",
     "those",
     "top",
+    "trade",
+    "typo",
+    "typos",
+    "two",
+    "tuition",
+    "use",
+    "uses",
     "visual",
     "visually",
     "well",
+    "well-known",
     "which",
     "with",
     "woman",
+    "sufficient",
+    "back-to-school",
+    "contest",
+    "contests",
+    "campaign",
+    "campaigns",
+    "brands",
+    "bursary",
+    "bursaries",
+    "study",
+    "back",
+    "known",
+    "tied",
+    "promoting",
 }
 _PRODUCT_CUE_SINGULARS = {
     "conditioners": "conditioner",
@@ -105,6 +162,38 @@ _PRODUCT_CUE_SINGULARS = {
     "shampoos": "shampoo",
     "treatments": "treatment",
     "vitamins": "vitamin",
+}
+_GENERIC_FAMILY_CONTEXT_TOKENS = {
+    "all",
+    "and",
+    "care",
+    "cleaning",
+    "consumer",
+    "counter",
+    "else",
+    "entertainment",
+    "financial",
+    "general",
+    "goods",
+    "health",
+    "healthcare",
+    "home",
+    "household",
+    "internet",
+    "manufacture",
+    "media",
+    "merchandise",
+    "over",
+    "product",
+    "products",
+    "retail",
+    "sale",
+    "service",
+    "services",
+    "store",
+    "stores",
+    "telecommunications",
+    "technology",
 }
 
 
@@ -249,6 +338,32 @@ def _extract_product_cue_terms(
     return [(_PRODUCT_CUE_SINGULARS.get(term.lower(), term.lower()) if term.islower() else _PRODUCT_CUE_SINGULARS.get(term.lower(), term)) for term in terms]
 
 
+def _extract_family_cue_terms(
+    family_context: str,
+    *,
+    max_terms: int = 2,
+) -> list[str]:
+    normalized = normalize_whitespace(family_context)
+    if not normalized:
+        return []
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_token in re.findall(r"[A-Za-zÀ-ÿ0-9]{3,}", normalized):
+        lower = _PRODUCT_CUE_SINGULARS.get(raw_token.lower(), raw_token.lower())
+        if lower in _GENERIC_FAMILY_CONTEXT_TOKENS:
+            continue
+        if not _looks_like_product_cue_token(lower):
+            continue
+        if lower in seen:
+            continue
+        seen.add(lower)
+        terms.append(lower)
+        if len(terms) >= max_terms:
+            break
+    return terms
+
+
 def build_product_cue_query_text(
     *,
     predicted_brand: str = "",
@@ -284,12 +399,20 @@ def build_product_cue_query_text(
             if len(cue_terms) >= max_terms:
                 break
 
+    family_terms = _extract_family_cue_terms(family_context, max_terms=max_terms)
+    prioritize_family_terms = "/" in family_context or "&" in family_context
+    if prioritize_family_terms:
+        _extend(family_terms)
+
     reasoning_terms = _extract_product_cue_terms(
         reasoning_summary,
         extra_stopwords=excluded_tokens,
         max_terms=max_terms,
     )
     _extend(reasoning_terms)
+
+    if len(cue_terms) < 4 and not prioritize_family_terms:
+        _extend(family_terms)
 
     if len(cue_terms) < 4:
         ocr_terms = _extract_product_cue_terms(

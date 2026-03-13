@@ -205,7 +205,7 @@ function JsonTreeNode({
   );
 }
 
-type ArtifactTab = "video" | "signals" | "ocr" | "frames" | "explain";
+type ArtifactTab = "video" | "signals" | "ocr" | "frames" | "llm-frames" | "explain";
 type VideoSource = { type: "local" | "youtube" | "remote"; url: string };
 type ScratchTool = "OCR" | "SEARCH" | "VISION" | "FINAL" | "ERROR";
 type ReasoningTermType = "brand" | "url" | "evidence";
@@ -1866,6 +1866,9 @@ export function JobDetail() {
   const progressPercent = Math.round(job.progress ?? 0);
 
   const frameItems = artifacts?.latest_frames || [];
+  const llmFrameItems = Array.isArray(artifacts?.llm_frames)
+    ? artifacts.llm_frames
+    : [];
   const videoPosterUrl =
     videoSource?.type === "local" ? getJobVideoPosterUrl(job.job_id) : undefined;
   const perFrameVision = Array.isArray(artifacts?.per_frame_vision)
@@ -2083,6 +2086,86 @@ export function JobDetail() {
         : 0;
     return Math.max(max, value);
   }, 0);
+
+  const renderFrameGallery = (
+    frames: ArtifactFrame[],
+    {
+      emptyMessage,
+      showVisionContext,
+    }: {
+      emptyMessage: string;
+      showVisionContext: boolean;
+    },
+  ) => {
+    if (frames.length === 0) {
+      return <div className="text-xs text-gray-500">{emptyMessage}</div>;
+    }
+
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {frames.map((frame, idx) => {
+          const frameLabel =
+            frame.label ||
+            (typeof frame.timestamp === "number"
+              ? `${frame.timestamp.toFixed(1)}s`
+              : `Frame ${idx + 1}`);
+          const frameTsKey = extractFrameTimestampKey(frame);
+          const frameOcrText = frameTsKey ? ocrByTimestamp.get(frameTsKey) : "";
+          const frameVision = showVisionContext ? frameVisionByIndex.get(idx) : undefined;
+          const frameScore = frameVision ? toNumber(frameVision.top_score) : null;
+          const frameTone = getFrameConfidenceTone(frameScore);
+          const frameCategory = frameVision?.top_category || "";
+          const isBestFrame = showVisionContext && bestFrameIndex === idx && frameVision != null;
+          const frameTooltip = frameVision
+            ? `Frame ${idx + 1}: ${frameCategory} (${(frameScore ?? 0).toFixed(2)})`
+            : undefined;
+
+          return (
+            <div
+              key={`${frame.url}-${idx}`}
+              className="aspect-video bg-gray-50 rounded border border-gray-200 overflow-hidden relative group"
+            >
+              <img
+                src={toApiUrl(frame.url)}
+                alt={frameLabel}
+                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+              />
+              {frameVision && (
+                <div
+                  className={`absolute inset-y-0 left-0 w-1 ${frameTone.stripClass}`}
+                  aria-hidden
+                />
+              )}
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
+                {frameLabel}
+              </div>
+              {frameVision && (
+                <div
+                  className={`absolute bottom-1 left-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${frameTone.badgeClass}`}
+                  title={frameTooltip}
+                >
+                  {(frameScore ?? 0).toFixed(2)} ·{" "}
+                  {truncateCategory(frameCategory)} · {frameTone.textLabel}
+                </div>
+              )}
+              {isBestFrame && (
+                <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-semibold">
+                  ★ Best
+                </div>
+              )}
+              {frameOcrText && (
+                <div className="absolute inset-0 bg-black/85 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-3 flex items-center justify-center">
+                  <p className="text-[10px] text-cyan-300 font-mono leading-relaxed text-center line-clamp-6">
+                    {frameOcrText}
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
@@ -2452,6 +2535,15 @@ export function JobDetail() {
           >
             Latest Frames
           </button>
+          {llmFrameItems.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setArtifactTab("llm-frames")}
+              className={`rounded-full border px-3 py-1.5 text-xs ${artifactTab === "llm-frames" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-slate-300 text-slate-700"}`}
+            >
+              LLM Frames
+            </button>
+          )}
         </div>
 
         {artifactTab === "video" && videoSource && (
@@ -3611,79 +3703,19 @@ export function JobDetail() {
 
         {artifactTab === "frames" && (
           <div className="p-4">
-            {frameItems.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {frameItems.map((frame, idx) => {
-                  const frameLabel =
-                    frame.label ||
-                    (typeof frame.timestamp === "number"
-                      ? `${frame.timestamp.toFixed(1)}s`
-                      : `Frame ${idx + 1}`);
-                  const frameTsKey = extractFrameTimestampKey(frame);
-                  const frameOcrText = frameTsKey
-                    ? ocrByTimestamp.get(frameTsKey)
-                    : "";
-                  const frameVision = frameVisionByIndex.get(idx);
-                  const frameScore = frameVision
-                    ? toNumber(frameVision.top_score)
-                    : null;
-                  const frameTone = getFrameConfidenceTone(frameScore);
-                  const frameCategory = frameVision?.top_category || "";
-                  const isBestFrame =
-                    bestFrameIndex === idx && frameVision != null;
-                  const frameTooltip = frameVision
-                    ? `Frame ${idx + 1}: ${frameCategory} (${(frameScore ?? 0).toFixed(2)})`
-                    : undefined;
-                  return (
-                    <div
-                      key={idx}
-                      className="aspect-video bg-gray-50 rounded border border-gray-200 overflow-hidden relative group"
-                    >
-                      <img
-                        src={toApiUrl(frame.url)}
-                        alt={frameLabel}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                      />
-                      {frameVision && (
-                        <div
-                          className={`absolute inset-y-0 left-0 w-1 ${frameTone.stripClass}`}
-                          aria-hidden
-                        />
-                      )}
-                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
-                        {frameLabel}
-                      </div>
-                      {frameVision && (
-                        <div
-                          className={`absolute bottom-1 left-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${frameTone.badgeClass}`}
-                          title={frameTooltip}
-                        >
-                          {(frameScore ?? 0).toFixed(2)} ·{" "}
-                          {truncateCategory(frameCategory)} ·{" "}
-                          {frameTone.textLabel}
-                        </div>
-                      )}
-                      {isBestFrame && (
-                        <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-semibold">
-                          ★ Best
-                        </div>
-                      )}
-                      {frameOcrText && (
-                        <div className="absolute inset-0 bg-black/85 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-3 flex items-center justify-center">
-                          <p className="text-[10px] text-cyan-300 font-mono leading-relaxed text-center line-clamp-6">
-                            {frameOcrText}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-xs text-gray-500">
-                No latest frames available.
-              </div>
-            )}
+            {renderFrameGallery(frameItems, {
+              emptyMessage: "No latest frames available.",
+              showVisionContext: true,
+            })}
+          </div>
+        )}
+
+        {artifactTab === "llm-frames" && (
+          <div className="p-4">
+            {renderFrameGallery(llmFrameItems, {
+              emptyMessage: "No LLM evidence frames available.",
+              showVisionContext: false,
+            })}
           </div>
         )}
       </div>

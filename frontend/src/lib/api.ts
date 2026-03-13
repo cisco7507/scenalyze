@@ -172,6 +172,7 @@ export interface PerFrameVision {
 
 export interface JobArtifacts {
   latest_frames: ArtifactFrame[];
+  llm_frames?: ArtifactFrame[];
   per_frame_vision: PerFrameVision[];
   ocr_text: ArtifactOCR;
   vision_board: ArtifactVisionBoard;
