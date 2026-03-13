@@ -7,6 +7,7 @@ from video_service.core.category_mapping import (
     load_category_mapping,
     select_mapping_input_text,
 )
+from video_service.core.categories import _prepare_query_text_for_embedding
 
 pytestmark = pytest.mark.unit
 
@@ -231,3 +232,16 @@ def test_build_product_cue_query_text_drops_meta_reasoning_tokens_for_haircare()
         )
         == "Head & Shoulders BARE protection antipelliculaire anti-dandruff shampoo conditioner dandruff control"
     )
+
+
+def test_prepare_query_text_for_embedding_prefixes_only_bge_large_en_v15():
+    raw_query = "Over-the-Counter Medication"
+
+    assert _prepare_query_text_for_embedding(
+        raw_query,
+        "BAAI/bge-large-en-v1.5",
+    ) == "Represent this sentence for searching relevant passages: Over-the-Counter Medication"
+    assert _prepare_query_text_for_embedding(
+        raw_query,
+        "sentence-transformers/all-mpnet-base-v2",
+    ) == raw_query

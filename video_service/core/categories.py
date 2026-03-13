@@ -33,6 +33,20 @@ DEFAULT_CATEGORY_EMBEDDING_MODEL = os.environ.get(
     "CATEGORY_EMBEDDING_MODEL",
     "BAAI/bge-large-en-v1.5",
 )
+_BGE_LARGE_EN_V15_MODEL = "BAAI/bge-large-en-v1.5"
+_BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+
+def _prepare_query_text_for_embedding(query_text: str, model_name: str) -> str:
+    normalized_model = str(model_name or "").strip()
+    normalized_query = str(query_text or "").strip()
+    if not normalized_query:
+        return ""
+    if normalized_query.startswith(_BGE_QUERY_PREFIX):
+        return normalized_query
+    if normalized_model == _BGE_LARGE_EN_V15_MODEL:
+        return f"{_BGE_QUERY_PREFIX}{normalized_query}"
+    return normalized_query
 
 
 def _as_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
@@ -478,8 +492,12 @@ class CategoryMapper:
             ocr_summary=ocr_summary,
             reasoning_summary=reasoning_summary,
         )
-        query_embedding = self.embedder.encode(
+        embedding_query_text = _prepare_query_text_for_embedding(
             query_text,
+            self.embedding_model_name or self.requested_embedding_model,
+        )
+        query_embedding = self.embedder.encode(
+            embedding_query_text,
             convert_to_tensor=True,
             show_progress_bar=False,
         )
@@ -570,8 +588,12 @@ class CategoryMapper:
             ocr_summary=ocr_summary,
             reasoning_summary=reasoning_summary,
         )
-        query_embedding = self.embedder.encode(
+        embedding_query_text = _prepare_query_text_for_embedding(
             query_text,
+            self.embedding_model_name or self.requested_embedding_model,
+        )
+        query_embedding = self.embedder.encode(
+            embedding_query_text,
             convert_to_tensor=True,
             show_progress_bar=False,
         )
@@ -709,8 +731,12 @@ class CategoryMapper:
                 ocr_summary=ocr_summary,
                 reasoning_summary=reasoning_summary,
             )
-            query_embedding = self.embedder.encode(
+            embedding_query_text = _prepare_query_text_for_embedding(
                 query_text,
+                self.embedding_model_name or self.requested_embedding_model,
+            )
+            query_embedding = self.embedder.encode(
+                embedding_query_text,
                 convert_to_tensor=True,
                 show_progress_bar=False,
             )
