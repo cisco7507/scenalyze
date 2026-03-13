@@ -1708,6 +1708,7 @@ def process_single_video(
     enable_vision_board=None,
     enable_llm_frame=None,
     ctx=8192,
+    category_embedding_model=None,
     express_mode=False,
     job_id=None,
     stage_callback=None,
@@ -1735,10 +1736,18 @@ def process_single_video(
         logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
         express_mode = bool(express_mode)
         send_llm_frame = bool(enable_llm_frame or express_mode)
+        selected_category_embedding_model = str(
+            category_embedding_model or "BAAI/bge-large-en-v1.5"
+        ).strip() or "BAAI/bge-large-en-v1.5"
+        if hasattr(category_mapper, "configure_embedding_model"):
+            selected_category_embedding_model = category_mapper.configure_embedding_model(
+                category_embedding_model
+            )
         processing_trace.update(
             {
                 "provider": p,
                 "model": m,
+                "category_embedding_model": selected_category_embedding_model,
                 "ocr_engine": oe,
                 "ocr_mode": om,
                 "scan_mode": "Express" if express_mode else sm,
@@ -3023,6 +3032,7 @@ def run_pipeline_job(
     enable_vision_board=None,
     enable_llm_frame=None,
     ctx=8192,
+    category_embedding_model=None,
     workers=1,
     express_mode=False,
     job_id=None,
@@ -3063,6 +3073,7 @@ def run_pipeline_job(
                 enable_vision_board,
                 enable_llm_frame,
                 ctx,
+                category_embedding_model,
                 express_mode,
                 job_id,
                 stage_callback,

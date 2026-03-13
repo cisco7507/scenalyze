@@ -21,6 +21,7 @@ export interface JobSettings {
   categories:    string;
   provider:      string;
   model_name:    string;
+  category_embedding_model: string;
   ocr_engine:    string;
   ocr_mode:      string;
   scan_mode:     string;

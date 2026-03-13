@@ -20,6 +20,7 @@ class JobSettings(BaseModel):
     categories: str = ""
     provider: str = "Gemini CLI"
     model_name: str = "Gemini CLI Default"
+    category_embedding_model: str = "BAAI/bge-large-en-v1.5"
     ocr_engine: str = "EasyOCR"
     ocr_mode: str = "Fast"
     scan_mode: str = "Tail Only"

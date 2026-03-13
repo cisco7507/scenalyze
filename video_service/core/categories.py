@@ -1,4 +1,7 @@
 import threading
+import hashlib
+import os
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -10,6 +13,7 @@ from video_service.core.logging_setup import job_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core.category_mapping import (
     CATEGORY_MAPPING_STATE,
+    load_category_mapping,
     select_mapping_input_text,
 )
 try:
@@ -25,6 +29,10 @@ _siglip_lock = threading.Lock()
 _siglip_error_logged = None
 
 SIGLIP_ID = "google/siglip-so400m-patch14-384"
+DEFAULT_CATEGORY_EMBEDDING_MODEL = os.environ.get(
+    "CATEGORY_EMBEDDING_MODEL",
+    "BAAI/bge-large-en-v1.5",
+)
 
 
 def _as_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
@@ -198,58 +206,196 @@ class CategoryMapper:
         self.categories = []
         self.last_error = CATEGORY_MAPPING_STATE.last_error
         self.csv_path_used = CATEGORY_MAPPING_STATE.csv_path_used
+        self.mapping_state = CATEGORY_MAPPING_STATE
         self.embedder = None
         self.category_embeddings = None
         self.cat_to_id = {}
         self.active = False
         self.has_nebula = False
         self.vision_text_features = None
-        self._reinit_lock = threading.Lock()
+        self._reinit_lock = threading.RLock()
+        self.embedding_model_name = ""
+        self.requested_embedding_model = DEFAULT_CATEGORY_EMBEDDING_MODEL
+        self._taxonomy_fingerprint = ""
+        self._csv_signature: tuple[str, int, int] | None = None
+        self._embedding_cache: dict[tuple[str, str], dict[str, Any]] = {}
+        self.pca = None
+        self.coords_3d = None
+        self.df_3d = None
+        self.max_range = 0.0
         self._initialize_mapper()
+
+    def _compute_taxonomy_fingerprint(self) -> str:
+        digest = hashlib.sha256()
+        for category, cat_id in sorted(self.cat_to_id.items()):
+            digest.update(str(cat_id).encode("utf-8"))
+            digest.update(b"\t")
+            digest.update(str(category).encode("utf-8"))
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    def _compute_csv_signature(self, path_str: str) -> tuple[str, int, int]:
+        try:
+            path = Path(path_str).expanduser().resolve()
+            stat = path.stat()
+            return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+        except Exception:
+            return (str(path_str or ""), -1, -1)
+
+    def _refresh_mapping_state_if_needed(self, force: bool = False) -> None:
+        current_path = self.csv_path_used or CATEGORY_MAPPING_STATE.csv_path_used
+        current_signature = self._compute_csv_signature(current_path)
+        if not force and self._csv_signature == current_signature:
+            return
+        self.mapping_state = load_category_mapping(current_path)
+        self.csv_path_used = self.mapping_state.csv_path_used
+        self.last_error = self.mapping_state.last_error
+        self._csv_signature = self._compute_csv_signature(self.csv_path_used)
+
+    def _cache_key(self, model_name: str) -> tuple[str, str]:
+        return (model_name, self._taxonomy_fingerprint)
+
+    def _build_embedding_cache_entry(
+        self,
+        *,
+        model_name: str,
+        embedder: SentenceTransformer,
+    ) -> dict[str, Any]:
+        category_embeddings = embedder.encode(
+            self.categories,
+            convert_to_tensor=True,
+            show_progress_bar=False,
+        )
+        entry: dict[str, Any] = {
+            "model_name": model_name,
+            "category_embeddings_cpu": category_embeddings.detach().cpu(),
+            "has_nebula": False,
+            "coords_3d": None,
+            "max_range": 0.0,
+        }
+        if len(self.categories) >= 3:
+            from sklearn.decomposition import PCA
+
+            pca = PCA(n_components=3)
+            coords_3d = pca.fit_transform(entry["category_embeddings_cpu"].numpy()) * 1000
+            entry["has_nebula"] = True
+            entry["coords_3d"] = coords_3d
+            entry["max_range"] = max(
+                coords_3d[:, 0].max() - coords_3d[:, 0].min(),
+                coords_3d[:, 1].max() - coords_3d[:, 1].min(),
+                coords_3d[:, 2].max() - coords_3d[:, 2].min(),
+            )
+        return entry
+
+    def _apply_embedding_cache_entry(
+        self,
+        *,
+        model_name: str,
+        embedder: SentenceTransformer,
+        cache_entry: dict[str, Any],
+    ) -> None:
+        self.embedder = embedder
+        self.embedding_model_name = model_name
+        self.category_embeddings = cache_entry["category_embeddings_cpu"].to(device)
+        self.has_nebula = bool(cache_entry.get("has_nebula"))
+        self.coords_3d = cache_entry.get("coords_3d")
+        self.max_range = float(cache_entry.get("max_range") or 0.0)
+        if self.has_nebula and self.coords_3d is not None:
+            self.df_3d = pd.DataFrame(
+                {
+                    "x": self.coords_3d[:, 0],
+                    "y": self.coords_3d[:, 1],
+                    "z": self.coords_3d[:, 2],
+                    "Category": self.categories,
+                    "ColorID": range(len(self.categories)),
+                }
+            )
+        else:
+            self.df_3d = None
+        self.vision_text_features = None
+        self.ensure_vision_text_features()
+
+    def configure_embedding_model(self, model_name: str | None = None) -> str:
+        requested = str(model_name or "").strip() or DEFAULT_CATEGORY_EMBEDDING_MODEL
+        self.requested_embedding_model = requested
+        self._refresh_mapping_state_if_needed()
+        if not self.mapping_state.enabled:
+            self.active = False
+            return requested
+
+        with self._reinit_lock:
+            self._refresh_mapping_state_if_needed()
+            next_cat_to_id = dict(self.mapping_state.category_to_id)
+            next_fingerprint = hashlib.sha256(
+                "".join(
+                    f"{cat_id}\t{category}\n"
+                    for category, cat_id in sorted(next_cat_to_id.items())
+                ).encode("utf-8")
+            ).hexdigest()
+            if (
+                self.active
+                and self.embedder is not None
+                and self.embedding_model_name == requested
+                and self._taxonomy_fingerprint == next_fingerprint
+            ):
+                return requested
+
+            self.cat_to_id = next_cat_to_id
+            self.categories = list(self.cat_to_id.keys())
+            self.csv_path_used = self.mapping_state.csv_path_used
+            self._taxonomy_fingerprint = next_fingerprint
+            cache_key = self._cache_key(requested)
+            try:
+                logger.info(
+                    "Initializing SentenceTransformer %s on %s",
+                    requested,
+                    device,
+                )
+                embedder = SentenceTransformer(
+                    requested,
+                    device=device,
+                )
+                cache_entry = self._embedding_cache.get(cache_key)
+                if cache_entry is None:
+                    cache_entry = self._build_embedding_cache_entry(
+                        model_name=requested,
+                        embedder=embedder,
+                    )
+                    self._embedding_cache[cache_key] = cache_entry
+                self._apply_embedding_cache_entry(
+                    model_name=requested,
+                    embedder=embedder,
+                    cache_entry=cache_entry,
+                )
+                self.active = True
+                self.last_error = None
+            except Exception as e:
+                logger.exception("Mapper init failed: %s", e)
+                self.last_error = str(e)
+                self.active = False
+                self.embedder = None
+                self.embedding_model_name = ""
+                self.has_nebula = False
+                self.vision_text_features = None
+                self.category_embeddings = None
+                self.df_3d = None
+                self.coords_3d = None
+                self.max_range = 0.0
+        return requested
 
     def _initialize_mapper(self):
         try:
-            self.cat_to_id = dict(CATEGORY_MAPPING_STATE.category_to_id)
+            self._refresh_mapping_state_if_needed(force=True)
+            self.cat_to_id = dict(self.mapping_state.category_to_id)
             self.categories = list(self.cat_to_id.keys())
-            self.active = bool(CATEGORY_MAPPING_STATE.enabled)
-            self.last_error = CATEGORY_MAPPING_STATE.last_error
+            self.active = bool(self.mapping_state.enabled)
+            self.last_error = self.mapping_state.last_error
             if not self.active:
                 return
             if not self.categories:
                 raise RuntimeError("Category taxonomy loaded but contains no valid rows")
-
-            logger.info(
-                "Initializing SentenceTransformer all-MiniLM-L6-v2 on %s",
-                device,
-            )
-            self.embedder = SentenceTransformer(
-                "all-MiniLM-L6-v2",
-                device=device,
-            )
-            self.category_embeddings = self.embedder.encode(
-                self.categories,
-                convert_to_tensor=True,
-                show_progress_bar=False,
-            )
-
-            self.vision_text_features = None
-            self.ensure_vision_text_features()
-
-            if len(self.categories) >= 3:
-                from sklearn.decomposition import PCA
-
-                self.pca = PCA(n_components=3)
-                self.coords_3d = self.pca.fit_transform(self.category_embeddings.cpu().numpy()) * 1000
-                self.df_3d = pd.DataFrame({
-                    'x': self.coords_3d[:, 0], 'y': self.coords_3d[:, 1], 'z': self.coords_3d[:, 2],
-                    'Category': self.categories, 'ColorID': range(len(self.categories))
-                })
-                self.has_nebula = True
-                self.max_range = max(self.df_3d['x'].max() - self.df_3d['x'].min(), self.df_3d['y'].max() - self.df_3d['y'].min(), self.df_3d['z'].max() - self.df_3d['z'].min())
-            else:
-                self.has_nebula = False
-
-            self.last_error = None
+            self._taxonomy_fingerprint = self._compute_taxonomy_fingerprint()
+            self.configure_embedding_model(self.requested_embedding_model)
 
         except Exception as e: 
             logger.exception("Mapper init failed: %s", e)
@@ -287,7 +433,8 @@ class CategoryMapper:
     def _attempt_reactivate(self):
         if self.active:
             return
-        if not CATEGORY_MAPPING_STATE.enabled:
+        self._refresh_mapping_state_if_needed()
+        if not self.mapping_state.enabled:
             return
         with self._reinit_lock:
             if self.active:
@@ -397,7 +544,7 @@ class CategoryMapper:
             "space": "mapper",
             "title": "Mapper Space",
             "subtitle": "Semantic neighborhood of the mapper query against nearby taxonomy labels.",
-            "backend": "all-MiniLM-L6-v2",
+            "backend": self.embedding_model_name or self.requested_embedding_model,
             "query_label": query_text,
             "selected_label": selected_category,
             "selected_category_id": str(self.cat_to_id.get(selected_category, "") or ""),
@@ -574,8 +721,9 @@ class CategoryMapper:
             canonical = self.categories[best_match_idx]
             category_id = str(self.cat_to_id.get(canonical, ""))
             logger.info(
-                "category_map job_id=%s raw=%r matched=%r id=%s score=%.6f",
+                "category_map job_id=%s model=%r raw=%r matched=%r id=%s score=%.6f",
                 job_id or "",
+                self.embedding_model_name or self.requested_embedding_model,
                 raw_category,
                 canonical,
                 category_id,
@@ -623,6 +771,7 @@ class CategoryMapper:
             "category_mapping_enabled": bool(self.active),
             "category_mapping_count": len(self.cat_to_id),
             "category_csv_path_used": self.csv_path_used,
+            "category_embedding_model": self.embedding_model_name or self.requested_embedding_model,
             "last_error": self.last_error if not self.active else None,
             "siglip_model_loaded": bool(siglip_model is not None and siglip_processor is not None),
             "vision_text_features_cached": bool(self.vision_text_features is not None),

@@ -288,6 +288,7 @@ def run_agent_job(
     enable_vision_board=None,
     enable_llm_frame=None,
     ctx=8192,
+    category_embedding_model=None,
     job_id=None,
     stage_callback=None,
     enable_vision=None,  # Deprecated alias
@@ -301,6 +302,8 @@ def run_agent_job(
         enable_vision_board = True
     if enable_llm_frame is None:
         enable_llm_frame = True
+    if hasattr(category_mapper, "configure_embedding_model"):
+        category_mapper.configure_embedding_model(category_embedding_model)
 
     if stage_callback:
         stage_callback("ingest", "resolving input sources")

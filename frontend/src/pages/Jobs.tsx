@@ -93,6 +93,7 @@ export function Jobs() {
   const [categories, setCategories] = useState('');
   const [provider, setProvider] = useState('Ollama');
   const [modelName, setModelName] = useState('qwen3-vl:8b-instruct');
+  const [categoryEmbeddingModel, setCategoryEmbeddingModel] = useState('BAAI/bge-large-en-v1.5');
   const [providerModels, setProviderModels] = useState<string[]>([]);
   const [providerModelsLoading, setProviderModelsLoading] = useState(false);
   const [ocrEngine, setOcrEngine] = useState('EasyOCR');
@@ -172,6 +173,7 @@ export function Jobs() {
       categories,
       provider,
       model_name: modelName,
+      category_embedding_model: categoryEmbeddingModel,
       ocr_engine: ocrEngine,
       ocr_mode: ocrMode,
       scan_mode: scanMode,
@@ -187,6 +189,7 @@ export function Jobs() {
       categories,
       provider,
       modelName,
+      categoryEmbeddingModel,
       ocrEngine,
       ocrMode,
       scanMode,
@@ -479,6 +482,17 @@ export function Jobs() {
                 <option value="true">Send Keyframe to LLM</option>
                 <option value="false">Disabled</option>
               </select>
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel
+                label="Category Embedding Model"
+                help="Sentence-transformer model used by the taxonomy mapper. This affects semantic category matching, neighbor lookup, and mapper-space debug plots."
+              />
+              <input
+                value={categoryEmbeddingModel}
+                onChange={(e) => setCategoryEmbeddingModel(e.target.value)}
+                className={controlClass}
+              />
             </div>
             <div className="space-y-1.5">
               <FieldLabel

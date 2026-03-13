@@ -685,6 +685,10 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         enable_search=enable_web_search,
         enable_vision_board=enable_vision_board,
         enable_llm_frame=enable_llm_frame,
+        category_embedding_model=settings.get(
+            "category_embedding_model",
+            "BAAI/bge-large-en-v1.5",
+        ),
         ctx=settings.get("context_size", 8192),
         workers=pipeline_threads,
         express_mode=express_mode,
@@ -783,6 +787,10 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
         enable_search=enable_web_search,
         enable_vision_board=enable_vision_board,
         enable_llm_frame=enable_llm_frame,
+        category_embedding_model=settings.get(
+            "category_embedding_model",
+            "BAAI/bge-large-en-v1.5",
+        ),
         ctx=settings.get("context_size", 8192),
         stage_callback=stage_cb,
     )

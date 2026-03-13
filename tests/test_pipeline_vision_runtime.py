@@ -192,6 +192,69 @@ def test_pipeline_passes_canonical_fallback_categories_to_llm(monkeypatch):
     assert len(llm_calls[0]["args"]) == 8
 
 
+def test_pipeline_configures_requested_category_embedding_model(monkeypatch):
+    configured_models: list[str | None] = []
+
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def configure_embedding_model(model_name=None):
+            configured_models.append(model_name)
+            return str(model_name or "default")
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "sample ocr"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Brand X",
+                "category": "Raw Category",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        category_embedding_model="sentence-transformers/all-mpnet-base-v2",
+        job_id="job-embedding-model-1",
+    )
+
+    assert configured_models == ["sentence-transformers/all-mpnet-base-v2"]
+
+
 def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypatch):
     class _DummyMapper:
         categories = ["Category One"]

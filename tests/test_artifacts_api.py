@@ -86,6 +86,7 @@ def test_job_settings_accept_enable_web_search_alias():
     assert settings.enable_web_search is True
     assert settings.enable_vision_board is True
     assert settings.enable_llm_frame is True
+    assert settings.category_embedding_model == "BAAI/bge-large-en-v1.5"
 
 
 def test_job_explanation_endpoint_returns_structured_trace(monkeypatch):
