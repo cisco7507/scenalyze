@@ -351,8 +351,32 @@ function formatStageName(stage: string): string {
   return stage.replace(/_/g, " ");
 }
 
-function normalizeReasoningNarrative(text: string): string {
+function stripReasoningBoilerplate(text: string): string {
   return text
+    .replace(
+      /\bThe OCR text,\s*despite being heavily corrupted,\s*contains\s+/gi,
+      "The OCR references ",
+    )
+    .replace(
+      /\bThe OCR text,\s*despite being heavily corrupted,\s*/gi,
+      "The OCR text ",
+    )
+    .replace(
+      /\bThe OCR text contains fragmented and noisy text including\s+/gi,
+      "The OCR likely refers to ",
+    )
+    .replace(
+      /\bThe OCR text contains multiple fragments that clearly reference\s+/gi,
+      "The OCR references ",
+    )
+    .replace(
+      /\bThe OCR text contains fragmented phrases like\s+/gi,
+      "The OCR likely refers to ",
+    );
+}
+
+function normalizeReasoningNarrative(text: string): string {
+  return stripReasoningBoilerplate(text)
     .replace(/\r\n?/g, "\n")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
