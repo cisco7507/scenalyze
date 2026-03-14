@@ -21,7 +21,11 @@ from video_service.core.video_io import (
 )
 from video_service.core import categories as categories_runtime
 from video_service.core.categories import category_mapper, normalize_feature_tensor
-from video_service.core.category_mapping import build_product_cue_query_text
+from video_service.core.category_mapping import (
+    _looks_ambiguous_product_family_category,
+    _looks_generic_freeform_category,
+    build_product_cue_query_text,
+)
 from video_service.core.ocr import ocr_manager
 from video_service.core.llm import llm_engine, create_provider
 
@@ -648,6 +652,101 @@ def _local_family_primary_preference(
     return None
 
 
+_CATEGORY_RERANK_OVERLAP_STOPWORDS = {
+    "all",
+    "and",
+    "category",
+    "consumer",
+    "else",
+    "for",
+    "goods",
+    "home",
+    "industry",
+    "item",
+    "label",
+    "manufacture",
+    "medication",
+    "of",
+    "or",
+    "other",
+    "over",
+    "product",
+    "products",
+    "sale",
+    "service",
+    "services",
+    "store",
+    "stores",
+    "the",
+}
+
+
+def _normalize_category_overlap_token(token: str) -> str:
+    clean = re.sub(r"[^a-z0-9]+", "", (token or "").lower())
+    if len(clean) > 4 and clean.endswith("ies"):
+        clean = f"{clean[:-3]}y"
+    elif len(clean) > 4 and clean.endswith("s") and not clean.endswith("ss"):
+        clean = clean[:-1]
+    return clean
+
+
+def _category_overlap_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for raw_token in re.findall(r"[A-Za-zÀ-ÿ0-9]{3,}", str(text or "")):
+        token = _normalize_category_overlap_token(raw_token)
+        if len(token) < 3 or token in _CATEGORY_RERANK_OVERLAP_STOPWORDS:
+            continue
+        tokens.add(token)
+    return tokens
+
+
+def _resolve_category_rerank_freeform_mismatch_score_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_FREEFORM_MISMATCH_SCORE_THRESHOLD", "0.78")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning(
+            "invalid_category_rerank_freeform_mismatch_score_threshold value=%r fallback=0.78",
+            raw,
+        )
+        return 0.78
+
+
+def _freeform_label_mismatch_reason(
+    *,
+    current_canonical: str,
+    raw_category: str,
+    exact_taxonomy_match: bool,
+    primary_candidates: list[tuple[str, float]],
+) -> str | None:
+    if exact_taxonomy_match:
+        return None
+    if not current_canonical or not raw_category or not primary_candidates:
+        return None
+    if _looks_generic_freeform_category(raw_category):
+        return None
+    if _looks_ambiguous_product_family_category(raw_category):
+        return None
+
+    raw_tokens = _category_overlap_tokens(raw_category)
+    if len(raw_tokens) < 2:
+        return None
+    if raw_tokens & _category_overlap_tokens(current_canonical):
+        return None
+
+    try:
+        top1_score = float(primary_candidates[0][1] or 0.0)
+    except (TypeError, ValueError):
+        top1_score = 0.0
+    if top1_score >= _resolve_category_rerank_freeform_mismatch_score_threshold():
+        return None
+
+    return (
+        f"freeform_label_mismatch raw={raw_category!r};mapped={current_canonical!r};"
+        f"top1_score={top1_score:.4f}"
+    )
+
+
 def _category_rerank_enabled() -> bool:
     raw = os.environ.get("CATEGORY_RERANK_ENABLED", "true").strip().lower()
     return raw not in {"0", "false", "no", "off"}
@@ -881,7 +980,18 @@ def _should_run_category_rerank(
         exact_taxonomy_match=exact_taxonomy_match,
         primary_candidates=primary_candidates,
     )
-    if not uncertainty_reasons and not family_preference_reason and not family_primary_reason:
+    freeform_mismatch_reason = _freeform_label_mismatch_reason(
+        current_canonical=canonical,
+        raw_category=raw_category,
+        exact_taxonomy_match=exact_taxonomy_match,
+        primary_candidates=primary_candidates,
+    )
+    if (
+        not uncertainty_reasons
+        and not family_preference_reason
+        and not family_primary_reason
+        and not freeform_mismatch_reason
+    ):
         return False, "mapping_confident", candidate_categories, []
 
     contradiction_reasons: list[str] = []
@@ -914,6 +1024,8 @@ def _should_run_category_rerank(
             return True, family_preference_reason, candidate_categories, visual_matches
         if family_primary_reason:
             return True, family_primary_reason, candidate_categories, visual_matches
+        if freeform_mismatch_reason:
+            return True, freeform_mismatch_reason, candidate_categories, visual_matches
         return False, ";".join(uncertainty_reasons), candidate_categories, visual_matches
 
     reason_parts = [*uncertainty_reasons]
@@ -921,6 +1033,8 @@ def _should_run_category_rerank(
         reason_parts.append(family_preference_reason)
     if family_primary_reason:
         reason_parts.append(family_primary_reason)
+    if freeform_mismatch_reason:
+        reason_parts.append(freeform_mismatch_reason)
     return (
         True,
         ";".join([*reason_parts, *contradiction_reasons]),
@@ -943,6 +1057,40 @@ def _accept_category_rerank_result(
     if reranked_canonical == current_canonical:
         return False, f"unchanged_category={reranked_canonical!r}"
     return True, f"reranked_to={reranked_canonical!r}"
+
+
+def _exact_taxonomy_match_from_label(label: str) -> dict[str, object] | None:
+    canonical = str(label or "").strip()
+    categories = set(getattr(category_mapper, "categories", []) or [])
+    if not canonical or canonical not in categories:
+        return None
+    cat_to_id = getattr(category_mapper, "cat_to_id", {}) or {}
+    category_id = str(cat_to_id.get(canonical, "") or "")
+    if not category_id:
+        map_fn = getattr(category_mapper, "map_category", None)
+        if callable(map_fn):
+            try:
+                exact_match = map_fn(
+                    raw_category=canonical,
+                    suggested_categories_text="",
+                    predicted_brand="",
+                    ocr_summary="",
+                    reasoning_summary="",
+                )
+            except Exception:
+                exact_match = None
+            if isinstance(exact_match, dict):
+                exact_canonical = str(exact_match.get("canonical_category", "") or "").strip()
+                if exact_canonical == canonical:
+                    category_id = str(exact_match.get("category_id", "") or "")
+    return {
+        "canonical_category": canonical,
+        "category_id": category_id,
+        "category_match_method": "exact_rerank_label",
+        "category_match_score": 1.0,
+        "mapping_query_text": canonical,
+        "top_matches": [],
+    }
 
 
 def _build_specificity_search_candidates(
@@ -1707,6 +1855,7 @@ def process_single_video(
     enable_search,
     enable_vision_board=None,
     enable_llm_frame=None,
+    product_focus_guidance_enabled=True,
     ctx=8192,
     category_embedding_model=None,
     express_mode=False,
@@ -2195,6 +2344,7 @@ def process_single_video(
                         ctx,
                         express_mode=False,
                         evidence_images=evidence_images,
+                        product_focus_guidance_enabled=product_focus_guidance_enabled,
                     )
                     llm_ok, llm_reason = _llm_result_allows_ocr_skip(
                         prelim_res,
@@ -2256,6 +2406,7 @@ def process_single_video(
                 ctx,
                 express_mode=express_mode,
                 evidence_images=evidence_images,
+                product_focus_guidance_enabled=product_focus_guidance_enabled,
             )
 
         def _apply_fallback_result(
@@ -2368,6 +2519,7 @@ def process_single_video(
                 ctx,
                 express_mode=False,
                 evidence_images=fallback_images,
+                product_focus_guidance_enabled=product_focus_guidance_enabled,
             )
             fallback_blank, fallback_blank_reason = _llm_result_is_blank(fallback_res)
             if fallback_blank:
@@ -2562,6 +2714,7 @@ def process_single_video(
                 send_llm_frame,
                 ctx,
                 express_mode=True,
+                product_focus_guidance_enabled=product_focus_guidance_enabled,
             )
             express_blank, express_blank_reason = _llm_result_is_blank(express_res)
             if express_blank:
@@ -2757,16 +2910,26 @@ def process_single_video(
                     candidate_categories=category_rerank_candidates,
                     visual_matches=category_rerank_visual_matches,
                     context_size=ctx,
+                    product_focus_guidance_enabled=product_focus_guidance_enabled,
                 )
             if isinstance(reranked_res, dict):
-                reranked_match = category_mapper.map_category(
-                    raw_category=reranked_res.get("category", "Unknown"),
-                    job_id=job_id,
-                    suggested_categories_text="",
-                    predicted_brand=reranked_res.get("brand", "Unknown"),
-                    ocr_summary=ocr_text,
-                    reasoning_summary=str(reranked_res.get("reasoning", "") or ""),
+                reranked_exact_match = _exact_taxonomy_match_from_label(
+                    str(reranked_res.get("category", "") or "")
                 )
+                if reranked_exact_match is not None:
+                    reranked_exact_match["top_matches"] = list(
+                        category_match.get("top_matches") or []
+                    )
+                    reranked_match = reranked_exact_match
+                else:
+                    reranked_match = category_mapper.map_category(
+                        raw_category=reranked_res.get("category", "Unknown"),
+                        job_id=job_id,
+                        suggested_categories_text="",
+                        predicted_brand=reranked_res.get("brand", "Unknown"),
+                        ocr_summary=ocr_text,
+                        reasoning_summary=str(reranked_res.get("reasoning", "") or ""),
+                    )
                 rerank_ok, rerank_accept_reason = _accept_category_rerank_result(
                     category_match,
                     reranked_match,
@@ -2951,6 +3114,8 @@ def process_single_video(
         cat_id_out = category_match["category_id"]
         signal_artifacts = {
             "mapper_plot": None,
+            "mapper_top_matches": list(category_match.get("top_matches") or []),
+            "mapper_query_fragments": list(category_match.get("mapping_query_fragments") or []),
             "visual_plot": None,
             "processing_trace": None,
             "llm_evidence_gallery": [],
@@ -3031,6 +3196,7 @@ def run_pipeline_job(
     enable_search,
     enable_vision_board=None,
     enable_llm_frame=None,
+    product_focus_guidance_enabled=True,
     ctx=8192,
     category_embedding_model=None,
     workers=1,
@@ -3072,6 +3238,7 @@ def run_pipeline_job(
                 enable_search,
                 enable_vision_board,
                 enable_llm_frame,
+                product_focus_guidance_enabled,
                 ctx,
                 category_embedding_model,
                 express_mode,

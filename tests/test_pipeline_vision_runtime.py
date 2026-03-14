@@ -763,6 +763,139 @@ def test_pipeline_category_rerank_refines_broad_family_mapping_with_local_eviden
     )
 
 
+def test_pipeline_category_rerank_preserves_exact_taxonomy_leaf_without_remapping(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Retail Stores/Chains",
+            "Grocery Stores",
+            "Grocery Stores and Supermarkets",
+            "Supermarkets",
+        ]
+        cat_to_id = {
+            "Retail Stores/Chains": "403",
+            "Grocery Stores": "9355",
+            "Grocery Stores and Supermarkets": "19",
+            "Supermarkets": "9323",
+        }
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            if raw == "Grocery":
+                return {
+                    "canonical_category": "Grocery Stores",
+                    "category_id": "9355",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.7842,
+                    "mapping_query_text": "Grocery",
+                }
+            if raw == "Grocery Stores":
+                return {
+                    "canonical_category": "Retail Stores/Chains",
+                    "category_id": "403",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.5377,
+                    "mapping_query_text": "No Frills Loblaws Inc Prices effect until February",
+                }
+            return {
+                "canonical_category": raw or "Unknown",
+                "category_id": "",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+                "mapping_query_text": raw,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=8,
+        ):
+            query = str(raw_category or "")
+            if query == "Grocery":
+                return [
+                    ("Grocery Stores", 0.7842),
+                    ("Supermarkets", 0.7826),
+                    ("Grocery Stores and Supermarkets", 0.7637),
+                    ("Grocery Subscriptions", 0.7152),
+                ][:top_k]
+            if "No Frills" in query:
+                return [
+                    ("Retail Stores/Chains", 0.5377),
+                    ("Discount and Warehouse Sales", 0.5363),
+                    ("Retail and General Merchandise", 0.5274),
+                    ("Grocery Stores", 0.5176),
+                ][:top_k]
+            return [("Grocery Stores", 0.7842), ("Supermarkets", 0.7826)][:top_k]
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "NOFRILLS Loblaws Inc Prices in effect until February 2026 YES SAVINGS"
+
+    rerank_calls: list[dict[str, object]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "No Frills",
+                "category": "Grocery",
+                "confidence": 0.99,
+                "reasoning": "No Frills grocery promotion.",
+            }
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls.append({"args": args, "kwargs": kwargs})
+            return (
+                {
+                    "brand": "No Frills",
+                    "category": "Grocery Stores",
+                    "confidence": 0.99,
+                    "reasoning": "Grocery Stores is the most precise supported category.",
+                },
+                "ok",
+            )
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/no-frills.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-rerank-grocery",
+    )
+
+    assert len(rerank_calls) == 1
+    assert row[2] == "9355"
+    assert row[3] == "Grocery Stores"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank"
+        and attempt.get("status") == "rejected"
+        and "unchanged_category='Grocery Stores'" in str(attempt.get("evidence_note", ""))
+        for attempt in attempts
+    )
+
+
 def test_pipeline_category_rerank_triggers_for_weak_freeform_mapping_without_extra_probe_contradiction(monkeypatch):
     class _DummyMapper:
         categories = [
@@ -2858,3 +2991,62 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
     assert primary_candidates[0][0] == "Haircare products"
     assert "Shampoo/Conditioner" in labels
     assert evidence_neighbors[0][0] == "Shampoo/Conditioner"
+
+
+def test_category_rerank_triggers_for_specific_freeform_mismatch(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Women's perfume",
+            "Air fresheners",
+            "Home Products",
+            "Men's perfume",
+        ]
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=5,
+        ):
+            if raw_category == "Home Fragrance Diffusers":
+                return [
+                    ("Women's perfume", 0.7400),
+                    ("Air fresheners", 0.7210),
+                    ("Home Products", 0.7090),
+                    ("Men's perfume", 0.6880),
+                ][:top_k]
+            return [
+                ("Air fresheners", 0.7010),
+                ("Home Products", 0.6840),
+                ("Women's perfume", 0.6300),
+            ][:top_k]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    should_rerank, reason, candidates, _visual_matches = pipeline_module._should_run_category_rerank(
+        result_payload={
+            "brand": "Febreze",
+            "category": "Home Fragrance Diffusers",
+            "reasoning": (
+                "The frames show Febreze branding and a home fragrance diffuser with refill cartridges."
+            ),
+        },
+        category_match={
+            "canonical_category": "Women's perfume",
+            "category_match_method": "embeddings",
+            "category_match_score": 0.74,
+        },
+        ocr_text="Febreze diffuser refill home fragrance",
+        sorted_vision={},
+    )
+
+    assert should_rerank is True
+    assert "freeform_label_mismatch" in reason
+    assert candidates[:4] == [
+        "Women's perfume",
+        "Air fresheners",
+        "Home Products",
+        "Men's perfume",
+    ]

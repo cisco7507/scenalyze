@@ -1,6 +1,8 @@
 import threading
 import hashlib
 import os
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +13,16 @@ import numpy as np
 from sentence_transformers import SentenceTransformer, util
 from video_service.core.logging_setup import job_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
+from video_service.core.embedding_models import (
+    DEFAULT_CATEGORY_EMBEDDING_MODEL as DEFAULT_ALLOWED_CATEGORY_EMBEDDING_MODEL,
+    category_embedding_model_requires_remote_code,
+    resolve_category_embedding_model,
+    resolve_category_embedding_device,
+)
 from video_service.core.category_mapping import (
     CATEGORY_MAPPING_STATE,
     load_category_mapping,
+    normalize_whitespace,
     select_mapping_input_text,
 )
 try:
@@ -31,10 +40,124 @@ _siglip_error_logged = None
 SIGLIP_ID = "google/siglip-so400m-patch14-384"
 DEFAULT_CATEGORY_EMBEDDING_MODEL = os.environ.get(
     "CATEGORY_EMBEDDING_MODEL",
-    "BAAI/bge-large-en-v1.5",
+    DEFAULT_ALLOWED_CATEGORY_EMBEDDING_MODEL,
 )
 _BGE_LARGE_EN_V15_MODEL = "BAAI/bge-large-en-v1.5"
 _BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+_MAPPING_QUERY_LOG_MAX_CHARS = 180
+_MAPPING_QUERY_PART_LOG_MAX_CHARS = 80
+_EMBEDDING_FRAGMENT_SPLIT_PATTERN = re.compile(r"\n+|\|+|,\s+|;\s+")
+_EMBEDDING_FRAGMENT_FRENCH_PHRASE_TRANSLATIONS = (
+    (re.compile(r"\bla banque officielle\b", flags=re.IGNORECASE), "official bank"),
+    (re.compile(r"\bbanque officielle\b", flags=re.IGNORECASE), "official bank"),
+    (re.compile(r"\bprotection antipelliculaire\b", flags=re.IGNORECASE), "anti dandruff protection"),
+)
+_EMBEDDING_FRAGMENT_FRENCH_TOKEN_TRANSLATIONS = {
+    "banque": "bank",
+    "bancaire": "bank",
+    "bancairo": "bank",
+    "officielle": "official",
+    "officiel": "official",
+    "officiels": "official",
+    "officielles": "official",
+    "diffuseur": "diffuser",
+    "essayez": "try",
+    "citron": "lemon",
+    "miel": "honey",
+    "antipelliculaire": "anti-dandruff",
+    "prix": "price",
+    "leurs": "their",
+}
+_EMBEDDING_FRAGMENT_FRENCH_STOPWORDS = {
+    "de",
+    "des",
+    "du",
+    "la",
+    "le",
+    "les",
+    "et",
+    "pour",
+    "un",
+    "une",
+    "au",
+    "aux",
+    "daro",
+    "dero",
+    "dro",
+}
+
+
+def _should_prefix_bge_query(query_text: str) -> bool:
+    normalized_query = str(query_text or "").strip()
+    if not normalized_query:
+        return False
+
+    token_count = len(re.findall(r"[A-Za-zÀ-ÿ0-9]+", normalized_query))
+    has_multiline_evidence = "\n" in normalized_query
+    is_long_query = len(normalized_query) >= 80 or token_count >= 10
+
+    return has_multiline_evidence and is_long_query
+
+
+def _translate_embedding_fragment_to_english(fragment: str) -> str:
+    normalized = unicodedata.normalize("NFKD", normalize_whitespace(fragment or ""))
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    if not normalized:
+        return ""
+
+    translated = normalized
+    for pattern, replacement in _EMBEDDING_FRAGMENT_FRENCH_PHRASE_TRANSLATIONS:
+        translated = pattern.sub(replacement, translated)
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for raw_token in re.findall(r"[A-Za-zÀ-ÿ0-9/-]+", translated):
+        token = raw_token.strip()
+        if not token:
+            continue
+        token_key = token.casefold()
+        if token_key in _EMBEDDING_FRAGMENT_FRENCH_STOPWORDS:
+            continue
+        replacement = _EMBEDDING_FRAGMENT_FRENCH_TOKEN_TRANSLATIONS.get(token_key, token)
+        replacement = re.sub(r"[^A-Za-z0-9/\-]+", "", replacement)
+        if len(replacement) < 2:
+            continue
+        replacement_key = replacement.casefold()
+        if replacement_key in seen:
+            continue
+        seen.add(replacement_key)
+        tokens.append(replacement)
+
+    return " ".join(tokens)
+
+
+def _split_embedding_query_fragments(raw_category: str, query_text: str) -> list[str]:
+    candidates: list[str] = []
+    raw_label = normalize_whitespace(raw_category or "")
+    if raw_label:
+        candidates.append(raw_label)
+
+    resolved_query = str(query_text or "")
+    if resolved_query:
+        candidates.extend(
+            fragment.strip()
+            for fragment in _EMBEDDING_FRAGMENT_SPLIT_PATTERN.split(resolved_query)
+            if fragment and fragment.strip()
+        )
+
+    fragments: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        translated = _translate_embedding_fragment_to_english(candidate)
+        if not translated:
+            continue
+        key = translated.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        fragments.append(translated)
+
+    return fragments
 
 
 def _prepare_query_text_for_embedding(query_text: str, model_name: str) -> str:
@@ -43,10 +166,29 @@ def _prepare_query_text_for_embedding(query_text: str, model_name: str) -> str:
     if not normalized_query:
         return ""
     if normalized_query.startswith(_BGE_QUERY_PREFIX):
-        return normalized_query
-    if normalized_model == _BGE_LARGE_EN_V15_MODEL:
+        normalized_query = normalized_query[len(_BGE_QUERY_PREFIX):]
+    if normalized_model == _BGE_LARGE_EN_V15_MODEL and _should_prefix_bge_query(normalized_query):
         return f"{_BGE_QUERY_PREFIX}{normalized_query}"
     return normalized_query
+
+
+def _summarize_mapping_query_for_log(query_text: str) -> str:
+    normalized_query = normalize_whitespace(query_text or "")
+    if len(normalized_query) <= _MAPPING_QUERY_LOG_MAX_CHARS:
+        return normalized_query
+    return f"{normalized_query[:_MAPPING_QUERY_LOG_MAX_CHARS - 3].rstrip()}..."
+
+
+def _summarize_mapping_query_parts_for_log(query_parts: list[str]) -> list[str]:
+    summarized: list[str] = []
+    for part in query_parts:
+        normalized_part = normalize_whitespace(part or "")
+        if len(normalized_part) > _MAPPING_QUERY_PART_LOG_MAX_CHARS:
+            normalized_part = (
+                f"{normalized_part[:_MAPPING_QUERY_PART_LOG_MAX_CHARS - 3].rstrip()}..."
+            )
+        summarized.append(normalized_part)
+    return summarized
 
 
 def _as_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
@@ -229,6 +371,7 @@ class CategoryMapper:
         self.vision_text_features = None
         self._reinit_lock = threading.RLock()
         self.embedding_model_name = ""
+        self.embedding_device = ""
         self.requested_embedding_model = DEFAULT_CATEGORY_EMBEDDING_MODEL
         self._taxonomy_fingerprint = ""
         self._csv_signature: tuple[str, int, int] | None = None
@@ -310,7 +453,12 @@ class CategoryMapper:
     ) -> None:
         self.embedder = embedder
         self.embedding_model_name = model_name
-        self.category_embeddings = cache_entry["category_embeddings_cpu"].to(device)
+        model_device = resolve_category_embedding_device(
+            model_name,
+            preferred_device=device,
+        )
+        self.embedding_device = model_device
+        self.category_embeddings = cache_entry["category_embeddings_cpu"].to(model_device)
         self.has_nebula = bool(cache_entry.get("has_nebula"))
         self.coords_3d = cache_entry.get("coords_3d")
         self.max_range = float(cache_entry.get("max_range") or 0.0)
@@ -330,7 +478,14 @@ class CategoryMapper:
         self.ensure_vision_text_features()
 
     def configure_embedding_model(self, model_name: str | None = None) -> str:
-        requested = str(model_name or "").strip() or DEFAULT_CATEGORY_EMBEDDING_MODEL
+        requested_raw = str(model_name or "").strip() or DEFAULT_CATEGORY_EMBEDDING_MODEL
+        requested = resolve_category_embedding_model(requested_raw)
+        if requested != requested_raw:
+            logger.warning(
+                "unsupported_category_embedding_model requested=%r fallback=%r",
+                requested_raw,
+                requested,
+            )
         self.requested_embedding_model = requested
         self._refresh_mapping_state_if_needed()
         if not self.mapping_state.enabled:
@@ -363,11 +518,18 @@ class CategoryMapper:
                 logger.info(
                     "Initializing SentenceTransformer %s on %s",
                     requested,
-                    device,
+                    resolve_category_embedding_device(
+                        requested,
+                        preferred_device=device,
+                    ),
                 )
                 embedder = SentenceTransformer(
                     requested,
-                    device=device,
+                    device=resolve_category_embedding_device(
+                        requested,
+                        preferred_device=device,
+                    ),
+                    trust_remote_code=category_embedding_model_requires_remote_code(requested),
                 )
                 cache_entry = self._embedding_cache.get(cache_key)
                 if cache_entry is None:
@@ -389,6 +551,7 @@ class CategoryMapper:
                 self.active = False
                 self.embedder = None
                 self.embedding_model_name = ""
+                self.embedding_device = ""
                 self.has_nebula = False
                 self.vision_text_features = None
                 self.category_embeddings = None
@@ -474,6 +637,35 @@ class CategoryMapper:
             reasoning_summary=reasoning_summary,
         )
 
+    def _encode_query_fragments(
+        self,
+        *,
+        raw_category: str,
+        query_text: str,
+    ) -> tuple[torch.Tensor, torch.Tensor, list[str], list[str]]:
+        query_fragments = _split_embedding_query_fragments(raw_category, query_text)
+        if not query_fragments:
+            fallback = normalize_whitespace(raw_category or "") or "unknown"
+            query_fragments = [fallback]
+
+        prepared_fragments = [
+            _prepare_query_text_for_embedding(
+                fragment,
+                self.embedding_model_name or self.requested_embedding_model,
+            )
+            for fragment in query_fragments
+        ]
+        query_embeddings = self.embedder.encode(
+            prepared_fragments,
+            convert_to_tensor=True,
+            show_progress_bar=False,
+        )
+        if query_embeddings.dim() == 1:
+            query_embeddings = query_embeddings.unsqueeze(0)
+        score_matrix = util.cos_sim(query_embeddings, self.category_embeddings)
+        aggregated_scores = torch.max(score_matrix, dim=0).values
+        return query_embeddings, aggregated_scores, query_fragments, prepared_fragments
+
     def build_mapper_vector_plot(
         self,
         raw_category: str,
@@ -492,16 +684,18 @@ class CategoryMapper:
             ocr_summary=ocr_summary,
             reasoning_summary=reasoning_summary,
         )
-        embedding_query_text = _prepare_query_text_for_embedding(
-            query_text,
+        query_embeddings, scores, query_fragments, _prepared_fragments = self._encode_query_fragments(
+            raw_category=raw_category,
+            query_text=query_text,
+        )
+        logger.info(
+            "category_map_final model=%r raw=%r query=%r query_parts=%r selected=%r",
             self.embedding_model_name or self.requested_embedding_model,
+            raw_category,
+            _summarize_mapping_query_for_log(query_text),
+            _summarize_mapping_query_parts_for_log(query_fragments),
+            selected_category,
         )
-        query_embedding = self.embedder.encode(
-            embedding_query_text,
-            convert_to_tensor=True,
-            show_progress_bar=False,
-        )
-        scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
         candidate_count = min(max(3, top_k), len(self.categories))
         top_indices = torch.topk(scores, k=candidate_count).indices.tolist()
         if selected_category in self.categories:
@@ -509,7 +703,7 @@ class CategoryMapper:
             if selected_idx not in top_indices:
                 top_indices = top_indices[:-1] + [selected_idx]
 
-        query_vector = _to_numpy_vector(query_embedding, source="mapper_query")
+        query_vector = _to_numpy_vector(query_embeddings.mean(dim=0), source="mapper_query")
         category_vectors = [
             _to_numpy_vector(self.category_embeddings[idx], source=f"mapper_category[{self.categories[idx]}]")
             for idx in range(len(self.categories))
@@ -564,6 +758,7 @@ class CategoryMapper:
             "subtitle": "Semantic neighborhood of the mapper query against nearby taxonomy labels.",
             "backend": self.embedding_model_name or self.requested_embedding_model,
             "query_label": query_text,
+            "query_fragments": query_fragments,
             "selected_label": selected_category,
             "selected_category_id": str(self.cat_to_id.get(selected_category, "") or ""),
             "points": points,
@@ -588,16 +783,10 @@ class CategoryMapper:
             ocr_summary=ocr_summary,
             reasoning_summary=reasoning_summary,
         )
-        embedding_query_text = _prepare_query_text_for_embedding(
-            query_text,
-            self.embedding_model_name or self.requested_embedding_model,
+        _query_embeddings, scores, _query_fragments, _prepared_fragments = self._encode_query_fragments(
+            raw_category=raw_category,
+            query_text=query_text,
         )
-        query_embedding = self.embedder.encode(
-            embedding_query_text,
-            convert_to_tensor=True,
-            show_progress_bar=False,
-        )
-        scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
         candidate_count = min(max(1, top_k), len(self.categories))
         top_indices = torch.topk(scores, k=candidate_count).indices.tolist()
         return [
@@ -712,6 +901,7 @@ class CategoryMapper:
                     "category_match_method": "skipped_unknown",
                     "category_match_score": None,
                     "mapping_query_text": "",
+                    "top_matches": [],
                 }
 
             if not self.active and CATEGORY_MAPPING_STATE.enabled:
@@ -722,6 +912,8 @@ class CategoryMapper:
                     "category_id": "",
                     "category_match_method": "disabled",
                     "category_match_score": None,
+                    "mapping_query_text": "",
+                    "top_matches": [],
                 }
 
             query_text = self._resolve_query_text(
@@ -731,26 +923,34 @@ class CategoryMapper:
                 ocr_summary=ocr_summary,
                 reasoning_summary=reasoning_summary,
             )
-            embedding_query_text = _prepare_query_text_for_embedding(
-                query_text,
-                self.embedding_model_name or self.requested_embedding_model,
+            _query_embeddings, scores, query_fragments, prepared_fragments = self._encode_query_fragments(
+                raw_category=raw_category,
+                query_text=query_text,
             )
-            query_embedding = self.embedder.encode(
-                embedding_query_text,
-                convert_to_tensor=True,
-                show_progress_bar=False,
-            )
-            scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
             best_match_idx = torch.argmax(scores).item()
             score = float(scores[best_match_idx].item())
+            top_indices = torch.topk(scores, k=min(5, len(self.categories))).indices.tolist()
+            top_matches = [
+                {
+                    "label": self.categories[idx],
+                    "category_id": str(self.cat_to_id.get(self.categories[idx], "") or ""),
+                    "score": float(scores[idx].item()),
+                }
+                for idx in top_indices
+            ]
 
             canonical = self.categories[best_match_idx]
             category_id = str(self.cat_to_id.get(canonical, ""))
+            query_log_preview = _summarize_mapping_query_for_log(query_text)
+            query_parts_log = _summarize_mapping_query_parts_for_log(query_fragments)
             logger.info(
-                "category_map job_id=%s model=%r raw=%r matched=%r id=%s score=%.6f",
+                "category_map job_id=%s model=%r raw=%r query=%r query_parts=%r query_transformed=%s matched=%r id=%s score=%.6f",
                 job_id or "",
                 self.embedding_model_name or self.requested_embedding_model,
                 raw_category,
+                query_log_preview,
+                query_parts_log,
+                prepared_fragments != query_fragments,
                 canonical,
                 category_id,
                 score,
@@ -761,6 +961,8 @@ class CategoryMapper:
                 "category_match_method": "embeddings",
                 "category_match_score": score,
                 "mapping_query_text": query_text,
+                "mapping_query_fragments": query_fragments,
+                "top_matches": top_matches,
             }
 
     def get_closest_official_category(
@@ -798,6 +1000,7 @@ class CategoryMapper:
             "category_mapping_count": len(self.cat_to_id),
             "category_csv_path_used": self.csv_path_used,
             "category_embedding_model": self.embedding_model_name or self.requested_embedding_model,
+            "category_embedding_device": self.embedding_device or device,
             "last_error": self.last_error if not self.active else None,
             "siglip_model_loaded": bool(siglip_model is not None and siglip_processor is not None),
             "vision_text_features_cached": bool(self.vision_text_features is not None),
