@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import torch
 
 from video_service.core.category_mapping import (
     build_product_cue_query_text,
@@ -8,6 +9,8 @@ from video_service.core.category_mapping import (
     select_mapping_input_text,
 )
 from video_service.core.categories import (
+    _build_taxonomy_retrieval_alias_rows,
+    _collapse_alias_scores,
     _prepare_query_text_for_embedding,
     _split_embedding_query_fragments,
     _translate_embedding_fragment_to_english,
@@ -259,6 +262,41 @@ def test_build_product_cue_query_text_drops_meta_reasoning_tokens_for_haircare()
         )
         == "Head & Shoulders BARE protection antipelliculaire anti-dandruff shampoo conditioner dandruff control"
     )
+
+
+def test_build_taxonomy_retrieval_alias_rows_adds_hidden_slash_aliases():
+    rows = _build_taxonomy_retrieval_alias_rows(
+        [
+            "Travel/Hotels/Airlines",
+            "Anti-perspirant/Deodorant/ Body Spray",
+            "Alcoholic beverages - All else",
+        ]
+    )
+
+    travel_rows = [row for row in rows if row["category_index"] == 0]
+    assert [row["text"] for row in travel_rows] == [
+        "Travel/Hotels/Airlines",
+        "Travel",
+        "Hotels",
+        "Airlines",
+    ]
+    assert [row["is_alias"] for row in travel_rows] == [False, True, True, True]
+
+    all_else_rows = [row for row in rows if row["category_index"] == 2]
+    assert [row["text"] for row in all_else_rows] == ["Alcoholic beverages - All else"]
+
+
+def test_collapse_alias_scores_uses_best_hidden_alias_per_canonical_label():
+    scores, aliases = _collapse_alias_scores(
+        torch.tensor([0.51, 0.98, 0.63, 0.72], dtype=torch.float32),
+        [0, 0, 1, 1],
+        ["Travel/Hotels/Airlines", "Hotels", "Beer/Cider/Lager", "Beer"],
+        ["Travel/Hotels/Airlines", "Beer/Cider/Lager"],
+    )
+
+    assert pytest.approx(float(scores[0].item()), rel=1e-6) == 0.98
+    assert pytest.approx(float(scores[1].item()), rel=1e-6) == 0.72
+    assert aliases == ["Hotels", "Beer"]
 
 
 def test_prepare_query_text_for_embedding_keeps_short_label_style_queries_raw():

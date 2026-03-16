@@ -71,6 +71,7 @@ export interface ArtifactVisionMatch {
   label: string;
   score: number;
   category_id?: number | null;
+  matched_alias?: string;
 }
 
 export interface SignalVectorPlotPoint {

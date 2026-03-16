@@ -87,6 +87,53 @@ _EMBEDDING_FRAGMENT_FRENCH_STOPWORDS = {
 }
 
 
+def _build_taxonomy_retrieval_alias_rows(categories: list[str]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    seen: set[tuple[int, str]] = set()
+    for category_idx, category in enumerate(categories or []):
+        canonical = normalize_whitespace(category or "")
+        if not canonical:
+            continue
+        row_candidates = [canonical]
+        if "/" in canonical and "all else" not in canonical.casefold():
+            parts = [normalize_whitespace(part) for part in canonical.split("/") if normalize_whitespace(part)]
+            row_candidates.extend(parts)
+        for text in row_candidates:
+            key = (category_idx, text.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "text": text,
+                    "category_index": category_idx,
+                    "is_alias": text != canonical,
+                }
+            )
+    return rows
+
+
+def _collapse_alias_scores(
+    alias_scores: torch.Tensor,
+    alias_category_indices: list[int],
+    alias_texts: list[str],
+    categories: list[str],
+) -> tuple[torch.Tensor, list[str]]:
+    canonical_scores = torch.full(
+        (len(categories),),
+        float("-inf"),
+        device=alias_scores.device,
+        dtype=alias_scores.dtype,
+    )
+    best_aliases = ["" for _ in categories]
+    for alias_idx, category_idx in enumerate(alias_category_indices):
+        score_value = alias_scores[alias_idx]
+        if score_value > canonical_scores[category_idx]:
+            canonical_scores[category_idx] = score_value
+            best_aliases[category_idx] = alias_texts[alias_idx]
+    return canonical_scores, best_aliases
+
+
 def _should_prefix_bge_query(query_text: str) -> bool:
     normalized_query = str(query_text or "").strip()
     if not normalized_query:
@@ -376,6 +423,10 @@ class CategoryMapper:
         self._taxonomy_fingerprint = ""
         self._csv_signature: tuple[str, int, int] | None = None
         self._embedding_cache: dict[tuple[str, str], dict[str, Any]] = {}
+        self.retrieval_texts: list[str] = []
+        self.retrieval_category_indices: list[int] = []
+        self.retrieval_alias_flags: list[bool] = []
+        self.retrieval_embeddings = None
         self.pca = None
         self.coords_3d = None
         self.df_3d = None
@@ -418,14 +469,25 @@ class CategoryMapper:
         model_name: str,
         embedder: SentenceTransformer,
     ) -> dict[str, Any]:
+        retrieval_rows = _build_taxonomy_retrieval_alias_rows(self.categories)
+        retrieval_texts = [str(row["text"]) for row in retrieval_rows]
         category_embeddings = embedder.encode(
             self.categories,
+            convert_to_tensor=True,
+            show_progress_bar=False,
+        )
+        retrieval_embeddings = embedder.encode(
+            retrieval_texts,
             convert_to_tensor=True,
             show_progress_bar=False,
         )
         entry: dict[str, Any] = {
             "model_name": model_name,
             "category_embeddings_cpu": category_embeddings.detach().cpu(),
+            "retrieval_embeddings_cpu": retrieval_embeddings.detach().cpu(),
+            "retrieval_texts": retrieval_texts,
+            "retrieval_category_indices": [int(row["category_index"]) for row in retrieval_rows],
+            "retrieval_alias_flags": [bool(row["is_alias"]) for row in retrieval_rows],
             "has_nebula": False,
             "coords_3d": None,
             "max_range": 0.0,
@@ -459,6 +521,10 @@ class CategoryMapper:
         )
         self.embedding_device = model_device
         self.category_embeddings = cache_entry["category_embeddings_cpu"].to(model_device)
+        self.retrieval_embeddings = cache_entry["retrieval_embeddings_cpu"].to(model_device)
+        self.retrieval_texts = list(cache_entry.get("retrieval_texts") or [])
+        self.retrieval_category_indices = list(cache_entry.get("retrieval_category_indices") or [])
+        self.retrieval_alias_flags = list(cache_entry.get("retrieval_alias_flags") or [])
         self.has_nebula = bool(cache_entry.get("has_nebula"))
         self.coords_3d = cache_entry.get("coords_3d")
         self.max_range = float(cache_entry.get("max_range") or 0.0)
@@ -642,7 +708,7 @@ class CategoryMapper:
         *,
         raw_category: str,
         query_text: str,
-    ) -> tuple[torch.Tensor, torch.Tensor, list[str], list[str]]:
+    ) -> tuple[torch.Tensor, torch.Tensor, list[str], list[str], list[str]]:
         query_fragments = _split_embedding_query_fragments(raw_category, query_text)
         if not query_fragments:
             fallback = normalize_whitespace(raw_category or "") or "unknown"
@@ -662,9 +728,20 @@ class CategoryMapper:
         )
         if query_embeddings.dim() == 1:
             query_embeddings = query_embeddings.unsqueeze(0)
-        score_matrix = util.cos_sim(query_embeddings, self.category_embeddings)
-        aggregated_scores = torch.max(score_matrix, dim=0).values
-        return query_embeddings, aggregated_scores, query_fragments, prepared_fragments
+        retrieval_embeddings = (
+            self.retrieval_embeddings
+            if self.retrieval_embeddings is not None
+            else self.category_embeddings
+        )
+        score_matrix = util.cos_sim(query_embeddings, retrieval_embeddings)
+        best_alias_scores = torch.max(score_matrix, dim=0).values
+        aggregated_scores, best_aliases = _collapse_alias_scores(
+            best_alias_scores,
+            self.retrieval_category_indices or list(range(len(self.categories))),
+            self.retrieval_texts or list(self.categories),
+            self.categories,
+        )
+        return query_embeddings, aggregated_scores, query_fragments, prepared_fragments, best_aliases
 
     def build_mapper_vector_plot(
         self,
@@ -684,7 +761,7 @@ class CategoryMapper:
             ocr_summary=ocr_summary,
             reasoning_summary=reasoning_summary,
         )
-        query_embeddings, scores, query_fragments, _prepared_fragments = self._encode_query_fragments(
+        query_embeddings, scores, query_fragments, _prepared_fragments, _best_aliases = self._encode_query_fragments(
             raw_category=raw_category,
             query_text=query_text,
         )
@@ -783,7 +860,7 @@ class CategoryMapper:
             ocr_summary=ocr_summary,
             reasoning_summary=reasoning_summary,
         )
-        _query_embeddings, scores, _query_fragments, _prepared_fragments = self._encode_query_fragments(
+        _query_embeddings, scores, _query_fragments, _prepared_fragments, _best_aliases = self._encode_query_fragments(
             raw_category=raw_category,
             query_text=query_text,
         )
@@ -923,7 +1000,7 @@ class CategoryMapper:
                 ocr_summary=ocr_summary,
                 reasoning_summary=reasoning_summary,
             )
-            _query_embeddings, scores, query_fragments, prepared_fragments = self._encode_query_fragments(
+            _query_embeddings, scores, query_fragments, prepared_fragments, best_aliases = self._encode_query_fragments(
                 raw_category=raw_category,
                 query_text=query_text,
             )
@@ -935,16 +1012,18 @@ class CategoryMapper:
                     "label": self.categories[idx],
                     "category_id": str(self.cat_to_id.get(self.categories[idx], "") or ""),
                     "score": float(scores[idx].item()),
+                    "matched_alias": best_aliases[idx] if best_aliases[idx] != self.categories[idx] else "",
                 }
                 for idx in top_indices
             ]
 
             canonical = self.categories[best_match_idx]
             category_id = str(self.cat_to_id.get(canonical, ""))
+            matched_alias = best_aliases[best_match_idx] if best_aliases[best_match_idx] != canonical else ""
             query_log_preview = _summarize_mapping_query_for_log(query_text)
             query_parts_log = _summarize_mapping_query_parts_for_log(query_fragments)
             logger.info(
-                "category_map job_id=%s model=%r raw=%r query=%r query_parts=%r query_transformed=%s matched=%r id=%s score=%.6f",
+                "category_map job_id=%s model=%r raw=%r query=%r query_parts=%r query_transformed=%s matched=%r matched_alias=%r id=%s score=%.6f",
                 job_id or "",
                 self.embedding_model_name or self.requested_embedding_model,
                 raw_category,
@@ -952,6 +1031,7 @@ class CategoryMapper:
                 query_parts_log,
                 prepared_fragments != query_fragments,
                 canonical,
+                matched_alias,
                 category_id,
                 score,
             )
@@ -962,6 +1042,7 @@ class CategoryMapper:
                 "category_match_score": score,
                 "mapping_query_text": query_text,
                 "mapping_query_fragments": query_fragments,
+                "matched_alias": matched_alias,
                 "top_matches": top_matches,
             }
 
@@ -1001,6 +1082,7 @@ class CategoryMapper:
             "category_csv_path_used": self.csv_path_used,
             "category_embedding_model": self.embedding_model_name or self.requested_embedding_model,
             "category_embedding_device": self.embedding_device or device,
+            "category_retrieval_alias_count": max(0, len(self.retrieval_texts) - len(self.categories)),
             "last_error": self.last_error if not self.active else None,
             "siglip_model_loaded": bool(siglip_model is not None and siglip_processor is not None),
             "vision_text_features_cached": bool(self.vision_text_features is not None),

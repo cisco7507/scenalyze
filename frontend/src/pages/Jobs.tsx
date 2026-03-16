@@ -99,7 +99,7 @@ export function Jobs() {
 
   const [mode, setMode] = useState('pipeline');
   const [categories, setCategories] = useState('');
-  const [provider, setProvider] = useState('Ollama');
+  const [provider, setProvider] = useState('Llama Server');
   const [modelName, setModelName] = useState('qwen3-vl:8b-instruct');
   const [categoryEmbeddingModel, setCategoryEmbeddingModel] = useState('BAAI/bge-large-en-v1.5');
   const [providerModels, setProviderModels] = useState<string[]>([]);

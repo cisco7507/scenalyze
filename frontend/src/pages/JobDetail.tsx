@@ -1429,7 +1429,6 @@ export function JobDetail() {
   const [videoAvailable, setVideoAvailable] = useState(false);
   const [videoError, setVideoError] = useState("");
   const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
-  const [showFullReasoning, setShowFullReasoning] = useState(false);
   const [showRawJsonContext, setShowRawJsonContext] = useState(false);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
@@ -1456,12 +1455,10 @@ export function JobDetail() {
   const isRecoveredReasoning = reasoningText
     .toLowerCase()
     .startsWith("(recovered)");
-  const reasoningDisplayText = useMemo(() => {
-    if (!reasoningNarrativeText) return "";
-    if (showFullReasoning || reasoningNarrativeText.length <= 500)
-      return reasoningNarrativeText;
-    return `${reasoningNarrativeText.slice(0, 220).trimEnd()}...`;
-  }, [reasoningNarrativeText, showFullReasoning]);
+  const reasoningDisplayText = useMemo(
+    () => reasoningNarrativeText,
+    [reasoningNarrativeText],
+  );
   const quotedTermsAll = useMemo<ReasoningTerm[]>(() => {
     if (!reasoningNarrativeText) return [];
     const orderedTerms: string[] = [];
@@ -1697,7 +1694,6 @@ export function JobDetail() {
 
   useEffect(() => {
     setShowAllReasoningTerms(false);
-    setShowFullReasoning(false);
   }, [reasoningText]);
 
   useEffect(() => {
@@ -2495,15 +2491,6 @@ export function JobDetail() {
                       Full model prose with inline evidence highlights.
                     </div>
                   </div>
-                  {reasoningNarrativeText.length > 500 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowFullReasoning((current) => !current)}
-                      className="text-xs text-cyan-700 hover:text-cyan-800 underline underline-offset-2"
-                    >
-                      {showFullReasoning ? "Show less" : "Show more"}
-                    </button>
-                  )}
                 </div>
 
                 {reasoningText ? (
@@ -2703,11 +2690,19 @@ export function JobDetail() {
                     {(mapperArtifact?.top_matches || []).map((m, idx) => (
                       <div
                         key={idx}
-                        title={`${m.label} · score ${Number(m.score).toFixed(6)}${m.category_id != null ? ` · category ID ${m.category_id}` : ""}`}
+                        title={`${m.label} · score ${Number(m.score).toFixed(6)}${m.category_id != null ? ` · category ID ${m.category_id}` : ""}${typeof m.matched_alias === "string" && m.matched_alias.trim().length > 0 ? ` · via alias ${m.matched_alias}` : ""}`}
                         className="flex items-center justify-between text-xs bg-white border border-gray-200 rounded px-3 py-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-gray-800 truncate">{m.label}</span>
+                          <div className="min-w-0">
+                            <div className="text-gray-800 truncate">{m.label}</div>
+                            {typeof m.matched_alias === "string" &&
+                              m.matched_alias.trim().length > 0 && (
+                                <div className="text-[10px] text-gray-500 truncate">
+                                  via alias {m.matched_alias}
+                                </div>
+                              )}
+                          </div>
                           {m.category_id != null && (
                             <span
                               title={`Category ID: ${m.category_id}`}
