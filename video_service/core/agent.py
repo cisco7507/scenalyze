@@ -22,6 +22,13 @@ RESULT_COLUMNS = [
     "Reasoning",
     "category_match_method",
     "category_match_score",
+    "brand",
+    "confidence",
+    "reasoning",
+    "industry_id",
+    "industry_name",
+    "category_id",
+    "category_name",
 ]
 
 
@@ -362,8 +369,8 @@ def run_agent_job(
                 category_match_method, category_match_score = match_method, match_score
                 yield log, gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             
-            master.append([url, brand, cat_id, cat, "N/A", reason, category_match_method, category_match_score])
+            master.append([url, brand, cat_id, cat, "N/A", reason, category_match_method, category_match_score, brand, "N/A", reason, "", "", cat_id, cat])
             yield "Result row appended.\n", gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             time.sleep(4)
         except Exception as e:
-            master.append([url, "Error", "", "Error", "N/A", str(e), "none", None])
+            master.append([url, "Error", "", "Error", "N/A", str(e), "none", None, "Error", "N/A", str(e), "", "", "", ""])

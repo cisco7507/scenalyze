@@ -127,6 +127,11 @@ class JobStatus(BaseModel):
     brand: Optional[str] = None
     category: Optional[str] = None
     category_id: Optional[str] = None
+    category_name: Optional[str] = None
+    parent_category_id: Optional[str] = None
+    parent_category: Optional[str] = None
+    industry_id: Optional[str] = None
+    industry_name: Optional[str] = None
 
 
 class BenchmarkTruthCreateRequest(BaseModel):

@@ -1121,6 +1121,7 @@ class HybridLLM:
         ocr_text: str,
         reasoning: str,
         candidate_categories: list[str],
+        candidate_category_contexts: dict[str, str] | None = None,
         visual_matches: list[tuple[str, float]] | None = None,
         context_size=8192,
         product_focus_guidance_enabled: bool = True,
@@ -1146,7 +1147,15 @@ class HybridLLM:
 
         ocr_excerpt = " ".join((ocr_text or "").split())[:500]
         reasoning_excerpt = " ".join((reasoning or "").split())[:400]
-        candidate_text = " | ".join(normalized_candidates.values())
+        candidate_lines: list[str] = []
+        for idx, candidate in enumerate(normalized_candidates.values(), start=1):
+            candidate_lines.append(f"{idx}. {candidate}")
+            path_text = ""
+            if candidate_category_contexts:
+                path_text = str(candidate_category_contexts.get(candidate, "") or "").strip()
+            if path_text and path_text != candidate:
+                candidate_lines.append(f"   Parent/Leaf Path: {path_text}")
+        candidate_text = "\n".join(candidate_lines)
         product_focus_guidance = ""
         if product_focus_guidance_enabled:
             product_focus_guidance = self._build_product_focus_guidance(
@@ -1159,6 +1168,8 @@ class HybridLLM:
         system_prompt = (
             "You are resolving a taxonomy mapping ambiguity for a video ad classification system. "
             "Choose exactly one category from the supplied candidate categories only. "
+            "Return the 1-based category_index for the chosen candidate. "
+            "The category_index is authoritative. "
             "Use the brand, OCR evidence, prior category guess, model reasoning, and optional visual hints together. "
             "Prefer the category that best matches the ad's overall product or service domain, not a superficial keyword overlap. "
             + (
@@ -1170,32 +1181,103 @@ class HybridLLM:
             + (
             "Do not invent a label. Do not choose a candidate whose domain contradicts the overall ad evidence. "
             "If the evidence is mixed, choose the safer in-family category from the list. "
-            "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
+            "Output STRICT JSON: {\"brand\": \"...\", \"category_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
         )
         user_prompt = (
             f"Brand: {brand}\n"
             f"LLM Category Guess: {raw_category}\n"
             f"Current Mapped Category: {mapped_category}\n"
-            f"Candidate Categories: {candidate_text}\n"
+            f"Candidate Categories:\n{candidate_text}\n"
             f"OCR Evidence: {ocr_excerpt or 'None'}\n"
             f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
             f"Visual Hints: {visual_hint_text or 'None'}\n"
             f"Decision Guidance: {product_focus_guidance or 'None'}\n"
             "Return the single best-supported category from the candidate list."
         )
+        ordered_candidates = list(normalized_candidates.values())
+
+        def _resolve_index(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_index = payload.get("category_index")
+            try:
+                candidate_index = int(chosen_index)
+            except (TypeError, ValueError):
+                return None, 0
+            if 1 <= candidate_index <= len(ordered_candidates):
+                return ordered_candidates[candidate_index - 1], candidate_index
+            return None, 0
+
+        def _resolve_exact_candidate_text(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_text = str(payload.get("category", "") or "").strip()
+            if not chosen_text:
+                return None, 0
+            canonical_candidate = normalized_candidates.get(chosen_text.casefold())
+            if canonical_candidate is None:
+                return None, 0
+            for idx, candidate in enumerate(ordered_candidates, start=1):
+                if candidate == canonical_candidate:
+                    return canonical_candidate, idx
+            return None, 0
+
+        original_category_text = ""
         try:
             res = provider_plugin.generate_json(system_prompt, user_prompt)
         except Exception as exc:
             return None, f"provider_error:{exc}"
-        if not isinstance(res, dict) or "category" not in res:
+        if not isinstance(res, dict):
             return None, "invalid_llm_response"
+        original_category_text = str(res.get("category", "") or "").strip()
 
-        chosen = str(res.get("category", "") or "").strip()
-        canonical_candidate = normalized_candidates.get(chosen.casefold())
+        canonical_candidate, resolved_index = _resolve_index(res)
+        resolution_source = f"category_index:{resolved_index}" if resolved_index else ""
         if canonical_candidate is None:
-            return None, f"outside_candidate_set={chosen!r}"
+            logger.info(
+                "category_rerank_retry_triggered reason=missing_category_index category_text=%r category_index=%r",
+                str(res.get("category", "") or "").strip(),
+                res.get("category_index"),
+            )
+            retry_system_prompt = (
+                "You must select exactly one category from the numbered candidate list. "
+                "Return STRICT JSON only as {\"category_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}. "
+                "The category_index is required and must be the 1-based number of the chosen candidate. "
+                "Do not return category text. Do not explain alternatives outside the list."
+            )
+            retry_user_prompt = (
+                f"Candidate Categories:\n{candidate_text}\n"
+                f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+                f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
+                f"Visual Hints: {visual_hint_text or 'None'}\n"
+                "Return only the single best category_index from the candidate list."
+            )
+            try:
+                retry_res = provider_plugin.generate_json(retry_system_prompt, retry_user_prompt)
+            except Exception as exc:
+                return None, f"provider_error:{exc}"
+            if not isinstance(retry_res, dict):
+                return None, "invalid_llm_response"
+            original_category_text = str(retry_res.get("category", "") or "").strip()
+            canonical_candidate, resolved_index = _resolve_index(retry_res)
+            if canonical_candidate is None:
+                canonical_candidate, resolved_index = _resolve_exact_candidate_text(retry_res)
+                if canonical_candidate is None:
+                    return None, "missing_category_index"
+                resolution_source = f"retry_category_text_exact:{resolved_index}"
+            else:
+                resolution_source = f"retry_category_index:{resolved_index}"
+            res = retry_res
         res["category"] = canonical_candidate
+        res["category_index"] = resolved_index
+        logger.info(
+            "category_rerank_resolved source=%s chosen=%r category_text=%r category_index=%r",
+            resolution_source or "unknown",
+            canonical_candidate,
+            original_category_text,
+            res.get("category_index"),
+        )
         return res, "ok"
 
     def query_specificity_rescue(
@@ -1206,6 +1288,7 @@ class HybridLLM:
         current_category: str,
         ocr_text: str,
         candidate_categories: list[str] | None = None,
+        candidate_category_contexts: dict[str, str] | None = None,
         visual_matches: list[tuple[str, float]] | None = None,
         context_size=8192,
     ) -> tuple[dict | None, str]:
@@ -1233,7 +1316,15 @@ class HybridLLM:
             )
         candidate_text = ""
         if candidate_categories:
-            candidate_text = " | ".join(candidate_categories)
+            candidate_lines: list[str] = []
+            for idx, candidate in enumerate(candidate_categories, start=1):
+                candidate_lines.append(f"{idx}. {candidate}")
+                path_text = ""
+                if candidate_category_contexts:
+                    path_text = str(candidate_category_contexts.get(candidate, "") or "").strip()
+                if path_text and path_text != candidate:
+                    candidate_lines.append(f"   Parent/Leaf Path: {path_text}")
+            candidate_text = "\n".join(candidate_lines)
 
         system_prompt = (
             "You are refining a broad video-ad category into the most specific supported product or service category. "
@@ -1246,7 +1337,7 @@ class HybridLLM:
         user_prompt = (
             f"Brand: {brand}\n"
             f"Current Category: {current_category}\n"
-            f"Candidate Categories: {candidate_text or current_category}\n"
+            f"Candidate Categories:\n{candidate_text or current_category}\n"
             f"OCR Evidence: {ocr_text}\n"
             f"Visual Hints: {visual_hint_text or 'None'}\n"
             f"Web Search Snippets: {snippets}\n"

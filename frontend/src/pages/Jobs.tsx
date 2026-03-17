@@ -766,9 +766,16 @@ export function Jobs() {
             const ocrEngineLabel = job.settings?.ocr_engine || '—';
             const ocrModeLabel = sanitizeDecorativeLabel(job.settings?.ocr_mode);
             const scanModeLabel = sanitizeDecorativeLabel(job.settings?.scan_mode);
-            const categoryLabel = job.category || '—';
+            const categoryLabel = job.category_name || job.category || '—';
             const brandLabel = job.brand || '—';
             const categoryId = (job.category_id || '').trim();
+            const parentCategoryLabel = (job.parent_category || '').trim();
+            const parentCategoryId = (job.parent_category_id || '').trim();
+            const showParentMeta =
+              Boolean(parentCategoryLabel) &&
+              parentCategoryLabel.toLowerCase() !== categoryLabel.toLowerCase() &&
+              categoryLabel !== '—';
+            const taxonomyMetaLabel = showParentMeta ? `Under ${parentCategoryLabel}` : 'Top-level category';
             const terminal = isTerminalStatus(job.status);
             const ageLabel =
               job.status === 'processing'
@@ -859,12 +866,12 @@ export function Jobs() {
                       <div>
                         <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Category</div>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
-                            <span
-                              className="break-words text-sm text-slate-800"
-                              title={`Category: ${categoryLabel}`}
-                            >
-                              {categoryLabel}
-                            </span>
+                          <span
+                            className="break-words text-sm font-medium text-slate-800"
+                            title={`Category: ${categoryLabel}`}
+                          >
+                            {categoryLabel}
+                          </span>
                           {categoryId && (
                             <span
                               title={`Category ID: ${categoryId}`}
@@ -874,6 +881,24 @@ export function Jobs() {
                             </span>
                           )}
                         </div>
+                        {categoryLabel !== '—' && (
+                          <div
+                            className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500"
+                            title={showParentMeta ? parentCategoryLabel : 'Top-level category'}
+                          >
+                            <span className="font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Taxonomy
+                            </span>
+                            <span className="min-w-0 truncate text-slate-600">
+                              {taxonomyMetaLabel}
+                            </span>
+                            {showParentMeta && parentCategoryId && (
+                              <span className="shrink-0 font-mono text-[10px] text-slate-400">
+                                #{parentCategoryId}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 

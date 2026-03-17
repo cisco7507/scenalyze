@@ -101,6 +101,71 @@ def _round_or_none(value):
     return round(value, 1) if value is not None else None
 
 
+def _normalize_result_row_payload(row: dict | None) -> dict:
+    payload = row if isinstance(row, dict) else {}
+    brand = str(payload.get("brand") or payload.get("Brand") or "")
+    category_name = str(
+        payload.get("category_name")
+        or payload.get("category")
+        or payload.get("Category")
+        or ""
+    )
+    category_id = str(payload.get("category_id") or payload.get("Category ID") or "")
+    parent_category_id = str(payload.get("parent_category_id") or "")
+    parent_category = str(payload.get("parent_category") or "")
+    industry_id = str(payload.get("industry_id") or "")
+    industry_name = str(payload.get("industry_name") or "")
+    confidence = payload.get("confidence", payload.get("Confidence"))
+    reasoning = payload.get("reasoning", payload.get("Reasoning"))
+
+    if category_name:
+        if not industry_id and hasattr(category_mapper, "get_category_industry_id"):
+            try:
+                industry_id = str(category_mapper.get_category_industry_id(category_name) or "")
+            except Exception:
+                industry_id = ""
+        if not industry_name and hasattr(category_mapper, "get_category_industry_name"):
+            try:
+                industry_name = str(category_mapper.get_category_industry_name(category_name) or "")
+            except Exception:
+                industry_name = ""
+        if not parent_category_id and hasattr(category_mapper, "get_category_parent_id"):
+            try:
+                parent_category_id = str(category_mapper.get_category_parent_id(category_name) or "")
+            except Exception:
+                parent_category_id = ""
+        if not parent_category and hasattr(category_mapper, "get_category_parent_name"):
+            try:
+                parent_category = str(category_mapper.get_category_parent_name(category_name) or "")
+            except Exception:
+                parent_category = ""
+
+    return {
+        "brand": brand,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "parent_category_id": parent_category_id,
+        "parent_category": parent_category,
+        "industry_id": industry_id,
+        "industry_name": industry_name,
+        "category_id": category_id,
+        "category_name": category_name,
+    }
+
+
+def _extract_result_summary(result_json: str | None) -> dict:
+    if not result_json:
+        return {}
+    try:
+        payload = json.loads(result_json)
+    except Exception:
+        return {}
+    if not isinstance(payload, list) or not payload:
+        return {}
+    first_row = payload[0] if isinstance(payload[0], dict) else {}
+    return _normalize_result_row_payload(first_row)
+
+
 def _percentile(values: list[float], quantile: float) -> float | None:
     if not values:
         return None
@@ -1690,6 +1755,8 @@ def _default_job_artifacts(job_id: str) -> dict:
         "category_mapper": {
             "category": "",
             "category_id": "",
+            "parent_category": "",
+            "category_path_text": "",
             "method": "",
             "score": None,
             "confidence": None,
@@ -1737,6 +1804,8 @@ def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
         payload["category_mapper"]["category_id"] = (
             str(mapper_payload.get("category_id") or "")
         )
+        payload["category_mapper"]["parent_category"] = mapper_payload.get("parent_category") or ""
+        payload["category_mapper"]["category_path_text"] = mapper_payload.get("category_path_text") or ""
         payload["category_mapper"]["method"] = mapper_payload.get("method") or ""
         payload["category_mapper"]["score"] = mapper_payload.get("score")
         payload["category_mapper"]["confidence"] = mapper_payload.get("confidence")
@@ -1811,10 +1880,12 @@ def _build_job_explanation(job_id: str, job_row, artifacts: dict, result_payload
         },
         "attempts": attempts,
         "final": {
-            "brand": first_result.get("Brand") or first_result.get("brand") or row_brand,
-            "category": first_result.get("Category") or first_result.get("category") or row_category,
-            "category_id": first_result.get("Category ID") or first_result.get("category_id") or row_category_id,
-            "confidence": first_result.get("Confidence") or first_result.get("confidence"),
+            "brand": first_result.get("brand") or first_result.get("Brand") or row_brand,
+            "category": first_result.get("category_name") or first_result.get("category") or first_result.get("Category") or row_category,
+            "category_id": first_result.get("category_id") or first_result.get("Category ID") or row_category_id,
+            "industry_id": first_result.get("industry_id") or "",
+            "industry_name": first_result.get("industry_name") or "",
+            "confidence": first_result.get("confidence") or first_result.get("Confidence"),
             "mapper_method": category_mapper.get("method") if isinstance(category_mapper, dict) else "",
             "mapper_score": category_mapper.get("score") if isinstance(category_mapper, dict) else None,
             "brand_ambiguity_flag": bool(accepted_result.get("brand_ambiguity_flag", False)),
@@ -2105,8 +2176,11 @@ def _get_jobs_from_db(limit: int = 100) -> list:
         rows = conn.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
-    return [
-        JobStatus(
+    result: list[JobStatus] = []
+    for r in rows:
+        result_summary = _extract_result_summary(row_value(r, "result_json"))
+        result.append(
+            JobStatus(
             job_id=r["id"], status=r["status"],
             stage=row_value(r, "stage"), stage_detail=row_value(r, "stage_detail"),
             duration_seconds=row_value(r, "duration_seconds"),
@@ -2114,10 +2188,17 @@ def _get_jobs_from_db(limit: int = 100) -> list:
             progress=r["progress"], error=row_value(r, "error"),
             settings=JobSettings.model_validate_json(r["settings"]) if r["settings"] else None,
             mode=row_value(r, "mode"), url=row_value(r, "url"),
-            brand=row_value(r, "brand"), category=row_value(r, "category"), category_id=row_value(r, "category_id"),
+            brand=result_summary.get("brand") or row_value(r, "brand"),
+            category=result_summary.get("category_name") or row_value(r, "category"),
+            category_id=result_summary.get("category_id") or row_value(r, "category_id"),
+            category_name=result_summary.get("category_name") or row_value(r, "category"),
+            parent_category_id=result_summary.get("parent_category_id") or "",
+            parent_category=result_summary.get("parent_category") or "",
+            industry_id=result_summary.get("industry_id") or "",
+            industry_name=result_summary.get("industry_name") or "",
         )
-        for r in rows
-    ]
+        )
+    return result
 
 
 def _dedupe_jobs_by_id(jobs: list[dict]) -> list[dict]:
@@ -2151,6 +2232,7 @@ async def get_job(req: Request, job_id: str):
         raise HTTPException(404, "Job not found")
     def row_value(r, key: str, default=None):
         return r[key] if key in r.keys() else default
+    result_summary = _extract_result_summary(row_value(row, "result_json"))
     return JobStatus(
         job_id=row["id"], status=row["status"],
         stage=row_value(row, "stage"), stage_detail=row_value(row, "stage_detail"),
@@ -2159,7 +2241,14 @@ async def get_job(req: Request, job_id: str):
         progress=row["progress"], error=row_value(row, "error"),
         settings=JobSettings.model_validate_json(row["settings"]) if row["settings"] else None,
         mode=row_value(row, "mode"), url=row_value(row, "url"),
-        brand=row_value(row, "brand"), category=row_value(row, "category"), category_id=row_value(row, "category_id"),
+        brand=result_summary.get("brand") or row_value(row, "brand"),
+        category=result_summary.get("category_name") or row_value(row, "category"),
+        category_id=result_summary.get("category_id") or row_value(row, "category_id"),
+        category_name=result_summary.get("category_name") or row_value(row, "category"),
+        parent_category_id=result_summary.get("parent_category_id") or "",
+        parent_category=result_summary.get("parent_category") or "",
+        industry_id=result_summary.get("industry_id") or "",
+        industry_name=result_summary.get("industry_name") or "",
     )
 
 
@@ -2172,7 +2261,18 @@ async def get_job_result(req: Request, job_id: str):
         row = conn.execute("SELECT result_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row or not row["result_json"]:
         return {"result": None}
-    return {"result": json.loads(row["result_json"])}
+    try:
+        payload = json.loads(row["result_json"])
+    except Exception:
+        raise HTTPException(500, "Stored result is invalid JSON")
+    if not isinstance(payload, list):
+        return {"result": None}
+    return {
+        "result": [
+            _normalize_result_row_payload(item if isinstance(item, dict) else {})
+            for item in payload
+        ]
+    }
 
 
 @app.get("/jobs/{job_id}/video", tags=["jobs"])

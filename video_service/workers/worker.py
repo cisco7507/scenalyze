@@ -111,6 +111,8 @@ def _build_default_artifacts(job_id: str) -> dict:
         "category_mapper": {
             "category": "",
             "category_id": "",
+            "parent_category": "",
+            "category_path_text": "",
             "method": "",
             "score": None,
             "confidence": None,
@@ -221,9 +223,9 @@ def _extract_summary_fields(result_json: str | None) -> tuple[str, str, str]:
     if not isinstance(payload, list) or not payload:
         return "", "", ""
     row = payload[0] if isinstance(payload[0], dict) else {}
-    brand = str(row.get("Brand") or row.get("brand") or "")
-    category = str(row.get("Category") or row.get("category") or "")
-    category_id = str(row.get("Category ID") or row.get("category_id") or "")
+    brand = str(row.get("brand") or row.get("Brand") or "")
+    category = str(row.get("category_name") or row.get("category") or row.get("Category") or "")
+    category_id = str(row.get("category_id") or row.get("Category ID") or "")
     return brand, category, category_id
 
 
@@ -232,14 +234,18 @@ def _category_mapper_from_row(row: dict | None) -> dict:
         return {
             "category": "",
             "category_id": "",
+            "parent_category": "",
+            "category_path_text": "",
             "method": "",
             "score": None,
             "confidence": None,
             "top_matches": [],
         }
     return {
-        "category": str(row.get("Category") or row.get("category") or ""),
-        "category_id": str(row.get("Category ID") or row.get("category_id") or ""),
+        "category": str(row.get("category_name") or row.get("category") or row.get("Category") or ""),
+        "category_id": str(row.get("category_id") or row.get("Category ID") or ""),
+        "parent_category": str(row.get("parent_category") or ""),
+        "category_path_text": str(row.get("category_path_text") or ""),
         "method": str(row.get("category_match_method") or row.get("match_method") or ""),
         "score": row.get("category_match_score"),
         "confidence": row.get("Confidence") if "Confidence" in row else row.get("confidence"),
@@ -770,6 +776,12 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
             )
             artifacts_payload["category_mapper"]["query_fragments"] = (
                 latest_signal_artifacts.get("mapper_query_fragments") or []
+            )
+            artifacts_payload["category_mapper"]["parent_category"] = (
+                latest_signal_artifacts.get("mapper_parent_category") or ""
+            )
+            artifacts_payload["category_mapper"]["category_path_text"] = (
+                latest_signal_artifacts.get("mapper_category_path_text") or ""
             )
         result = json.dumps(final_df.to_dict(orient="records"))
         logger.info("pipeline_done: rows=%d", len(final_df))

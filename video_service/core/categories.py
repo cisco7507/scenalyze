@@ -5,6 +5,7 @@ import re
 import unicodedata
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
 
 import torch
 from transformers import AutoProcessor, AutoModel
@@ -46,6 +47,36 @@ _BGE_LARGE_EN_V15_MODEL = "BAAI/bge-large-en-v1.5"
 _BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 _MAPPING_QUERY_LOG_MAX_CHARS = 180
 _MAPPING_QUERY_PART_LOG_MAX_CHARS = 80
+_RETRIEVAL_ALIAS_PENALTIES = {
+    "primary": 0.0,
+    "canonical": 0.02,
+    "fragment": 0.06,
+}
+_SPECIFICITY_STOPWORDS = {
+    "all",
+    "and",
+    "care",
+    "chemist",
+    "counter",
+    "else",
+    "general",
+    "manufacture",
+    "mfg",
+    "of",
+    "or",
+    "over",
+    "pharmaceutical",
+    "product",
+    "products",
+    "relief",
+    "retail",
+    "sale",
+    "service",
+    "services",
+    "store",
+    "stores",
+    "the",
+}
 _EMBEDDING_FRAGMENT_SPLIT_PATTERN = re.compile(r"\n+|\|+|,\s+|;\s+")
 _EMBEDDING_FRAGMENT_FRENCH_PHRASE_TRANSLATIONS = (
     (re.compile(r"\bla banque officielle\b", flags=re.IGNORECASE), "official bank"),
@@ -87,18 +118,26 @@ _EMBEDDING_FRAGMENT_FRENCH_STOPWORDS = {
 }
 
 
-def _build_taxonomy_retrieval_alias_rows(categories: list[str]) -> list[dict[str, object]]:
+def _build_taxonomy_retrieval_alias_rows(
+    categories: list[str],
+    category_prompt_texts: list[str] | None = None,
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     seen: set[tuple[int, str]] = set()
     for category_idx, category in enumerate(categories or []):
         canonical = normalize_whitespace(category or "")
         if not canonical:
             continue
-        row_candidates = [canonical]
+        primary_text = canonical
+        if category_prompt_texts and category_idx < len(category_prompt_texts):
+            primary_text = normalize_whitespace(category_prompt_texts[category_idx] or "") or canonical
+        row_candidates: list[tuple[str, str]] = [(primary_text, "primary")]
+        if primary_text.casefold() != canonical.casefold():
+            row_candidates.append((canonical, "canonical"))
         if "/" in canonical and "all else" not in canonical.casefold():
             parts = [normalize_whitespace(part) for part in canonical.split("/") if normalize_whitespace(part)]
-            row_candidates.extend(parts)
-        for text in row_candidates:
+            row_candidates.extend((part, "fragment") for part in parts)
+        for text, alias_kind in row_candidates:
             key = (category_idx, text.casefold())
             if key in seen:
                 continue
@@ -107,7 +146,8 @@ def _build_taxonomy_retrieval_alias_rows(categories: list[str]) -> list[dict[str
                 {
                     "text": text,
                     "category_index": category_idx,
-                    "is_alias": text != canonical,
+                    "is_alias": alias_kind != "primary",
+                    "alias_kind": alias_kind,
                 }
             )
     return rows
@@ -117,6 +157,7 @@ def _collapse_alias_scores(
     alias_scores: torch.Tensor,
     alias_category_indices: list[int],
     alias_texts: list[str],
+    alias_kinds: list[str],
     categories: list[str],
 ) -> tuple[torch.Tensor, list[str]]:
     canonical_scores = torch.full(
@@ -127,9 +168,11 @@ def _collapse_alias_scores(
     )
     best_aliases = ["" for _ in categories]
     for alias_idx, category_idx in enumerate(alias_category_indices):
-        score_value = alias_scores[alias_idx]
-        if score_value > canonical_scores[category_idx]:
-            canonical_scores[category_idx] = score_value
+        alias_kind = alias_kinds[alias_idx] if alias_idx < len(alias_kinds) else "fragment"
+        penalty = _RETRIEVAL_ALIAS_PENALTIES.get(alias_kind, _RETRIEVAL_ALIAS_PENALTIES["fragment"])
+        adjusted_score = alias_scores[alias_idx] - penalty
+        if adjusted_score > canonical_scores[category_idx]:
+            canonical_scores[category_idx] = adjusted_score
             best_aliases[category_idx] = alias_texts[alias_idx]
     return canonical_scores, best_aliases
 
@@ -219,6 +262,31 @@ def _prepare_query_text_for_embedding(query_text: str, model_name: str) -> str:
     return normalized_query
 
 
+def _normalize_specificity_token(token: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(token or "").strip().lower())
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = re.sub(r"[^a-z0-9]+", "", normalized)
+    if not normalized:
+        return ""
+    if normalized.endswith("ies") and len(normalized) > 4:
+        normalized = f"{normalized[:-3]}y"
+    elif normalized.endswith("s") and len(normalized) > 4:
+        normalized = normalized[:-1]
+    if normalized.startswith("medicat") or normalized.startswith("medicin"):
+        return "medic"
+    return normalized
+
+
+def _tokenize_specificity_text(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for raw_token in re.findall(r"[A-Za-z0-9]+", str(text or "")):
+        normalized = _normalize_specificity_token(raw_token)
+        if not normalized or normalized in _SPECIFICITY_STOPWORDS:
+            continue
+        tokens.add(normalized)
+    return tokens
+
+
 def _summarize_mapping_query_for_log(query_text: str) -> str:
     normalized_query = normalize_whitespace(query_text or "")
     if len(normalized_query) <= _MAPPING_QUERY_LOG_MAX_CHARS:
@@ -235,6 +303,33 @@ def _summarize_mapping_query_parts_for_log(query_parts: list[str]) -> list[str]:
                 f"{normalized_part[:_MAPPING_QUERY_PART_LOG_MAX_CHARS - 3].rstrip()}..."
             )
         summarized.append(normalized_part)
+    return summarized
+
+
+def _summarize_embedding_answers_for_log(
+    *,
+    labels: list[str],
+    scores: list[float],
+    path_lookup: Callable[[str], str] | None = None,
+    alias_lookup: list[str] | None = None,
+) -> list[str]:
+    summarized: list[str] = []
+    for idx, label in enumerate(labels):
+        normalized_label = str(label or "").strip()
+        if not normalized_label:
+            continue
+        score_value = float(scores[idx]) if idx < len(scores) else 0.0
+        path_text = (
+            str(path_lookup(normalized_label) or normalized_label)
+            if callable(path_lookup)
+            else normalized_label
+        )
+        alias_text = ""
+        if alias_lookup is not None and idx < len(alias_lookup):
+            alias_value = str(alias_lookup[idx] or "").strip()
+            if alias_value and alias_value != normalized_label:
+                alias_text = f" alias={alias_value!r}"
+        summarized.append(f"{normalized_label}@{score_value:.4f} [{path_text}]{alias_text}")
     return summarized
 
 
@@ -408,11 +503,18 @@ class CategoryMapper:
     def __init__(self, csv_path=None):
         self.categories = []
         self.last_error = CATEGORY_MAPPING_STATE.last_error
-        self.csv_path_used = CATEGORY_MAPPING_STATE.csv_path_used
+        self.taxonomy_path_used = CATEGORY_MAPPING_STATE.json_path_used
         self.mapping_state = CATEGORY_MAPPING_STATE
         self.embedder = None
         self.category_embeddings = None
         self.cat_to_id = {}
+        self.cat_to_industry_id = {}
+        self.cat_to_industry_name = {}
+        self.cat_to_parent_id = {}
+        self.cat_to_parent = {}
+        self.cat_to_path_text = {}
+        self.cat_to_level = {}
+        self.category_prompt_texts: list[str] = []
         self.active = False
         self.has_nebula = False
         self.vision_text_features = None
@@ -421,11 +523,13 @@ class CategoryMapper:
         self.embedding_device = ""
         self.requested_embedding_model = DEFAULT_CATEGORY_EMBEDDING_MODEL
         self._taxonomy_fingerprint = ""
-        self._csv_signature: tuple[str, int, int] | None = None
+        self._taxonomy_source_signature: tuple[str, int, int] | None = None
         self._embedding_cache: dict[tuple[str, str], dict[str, Any]] = {}
         self.retrieval_texts: list[str] = []
         self.retrieval_category_indices: list[int] = []
         self.retrieval_alias_flags: list[bool] = []
+        self.retrieval_alias_kinds: list[str] = []
+        self.retrieval_alias_lookup: dict[str, str] = {}
         self.retrieval_embeddings = None
         self.pca = None
         self.coords_3d = None
@@ -435,14 +539,18 @@ class CategoryMapper:
 
     def _compute_taxonomy_fingerprint(self) -> str:
         digest = hashlib.sha256()
-        for category, cat_id in sorted(self.cat_to_id.items()):
+        for category in self.categories:
+            cat_id = self.cat_to_id.get(category, "")
+            path_text = self.cat_to_path_text.get(category, category)
             digest.update(str(cat_id).encode("utf-8"))
             digest.update(b"\t")
             digest.update(str(category).encode("utf-8"))
+            digest.update(b"\t")
+            digest.update(str(path_text).encode("utf-8"))
             digest.update(b"\n")
         return digest.hexdigest()
 
-    def _compute_csv_signature(self, path_str: str) -> tuple[str, int, int]:
+    def _compute_taxonomy_source_signature(self, path_str: str) -> tuple[str, int, int]:
         try:
             path = Path(path_str).expanduser().resolve()
             stat = path.stat()
@@ -451,14 +559,16 @@ class CategoryMapper:
             return (str(path_str or ""), -1, -1)
 
     def _refresh_mapping_state_if_needed(self, force: bool = False) -> None:
-        current_path = self.csv_path_used or CATEGORY_MAPPING_STATE.csv_path_used
-        current_signature = self._compute_csv_signature(current_path)
-        if not force and self._csv_signature == current_signature:
+        current_path = self.taxonomy_path_used or CATEGORY_MAPPING_STATE.json_path_used
+        current_signature = self._compute_taxonomy_source_signature(current_path)
+        if not force and self._taxonomy_source_signature == current_signature:
             return
         self.mapping_state = load_category_mapping(current_path)
-        self.csv_path_used = self.mapping_state.csv_path_used
+        self.taxonomy_path_used = self.mapping_state.json_path_used
         self.last_error = self.mapping_state.last_error
-        self._csv_signature = self._compute_csv_signature(self.csv_path_used)
+        self._taxonomy_source_signature = self._compute_taxonomy_source_signature(
+            self.taxonomy_path_used
+        )
 
     def _cache_key(self, model_name: str) -> tuple[str, str]:
         return (model_name, self._taxonomy_fingerprint)
@@ -469,10 +579,13 @@ class CategoryMapper:
         model_name: str,
         embedder: SentenceTransformer,
     ) -> dict[str, Any]:
-        retrieval_rows = _build_taxonomy_retrieval_alias_rows(self.categories)
+        retrieval_rows = _build_taxonomy_retrieval_alias_rows(
+            self.categories,
+            self.category_prompt_texts,
+        )
         retrieval_texts = [str(row["text"]) for row in retrieval_rows]
         category_embeddings = embedder.encode(
-            self.categories,
+            self.category_prompt_texts,
             convert_to_tensor=True,
             show_progress_bar=False,
         )
@@ -488,6 +601,7 @@ class CategoryMapper:
             "retrieval_texts": retrieval_texts,
             "retrieval_category_indices": [int(row["category_index"]) for row in retrieval_rows],
             "retrieval_alias_flags": [bool(row["is_alias"]) for row in retrieval_rows],
+            "retrieval_alias_kinds": [str(row.get("alias_kind") or "fragment") for row in retrieval_rows],
             "has_nebula": False,
             "coords_3d": None,
             "max_range": 0.0,
@@ -525,6 +639,20 @@ class CategoryMapper:
         self.retrieval_texts = list(cache_entry.get("retrieval_texts") or [])
         self.retrieval_category_indices = list(cache_entry.get("retrieval_category_indices") or [])
         self.retrieval_alias_flags = list(cache_entry.get("retrieval_alias_flags") or [])
+        cached_alias_kinds = list(cache_entry.get("retrieval_alias_kinds") or [])
+        if not cached_alias_kinds and self.retrieval_alias_flags:
+            cached_alias_kinds = [
+                "fragment" if is_alias else "primary"
+                for is_alias in self.retrieval_alias_flags
+            ]
+        self.retrieval_alias_kinds = cached_alias_kinds
+        self.retrieval_alias_lookup = {}
+        for text, category_idx in zip(self.retrieval_texts, self.retrieval_category_indices):
+            normalized_text = normalize_whitespace(text or "").casefold()
+            if not normalized_text:
+                continue
+            if 0 <= int(category_idx) < len(self.categories):
+                self.retrieval_alias_lookup.setdefault(normalized_text, self.categories[int(category_idx)])
         self.has_nebula = bool(cache_entry.get("has_nebula"))
         self.coords_3d = cache_entry.get("coords_3d")
         self.max_range = float(cache_entry.get("max_range") or 0.0)
@@ -561,10 +689,21 @@ class CategoryMapper:
         with self._reinit_lock:
             self._refresh_mapping_state_if_needed()
             next_cat_to_id = dict(self.mapping_state.category_to_id)
+            next_cat_to_industry_id = dict(self.mapping_state.category_to_industry_id)
+            next_cat_to_industry_name = dict(self.mapping_state.category_to_industry_name)
+            next_cat_to_parent_id = dict(self.mapping_state.category_to_parent_id)
+            next_cat_to_parent = dict(self.mapping_state.category_to_parent)
+            next_cat_to_path_text = dict(self.mapping_state.category_to_path_text)
+            next_cat_to_level = dict(self.mapping_state.category_to_level)
+            next_categories = [record.name for record in self.mapping_state.records]
+            next_prompt_texts = [
+                next_cat_to_path_text.get(category, category)
+                for category in next_categories
+            ]
             next_fingerprint = hashlib.sha256(
                 "".join(
-                    f"{cat_id}\t{category}\n"
-                    for category, cat_id in sorted(next_cat_to_id.items())
+                    f"{next_cat_to_id.get(category, '')}\t{category}\t{next_cat_to_path_text.get(category, category)}\n"
+                    for category in next_categories
                 ).encode("utf-8")
             ).hexdigest()
             if (
@@ -576,8 +715,15 @@ class CategoryMapper:
                 return requested
 
             self.cat_to_id = next_cat_to_id
-            self.categories = list(self.cat_to_id.keys())
-            self.csv_path_used = self.mapping_state.csv_path_used
+            self.cat_to_industry_id = next_cat_to_industry_id
+            self.cat_to_industry_name = next_cat_to_industry_name
+            self.cat_to_parent_id = next_cat_to_parent_id
+            self.cat_to_parent = next_cat_to_parent
+            self.cat_to_path_text = next_cat_to_path_text
+            self.cat_to_level = next_cat_to_level
+            self.categories = next_categories
+            self.category_prompt_texts = next_prompt_texts
+            self.taxonomy_path_used = self.mapping_state.json_path_used
             self._taxonomy_fingerprint = next_fingerprint
             cache_key = self._cache_key(requested)
             try:
@@ -630,7 +776,17 @@ class CategoryMapper:
         try:
             self._refresh_mapping_state_if_needed(force=True)
             self.cat_to_id = dict(self.mapping_state.category_to_id)
-            self.categories = list(self.cat_to_id.keys())
+            self.cat_to_industry_id = dict(self.mapping_state.category_to_industry_id)
+            self.cat_to_industry_name = dict(self.mapping_state.category_to_industry_name)
+            self.cat_to_parent_id = dict(self.mapping_state.category_to_parent_id)
+            self.cat_to_parent = dict(self.mapping_state.category_to_parent)
+            self.cat_to_path_text = dict(self.mapping_state.category_to_path_text)
+            self.cat_to_level = dict(self.mapping_state.category_to_level)
+            self.categories = [record.name for record in self.mapping_state.records]
+            self.category_prompt_texts = [
+                self.cat_to_path_text.get(category, category)
+                for category in self.categories
+            ]
             self.active = bool(self.mapping_state.enabled)
             self.last_error = self.mapping_state.last_error
             if not self.active:
@@ -654,7 +810,10 @@ class CategoryMapper:
             return False, "siglip model unavailable"
 
         try:
-            vision_prompts = [f"A video ad for {cat}" for cat in self.categories]
+            vision_prompts = [
+                f"A video ad for {prompt_text}"
+                for prompt_text in (self.category_prompt_texts or self.categories)
+            ]
             text_inputs = siglip_processor(
                 text=vision_prompts,
                 padding="max_length",
@@ -703,6 +862,34 @@ class CategoryMapper:
             reasoning_summary=reasoning_summary,
         )
 
+    def get_category_parent_name(self, label: str) -> str:
+        return str(self.cat_to_parent.get(str(label or ""), "") or "")
+
+    def get_category_parent_id(self, label: str) -> str:
+        return str(self.cat_to_parent_id.get(str(label or ""), "") or "")
+
+    def get_category_industry_id(self, label: str) -> str:
+        return str(self.cat_to_industry_id.get(str(label or ""), "") or "")
+
+    def get_category_industry_name(self, label: str) -> str:
+        normalized_label = str(label or "")
+        return str(self.cat_to_industry_name.get(normalized_label, normalized_label) or normalized_label)
+
+    def get_category_path_text(self, label: str) -> str:
+        normalized_label = str(label or "")
+        return str(self.cat_to_path_text.get(normalized_label, normalized_label) or normalized_label)
+
+    def get_category_context_map(self, labels: list[str]) -> dict[str, str]:
+        context_map: dict[str, str] = {}
+        for label in labels or []:
+            normalized = str(label or "").strip()
+            if not normalized:
+                continue
+            path_text = self.get_category_path_text(normalized)
+            if path_text and path_text != normalized:
+                context_map[normalized] = path_text
+        return context_map
+
     def _encode_query_fragments(
         self,
         *,
@@ -739,9 +926,57 @@ class CategoryMapper:
             best_alias_scores,
             self.retrieval_category_indices or list(range(len(self.categories))),
             self.retrieval_texts or list(self.categories),
+            self.retrieval_alias_kinds or ["primary"] * len(self.retrieval_texts or self.categories),
             self.categories,
         )
-        return query_embeddings, aggregated_scores, query_fragments, prepared_fragments, best_aliases
+        adjusted_scores = self._apply_candidate_specificity_penalties(
+            aggregated_scores,
+            query_fragments,
+        )
+        return query_embeddings, adjusted_scores, query_fragments, prepared_fragments, best_aliases
+
+    def _apply_candidate_specificity_penalties(
+        self,
+        scores: torch.Tensor,
+        query_fragments: list[str],
+    ) -> torch.Tensor:
+        if scores.numel() == 0:
+            return scores
+
+        query_tokens: set[str] = set()
+        for fragment in query_fragments:
+            query_tokens.update(_tokenize_specificity_text(fragment))
+
+        if not query_tokens:
+            return scores
+
+        adjusted_scores = scores.clone()
+        for idx, label in enumerate(self.categories):
+            if not self.get_category_parent_name(label):
+                continue
+
+            label_variants = [normalize_whitespace(part) for part in str(label or "").split("/") if normalize_whitespace(part)]
+            if not label_variants:
+                label_variants = [str(label or "")]
+
+            best_unmatched_count: int | None = None
+            for variant in label_variants:
+                variant_tokens = _tokenize_specificity_text(variant)
+                if not variant_tokens:
+                    best_unmatched_count = 0
+                    break
+                unmatched_tokens = variant_tokens - query_tokens
+                unmatched_count = len(unmatched_tokens)
+                if best_unmatched_count is None or unmatched_count < best_unmatched_count:
+                    best_unmatched_count = unmatched_count
+
+            if not best_unmatched_count:
+                continue
+
+            penalty = min(0.04 * float(best_unmatched_count), 0.12)
+            adjusted_scores[idx] = adjusted_scores[idx] - penalty
+
+        return adjusted_scores
 
     def build_mapper_vector_plot(
         self,
@@ -765,16 +1000,22 @@ class CategoryMapper:
             raw_category=raw_category,
             query_text=query_text,
         )
+        candidate_count = min(max(3, top_k), len(self.categories))
+        top_indices = torch.topk(scores, k=candidate_count).indices.tolist()
         logger.info(
-            "category_map_final model=%r raw=%r query=%r query_parts=%r selected=%r",
+            "category_map_final model=%r raw=%r query=%r query_parts=%r selected=%r selected_path=%r answers=%r",
             self.embedding_model_name or self.requested_embedding_model,
             raw_category,
             _summarize_mapping_query_for_log(query_text),
             _summarize_mapping_query_parts_for_log(query_fragments),
             selected_category,
+            self.get_category_path_text(selected_category),
+            _summarize_embedding_answers_for_log(
+                labels=[self.categories[idx] for idx in top_indices],
+                scores=[float(scores[idx].item()) for idx in top_indices],
+                path_lookup=self.get_category_path_text,
+            ),
         )
-        candidate_count = min(max(3, top_k), len(self.categories))
-        top_indices = torch.topk(scores, k=candidate_count).indices.tolist()
         if selected_category in self.categories:
             selected_idx = self.categories.index(selected_category)
             if selected_idx not in top_indices:
@@ -815,6 +1056,8 @@ class CategoryMapper:
                 {
                     "label": label,
                     "category_id": self.cat_to_id.get(label),
+                    "parent_name": self.get_category_parent_name(label),
+                    "path_text": self.get_category_path_text(label),
                     "score": score,
                     "kind": kind,
                     "x": float(coords[idx + 1, 0]),
@@ -838,6 +1081,8 @@ class CategoryMapper:
             "query_fragments": query_fragments,
             "selected_label": selected_category,
             "selected_category_id": str(self.cat_to_id.get(selected_category, "") or ""),
+            "selected_parent_name": self.get_category_parent_name(selected_category),
+            "selected_path_text": self.get_category_path_text(selected_category),
             "points": points,
             "full_bounds": full_bounds,
             "focus_bounds": focus_bounds,
@@ -866,10 +1111,22 @@ class CategoryMapper:
         )
         candidate_count = min(max(1, top_k), len(self.categories))
         top_indices = torch.topk(scores, k=candidate_count).indices.tolist()
-        return [
+        top_candidates = [
             (self.categories[idx], float(scores[idx].item()))
             for idx in top_indices
         ]
+        logger.info(
+            "category_neighbors model=%r raw=%r query=%r answers=%r",
+            self.embedding_model_name or self.requested_embedding_model,
+            raw_category,
+            _summarize_mapping_query_for_log(query_text),
+            _summarize_embedding_answers_for_log(
+                labels=[label for label, _score in top_candidates],
+                scores=[float(score) for _label, score in top_candidates],
+                path_lookup=self.get_category_path_text,
+            ),
+        )
+        return top_candidates
 
     def build_visual_vector_plot(
         self,
@@ -928,6 +1185,8 @@ class CategoryMapper:
                 {
                     "label": label,
                     "category_id": self.cat_to_id.get(label),
+                    "parent_name": self.get_category_parent_name(label),
+                    "path_text": self.get_category_path_text(label),
                     "score": score,
                     "kind": kind,
                     "x": float(coords[idx + 1, 0]),
@@ -950,6 +1209,8 @@ class CategoryMapper:
             "query_label": query_label,
             "selected_label": selected_category,
             "selected_category_id": str(self.cat_to_id.get(selected_category, "") or ""),
+            "selected_parent_name": self.get_category_parent_name(selected_category),
+            "selected_path_text": self.get_category_path_text(selected_category),
             "points": points,
             "full_bounds": full_bounds,
             "focus_bounds": focus_bounds,
@@ -975,6 +1236,10 @@ class CategoryMapper:
                 return {
                     "canonical_category": raw_value or "Unknown",
                     "category_id": "",
+                    "industry_id": "",
+                    "industry_name": "",
+                    "parent_category": "",
+                    "category_path_text": raw_value or "Unknown",
                     "category_match_method": "skipped_unknown",
                     "category_match_score": None,
                     "mapping_query_text": "",
@@ -987,10 +1252,57 @@ class CategoryMapper:
                 return {
                     "canonical_category": raw_category,
                     "category_id": "",
+                    "industry_id": "",
+                    "industry_name": "",
+                    "parent_category": "",
+                    "category_path_text": str(raw_category or ""),
                     "category_match_method": "disabled",
                     "category_match_score": None,
                     "mapping_query_text": "",
                     "top_matches": [],
+                }
+
+            raw_normalized = normalize_whitespace(raw_value).casefold()
+            exact_canonical = ""
+            if raw_normalized:
+                exact_canonical = self.retrieval_alias_lookup.get(raw_normalized, "")
+            if exact_canonical:
+                category_id = str(self.cat_to_id.get(exact_canonical, "") or "")
+                matched_alias = raw_value if normalize_whitespace(raw_value) != exact_canonical else ""
+                logger.info(
+                    "category_map job_id=%s model=%r raw=%r exact_match=%r exact_path=%r matched_alias=%r id=%s score=1.000000",
+                    job_id or "",
+                    self.embedding_model_name or self.requested_embedding_model,
+                    raw_category,
+                    exact_canonical,
+                    self.get_category_path_text(exact_canonical),
+                    matched_alias,
+                    category_id,
+                )
+                return {
+                    "canonical_category": exact_canonical,
+                    "category_id": category_id,
+                    "industry_id": self.get_category_industry_id(exact_canonical),
+                    "industry_name": self.get_category_industry_name(exact_canonical),
+                    "parent_category": self.get_category_parent_name(exact_canonical),
+                    "category_path_text": self.get_category_path_text(exact_canonical),
+                    "category_match_method": "exact_alias",
+                    "category_match_score": 1.0,
+                    "mapping_query_text": raw_value,
+                    "mapping_query_fragments": [normalize_whitespace(raw_value)],
+                    "matched_alias": matched_alias,
+                    "top_matches": [
+                        {
+                            "label": exact_canonical,
+                            "category_id": category_id,
+                            "industry_id": self.get_category_industry_id(exact_canonical),
+                            "industry_name": self.get_category_industry_name(exact_canonical),
+                            "parent_name": self.get_category_parent_name(exact_canonical),
+                            "path_text": self.get_category_path_text(exact_canonical),
+                            "score": 1.0,
+                            "matched_alias": matched_alias,
+                        }
+                    ],
                 }
 
             query_text = self._resolve_query_text(
@@ -1011,6 +1323,10 @@ class CategoryMapper:
                 {
                     "label": self.categories[idx],
                     "category_id": str(self.cat_to_id.get(self.categories[idx], "") or ""),
+                    "industry_id": self.get_category_industry_id(self.categories[idx]),
+                    "industry_name": self.get_category_industry_name(self.categories[idx]),
+                    "parent_name": self.get_category_parent_name(self.categories[idx]),
+                    "path_text": self.get_category_path_text(self.categories[idx]),
                     "score": float(scores[idx].item()),
                     "matched_alias": best_aliases[idx] if best_aliases[idx] != self.categories[idx] else "",
                 }
@@ -1023,7 +1339,7 @@ class CategoryMapper:
             query_log_preview = _summarize_mapping_query_for_log(query_text)
             query_parts_log = _summarize_mapping_query_parts_for_log(query_fragments)
             logger.info(
-                "category_map job_id=%s model=%r raw=%r query=%r query_parts=%r query_transformed=%s matched=%r matched_alias=%r id=%s score=%.6f",
+                "category_map job_id=%s model=%r raw=%r query=%r query_parts=%r query_transformed=%s matched=%r matched_path=%r matched_alias=%r id=%s score=%.6f answers=%r",
                 job_id or "",
                 self.embedding_model_name or self.requested_embedding_model,
                 raw_category,
@@ -1031,13 +1347,24 @@ class CategoryMapper:
                 query_parts_log,
                 prepared_fragments != query_fragments,
                 canonical,
+                self.get_category_path_text(canonical),
                 matched_alias,
                 category_id,
                 score,
+                _summarize_embedding_answers_for_log(
+                    labels=[str(match.get("label", "") or "") for match in top_matches],
+                    scores=[float(match.get("score", 0.0) or 0.0) for match in top_matches],
+                    path_lookup=self.get_category_path_text,
+                    alias_lookup=[str(match.get("matched_alias", "") or "") for match in top_matches],
+                ),
             )
             return {
                 "canonical_category": canonical,
                 "category_id": category_id,
+                "industry_id": self.get_category_industry_id(canonical),
+                "industry_name": self.get_category_industry_name(canonical),
+                "parent_category": self.get_category_parent_name(canonical),
+                "category_path_text": self.get_category_path_text(canonical),
                 "category_match_method": "embeddings",
                 "category_match_score": score,
                 "mapping_query_text": query_text,
@@ -1079,7 +1406,7 @@ class CategoryMapper:
         return {
             "category_mapping_enabled": bool(self.active),
             "category_mapping_count": len(self.cat_to_id),
-            "category_csv_path_used": self.csv_path_used,
+            "category_json_path_used": self.taxonomy_path_used,
             "category_embedding_model": self.embedding_model_name or self.requested_embedding_model,
             "category_embedding_device": self.embedding_device or device,
             "category_retrieval_alias_count": max(0, len(self.retrieval_texts) - len(self.categories)),

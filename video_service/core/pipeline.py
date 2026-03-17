@@ -1,6 +1,7 @@
 import time
 import os
 import re
+import math
 from collections.abc import Callable
 import torch
 import cv2
@@ -38,7 +39,17 @@ RESULT_COLUMNS = [
     "Reasoning",
     "category_match_method",
     "category_match_score",
+    "brand",
+    "confidence",
+    "reasoning",
+    "industry_id",
+    "industry_name",
+    "category_id",
+    "category_name",
 ]
+
+_CATEGORY_RERANK_TAXONOMY_CACHE_KEY: tuple[str, int] | None = None
+_CATEGORY_RERANK_TAXONOMY_CACHE: dict[str, object] | None = None
 
 
 def _normalize_ocr(text: str) -> str:
@@ -700,6 +711,141 @@ def _category_overlap_tokens(text: str) -> set[str]:
     return tokens
 
 
+def _get_category_rerank_taxonomy_stats() -> dict[str, object]:
+    global _CATEGORY_RERANK_TAXONOMY_CACHE_KEY, _CATEGORY_RERANK_TAXONOMY_CACHE
+
+    categories = list(getattr(category_mapper, "categories", []) or [])
+    fingerprint = str(getattr(category_mapper, "_taxonomy_fingerprint", "") or "")
+    cache_key = (fingerprint, len(categories))
+    if _CATEGORY_RERANK_TAXONOMY_CACHE_KEY == cache_key and _CATEGORY_RERANK_TAXONOMY_CACHE is not None:
+        return _CATEGORY_RERANK_TAXONOMY_CACHE
+
+    get_path_text = getattr(category_mapper, "get_category_path_text", None)
+    get_parent_id = getattr(category_mapper, "get_category_parent_id", None)
+    cat_to_id = dict(getattr(category_mapper, "cat_to_id", {}) or {})
+    parent_by_label: dict[str, str] = {}
+    path_tokens_by_label: dict[str, set[str]] = {}
+    token_doc_frequency: dict[str, int] = {}
+    children_by_parent: dict[str, list[str]] = {}
+    ancestor_ids_by_label: dict[str, tuple[str, ...]] = {}
+    id_to_label = {
+        str(category_id or "").strip(): label
+        for label, category_id in cat_to_id.items()
+        if str(category_id or "").strip()
+    }
+
+    for label in categories:
+        normalized_label = str(label or "").strip()
+        path_text = (
+            str(get_path_text(normalized_label) or normalized_label)
+            if callable(get_path_text)
+            else normalized_label
+        )
+        path_tokens = _category_overlap_tokens(path_text or normalized_label)
+        path_tokens_by_label[normalized_label] = path_tokens
+        for token in path_tokens:
+            token_doc_frequency[token] = int(token_doc_frequency.get(token, 0)) + 1
+
+        parent_id = (
+            str(get_parent_id(normalized_label) or "").strip()
+            if callable(get_parent_id)
+            else ""
+        )
+        if parent_id:
+            parent_by_label[normalized_label] = parent_id
+            children_by_parent.setdefault(parent_id, []).append(normalized_label)
+
+    total_docs = max(1, len(categories))
+    token_weights = {
+        token: 1.0 + math.log((1.0 + float(total_docs)) / (1.0 + float(df)))
+        for token, df in token_doc_frequency.items()
+        if token
+    }
+
+    for label in categories:
+        normalized_label = str(label or "").strip()
+        ancestor_ids: list[str] = []
+        current_parent_id = parent_by_label.get(normalized_label, "")
+        seen_ids: set[str] = set()
+        while current_parent_id and current_parent_id not in seen_ids:
+            seen_ids.add(current_parent_id)
+            ancestor_ids.append(current_parent_id)
+            parent_label = id_to_label.get(current_parent_id, "")
+            if not parent_label:
+                break
+            current_parent_id = parent_by_label.get(parent_label, "")
+        ancestor_ids_by_label[normalized_label] = tuple(ancestor_ids)
+
+    _CATEGORY_RERANK_TAXONOMY_CACHE_KEY = cache_key
+    _CATEGORY_RERANK_TAXONOMY_CACHE = {
+        "token_weights": token_weights,
+        "path_tokens_by_label": path_tokens_by_label,
+        "children_by_parent": children_by_parent,
+        "ancestor_ids_by_label": ancestor_ids_by_label,
+        "id_to_label": id_to_label,
+        "parent_by_label": parent_by_label,
+    }
+    return _CATEGORY_RERANK_TAXONOMY_CACHE
+
+
+def _weighted_category_overlap_score(
+    query_tokens: set[str],
+    candidate_tokens: set[str],
+    token_weights: dict[str, float],
+) -> float:
+    overlap = query_tokens & candidate_tokens
+    if not overlap:
+        return 0.0
+    return float(sum(float(token_weights.get(token, 1.0)) for token in overlap))
+
+
+def _extract_head_concept_tokens(text: str, *, max_terms: int = 2) -> list[str]:
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    ordered_tokens: list[tuple[str, float, int]] = []
+    seen: set[str] = set()
+    raw_tokens = re.findall(r"[A-Za-zÀ-ÿ0-9]{3,}", str(text or ""))
+    token_count = max(1, len(raw_tokens))
+    for index, raw_token in enumerate(raw_tokens):
+        token = _normalize_category_overlap_token(raw_token)
+        if len(token) < 3 or token in _CATEGORY_RERANK_OVERLAP_STOPWORDS or token in seen:
+            continue
+        seen.add(token)
+        position_bias = 1.0 + (float(index) / float(token_count))
+        score = float(token_weights.get(token, 1.0)) * position_bias
+        ordered_tokens.append((token, score, index))
+    ordered_tokens.sort(key=lambda item: (-float(item[1]), -int(item[2]), item[0]))
+    return [token for token, _score, _index in ordered_tokens[:max_terms]]
+
+
+def _build_category_rerank_head_probe(
+    *,
+    raw_category: str,
+    predicted_brand: str,
+    ocr_text: str,
+    reasoning: str,
+) -> str:
+    compact_cues = build_product_cue_query_text(
+        predicted_brand=predicted_brand,
+        ocr_summary=ocr_text,
+        reasoning_summary=reasoning,
+        family_context=raw_category,
+        max_chars=220,
+    )
+    terms: list[str] = []
+    seen: set[str] = set()
+    brand_norm = " ".join(str(predicted_brand or "").split()).strip()
+    if brand_norm and brand_norm.lower() not in {"unknown", "none", "n/a"}:
+        terms.append(brand_norm)
+    for source in (raw_category, compact_cues):
+        for token in _extract_head_concept_tokens(source, max_terms=2):
+            if token in seen:
+                continue
+            seen.add(token)
+            terms.append(token)
+    return " ".join(terms[:4]).strip()
+
+
 def _resolve_category_rerank_freeform_mismatch_score_threshold() -> float:
     raw = os.environ.get("CATEGORY_RERANK_FREEFORM_MISMATCH_SCORE_THRESHOLD", "0.78")
     try:
@@ -744,6 +890,45 @@ def _freeform_label_mismatch_reason(
     return (
         f"freeform_label_mismatch raw={raw_category!r};mapped={current_canonical!r};"
         f"top1_score={top1_score:.4f}"
+    )
+
+
+def _head_concept_mismatch_reason(
+    *,
+    current_canonical: str,
+    raw_category: str,
+    exact_taxonomy_match: bool,
+    primary_candidates: list[tuple[str, float]],
+) -> str | None:
+    if exact_taxonomy_match:
+        return None
+    if not current_canonical or not raw_category or not primary_candidates:
+        return None
+
+    raw_heads = _extract_head_concept_tokens(raw_category, max_terms=2)
+    if not raw_heads:
+        return None
+
+    path_getter = getattr(category_mapper, "get_category_path_text", None)
+    current_path = (
+        str(path_getter(current_canonical) or current_canonical)
+        if callable(path_getter)
+        else current_canonical
+    )
+    current_tokens = _category_overlap_tokens(current_path)
+    if raw_heads[0] in current_tokens:
+        return None
+
+    try:
+        top1_score = float(primary_candidates[0][1] or 0.0)
+    except (TypeError, ValueError):
+        top1_score = 0.0
+    if top1_score >= 0.82:
+        return None
+
+    return (
+        f"head_concept_mismatch raw_heads={raw_heads!r};"
+        f"mapped={current_canonical!r};top1_score={top1_score:.4f}"
     )
 
 
@@ -797,6 +982,346 @@ def _resolve_category_rerank_visual_score_threshold() -> float:
         return 0.55
 
 
+def _build_category_rerank_probe_specs(
+    *,
+    raw_category: str,
+    predicted_brand: str,
+    ocr_text: str,
+    reasoning: str,
+    primary_limit: int,
+    evidence_limit: int,
+) -> tuple[list[tuple[str, str, int, dict[str, str]]], str, list[tuple[str, str]]]:
+    raw_norm = str(raw_category or "").strip()
+    brand_norm = str(predicted_brand or "").strip()
+    seen_queries: set[tuple[str, str, bool, bool]] = set()
+    debug_queries: list[tuple[str, str]] = []
+    specs: list[tuple[str, str, int, dict[str, str]]] = []
+
+    def _add_probe(
+        probe_name: str,
+        query_text: str,
+        *,
+        limit: int,
+        predicted_brand_value: str = "",
+        ocr_text_value: str = "",
+        reasoning_value: str = "",
+    ) -> None:
+        normalized_query = " ".join(str(query_text or "").split()).strip()
+        if not normalized_query:
+            return
+        key = (
+            normalized_query.casefold(),
+            " ".join(str(predicted_brand_value or "").split()).casefold(),
+            bool(str(ocr_text_value or "").strip()),
+            bool(str(reasoning_value or "").strip()),
+        )
+        if key in seen_queries:
+            return
+        seen_queries.add(key)
+        debug_queries.append((probe_name, normalized_query))
+        specs.append(
+            (
+                probe_name,
+                normalized_query,
+                limit,
+                {
+                    "predicted_brand": predicted_brand_value,
+                    "ocr_summary": ocr_text_value,
+                    "reasoning_summary": reasoning_value,
+                },
+            )
+        )
+
+    _add_probe("label", raw_norm, limit=primary_limit)
+    _add_probe(
+        "guided",
+        raw_norm,
+        limit=primary_limit,
+        predicted_brand_value=brand_norm,
+        ocr_text_value=ocr_text,
+        reasoning_value=reasoning,
+    )
+
+    evidence_query = _build_category_rerank_evidence_query(
+        brand=predicted_brand,
+        ocr_text=ocr_text,
+        reasoning=reasoning,
+        family_context=raw_category,
+    )
+    _add_probe("evidence", evidence_query, limit=evidence_limit)
+
+    ocr_cues = build_product_cue_query_text(
+        predicted_brand=brand_norm,
+        ocr_summary=ocr_text,
+        reasoning_summary="",
+        family_context=raw_norm,
+        max_chars=220,
+    )
+    _add_probe("ocr", ocr_cues, limit=evidence_limit)
+
+    reasoning_cues = build_product_cue_query_text(
+        predicted_brand=brand_norm,
+        ocr_summary="",
+        reasoning_summary=reasoning,
+        family_context=raw_norm,
+        max_chars=220,
+    )
+    _add_probe("reasoning", reasoning_cues, limit=evidence_limit)
+
+    head_probe = _build_category_rerank_head_probe(
+        raw_category=raw_norm,
+        predicted_brand=brand_norm,
+        ocr_text=ocr_text,
+        reasoning=reasoning,
+    )
+    _add_probe("head", head_probe, limit=evidence_limit)
+    return specs, evidence_query, debug_queries
+
+
+def _summarize_category_rerank_answers_for_log(candidates: list[tuple[str, float]]) -> list[str]:
+    path_getter = getattr(category_mapper, "get_category_path_text", None)
+    summarized: list[str] = []
+    for label, score in candidates:
+        normalized_label = str(label or "").strip()
+        if not normalized_label:
+            continue
+        path_text = (
+            str(path_getter(normalized_label) or normalized_label)
+            if callable(path_getter)
+            else normalized_label
+        )
+        summarized.append(f"{normalized_label}@{float(score):.4f} [{path_text}]")
+    return summarized
+
+
+def _merge_category_rerank_probe_candidates(
+    *,
+    probe_candidates: dict[str, list[tuple[str, float]]],
+    probe_queries: dict[str, str],
+    current_canonical: str,
+    combined_limit: int,
+) -> list[tuple[str, float]]:
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    path_tokens_by_label = dict(taxonomy_stats.get("path_tokens_by_label", {}) or {})
+    query_tokens = _category_overlap_tokens(" ".join(probe_queries.values()))
+    head_tokens = _extract_head_concept_tokens(" ".join(probe_queries.values()), max_terms=2)
+    primary_head = head_tokens[0] if head_tokens else ""
+    merged: dict[str, dict[str, object]] = {}
+
+    for probe_name, candidates in probe_candidates.items():
+        for rank, (label, score_raw) in enumerate(candidates):
+            canonical_label = str(label or "").strip()
+            if not canonical_label:
+                continue
+            try:
+                numeric_score = float(score_raw or 0.0)
+            except (TypeError, ValueError):
+                numeric_score = 0.0
+            entry = merged.setdefault(
+                canonical_label,
+                {
+                    "best_score": numeric_score,
+                    "support": set(),
+                    "best_rank": rank,
+                    "rank_sum": 0.0,
+                },
+            )
+            entry["best_score"] = max(float(entry["best_score"]), numeric_score)
+            support = entry["support"]
+            if isinstance(support, set):
+                support.add(probe_name)
+            entry["best_rank"] = min(int(entry["best_rank"]), rank)
+            entry["rank_sum"] = float(entry["rank_sum"]) + float(rank)
+
+    ranked: list[tuple[str, float]] = []
+    path_getter = getattr(category_mapper, "get_category_path_text", None)
+    for label, details in merged.items():
+        support = details["support"] if isinstance(details["support"], set) else set()
+        support_count = len(support)
+        best_score = float(details["best_score"])
+        best_rank = int(details["best_rank"])
+        path_text = ""
+        if callable(path_getter):
+            path_text = str(path_getter(label) or "")
+        candidate_tokens = set(path_tokens_by_label.get(label, set()))
+        if not candidate_tokens:
+            candidate_tokens = _category_overlap_tokens(path_text or label)
+        weighted_overlap = _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights)
+        combined_score = (
+            best_score
+            + (0.025 * max(0, support_count - 1))
+            + min(0.012 * float(weighted_overlap), 0.06)
+            - min(0.004 * float(best_rank), 0.02)
+        )
+        if "head" in support:
+            combined_score += 0.035
+        if primary_head and primary_head not in candidate_tokens:
+            combined_score -= 0.045
+        if label == current_canonical:
+            combined_score += 0.01
+        ranked.append((label, combined_score))
+
+    ranked.sort(key=lambda item: (-float(item[1]), item[0]))
+    return ranked[: max(1, combined_limit)]
+
+
+def _expand_category_rerank_branch_candidates(
+    *,
+    ranked_candidates: list[tuple[str, float]],
+    current_canonical: str,
+    probe_queries: dict[str, str],
+    combined_limit: int,
+) -> list[tuple[str, float]]:
+    categories = list(getattr(category_mapper, "categories", []) or [])
+    get_path_text = getattr(category_mapper, "get_category_path_text", None)
+    cat_to_id = dict(getattr(category_mapper, "cat_to_id", {}) or {})
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    children_by_parent = dict(taxonomy_stats.get("children_by_parent", {}) or {})
+    ancestor_ids_by_label = dict(taxonomy_stats.get("ancestor_ids_by_label", {}) or {})
+    id_to_label = dict(taxonomy_stats.get("id_to_label", {}) or {})
+    path_tokens_by_label = dict(taxonomy_stats.get("path_tokens_by_label", {}) or {})
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    if not categories or not callable(get_path_text) or not cat_to_id:
+        return ranked_candidates[: max(1, combined_limit)]
+
+    query_tokens = _category_overlap_tokens(" ".join(probe_queries.values()))
+    if not query_tokens:
+        return ranked_candidates[: max(1, combined_limit)]
+    expanded_scores: dict[str, float] = {
+        str(label or "").strip(): float(score)
+        for label, score in ranked_candidates
+        if str(label or "").strip()
+    }
+
+    branch_support: dict[str, float] = {}
+    for label, score in ranked_candidates:
+        normalized_label = str(label or "").strip()
+        if not normalized_label:
+            continue
+        category_id = str(cat_to_id.get(normalized_label, "") or "").strip()
+        if category_id and category_id in children_by_parent:
+            branch_support[category_id] = max(branch_support.get(category_id, float("-inf")), float(score))
+        for depth, ancestor_id in enumerate(ancestor_ids_by_label.get(normalized_label, ())):
+            if not ancestor_id or ancestor_id not in children_by_parent:
+                continue
+            inherited_score = float(score) * (0.8 ** depth)
+            branch_support[ancestor_id] = max(branch_support.get(ancestor_id, float("-inf")), inherited_score)
+
+    supported_branches = [
+        branch_id
+        for branch_id, _score in sorted(
+            branch_support.items(),
+            key=lambda item: (-float(item[1]), item[0]),
+        )
+        if branch_id in children_by_parent
+    ][:3]
+
+    def _candidate_bonus(candidate_label: str, *, relation: str, seed_score: float) -> float:
+        candidate_tokens = set(path_tokens_by_label.get(candidate_label, set()))
+        if not candidate_tokens:
+            candidate_tokens = _category_overlap_tokens(str(get_path_text(candidate_label) or candidate_label))
+        overlap = _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights)
+        relation_penalty = {
+            "child": 0.02,
+            "sibling": 0.03,
+            "parent": 0.04,
+            "branch": 0.035,
+        }.get(relation, 0.04)
+        return seed_score - relation_penalty + min(0.012 * float(overlap), 0.06)
+
+    seed_labels: list[str] = []
+    for label, _score in ranked_candidates[:4]:
+        normalized = str(label or "").strip()
+        if normalized and normalized not in seed_labels:
+            seed_labels.append(normalized)
+    if current_canonical and current_canonical not in seed_labels:
+        seed_labels.append(current_canonical)
+
+    for seed_label in seed_labels:
+        seed_score = expanded_scores.get(seed_label)
+        if seed_score is None:
+            continue
+        seed_id = str(cat_to_id.get(seed_label, "") or "").strip()
+        parent_ids = ancestor_ids_by_label.get(seed_label, ())
+        parent_id = parent_ids[0] if parent_ids else ""
+
+        if parent_id:
+            parent_label = id_to_label.get(parent_id, "")
+            if parent_label:
+                expanded_scores[parent_label] = max(
+                    expanded_scores.get(parent_label, float("-inf")),
+                    _candidate_bonus(parent_label, relation="parent", seed_score=seed_score),
+                )
+
+            sibling_candidates = []
+            for sibling in children_by_parent.get(parent_id, []):
+                if sibling == seed_label or sibling in expanded_scores:
+                    continue
+                candidate_tokens = _category_overlap_tokens(sibling)
+                if not candidate_tokens:
+                    continue
+                if _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights) <= 0.0:
+                    continue
+                sibling_candidates.append(
+                    (
+                        sibling,
+                        _candidate_bonus(sibling, relation="sibling", seed_score=seed_score),
+                    )
+                )
+            sibling_candidates.sort(key=lambda item: (-float(item[1]), item[0]))
+            for sibling, sibling_score in sibling_candidates[:2]:
+                expanded_scores[sibling] = max(expanded_scores.get(sibling, float("-inf")), sibling_score)
+
+        if seed_id:
+            child_candidates = []
+            for child in children_by_parent.get(seed_id, []):
+                if child in expanded_scores:
+                    continue
+                candidate_tokens = _category_overlap_tokens(child)
+                if not candidate_tokens:
+                    continue
+                if _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights) <= 0.0:
+                    continue
+                child_candidates.append(
+                    (
+                        child,
+                        _candidate_bonus(child, relation="child", seed_score=seed_score),
+                    )
+                )
+            child_candidates.sort(key=lambda item: (-float(item[1]), item[0]))
+            for child, child_score in child_candidates[:3]:
+                expanded_scores[child] = max(expanded_scores.get(child, float("-inf")), child_score)
+
+    for branch_id in supported_branches:
+        branch_score = float(branch_support.get(branch_id, 0.0))
+        branch_candidates = []
+        for child_label in children_by_parent.get(branch_id, []):
+            if child_label in expanded_scores:
+                continue
+            candidate_tokens = _category_overlap_tokens(child_label)
+            if not candidate_tokens:
+                continue
+            weighted_overlap = _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights)
+            if weighted_overlap <= 0.0:
+                continue
+            branch_candidates.append(
+                (
+                    child_label,
+                    _candidate_bonus(child_label, relation="branch", seed_score=branch_score),
+                )
+            )
+        branch_candidates.sort(key=lambda item: (-float(item[1]), item[0]))
+        for child_label, child_score in branch_candidates[:4]:
+            expanded_scores[child_label] = max(expanded_scores.get(child_label, float("-inf")), child_score)
+
+    final_ranked = sorted(
+        expanded_scores.items(),
+        key=lambda item: (-float(item[1]), item[0]),
+    )
+    return final_ranked[: max(1, combined_limit)]
+
+
 def _build_category_rerank_candidates(
     *,
     raw_category: str,
@@ -804,52 +1329,54 @@ def _build_category_rerank_candidates(
     predicted_brand: str,
     ocr_text: str,
     reasoning: str = "",
-    primary_limit: int = 5,
-    evidence_limit: int = 3,
-    combined_limit: int = 8,
+    visual_matches: list[tuple[str, float]] | None = None,
+    primary_limit: int = 8,
+    evidence_limit: int = 6,
+    combined_limit: int = 12,
 ) -> tuple[list[tuple[str, float]], list[tuple[str, float]], list[tuple[str, float]]]:
     if not hasattr(category_mapper, "get_mapper_neighbor_categories"):
         return [], [], []
 
-    def _merge_ranked_candidates(
-        *candidate_lists: list[tuple[str, float]],
-        limit: int,
-    ) -> list[tuple[str, float]]:
-        merged: list[tuple[str, float]] = []
-        seen: set[str] = set()
-        for candidates in candidate_lists:
-            for label, score in candidates:
-                canonical_label = str(label or "").strip()
-                if not canonical_label:
-                    continue
-                key = canonical_label.casefold()
-                if key in seen:
-                    continue
-                seen.add(key)
-                try:
-                    numeric_score = float(score)
-                except (TypeError, ValueError):
-                    numeric_score = 0.0
-                merged.append((canonical_label, numeric_score))
-                if len(merged) >= limit:
-                    return merged
-        return merged
-
-    try:
-        primary_candidates = list(
-            category_mapper.get_mapper_neighbor_categories(
-                raw_category=raw_category,
-                predicted_brand=predicted_brand,
-                ocr_summary=ocr_text,
-                reasoning_summary=reasoning,
-                top_k=primary_limit,
-            )
-        )
-    except Exception as exc:
-        logger.warning("category_rerank_candidates_failed: %s", exc)
-        return [], [], []
-
     canonical = str(current_match.get("canonical_category", "") or "").strip()
+    probe_specs, evidence_query, probe_debug_queries = _build_category_rerank_probe_specs(
+        raw_category=raw_category,
+        predicted_brand=predicted_brand,
+        ocr_text=ocr_text,
+        reasoning=reasoning,
+        primary_limit=primary_limit,
+        evidence_limit=evidence_limit,
+    )
+
+    probe_candidates: dict[str, list[tuple[str, float]]] = {}
+    primary_candidates: list[tuple[str, float]] = []
+    evidence_neighbors: list[tuple[str, float]] = []
+
+    for probe_name, query_text, limit, probe_kwargs in probe_specs:
+        try:
+            candidates = list(
+                category_mapper.get_mapper_neighbor_categories(
+                    raw_category=query_text,
+                    predicted_brand=str(probe_kwargs.get("predicted_brand", "") or ""),
+                    ocr_summary=str(probe_kwargs.get("ocr_summary", "") or ""),
+                    reasoning_summary=str(probe_kwargs.get("reasoning_summary", "") or ""),
+                    top_k=limit,
+                )
+            )
+        except Exception as exc:
+            logger.warning("category_rerank_%s_neighbors_failed: %s", probe_name, exc)
+            candidates = []
+        probe_candidates[probe_name] = candidates
+        logger.info(
+            "category_rerank_probe probe=%s query=%r answers=%r",
+            probe_name,
+            query_text,
+            _summarize_category_rerank_answers_for_log(candidates),
+        )
+        if probe_name == "guided":
+            primary_candidates = candidates
+        elif probe_name == "evidence":
+            evidence_neighbors = candidates
+
     if canonical and canonical not in {label for label, _score in primary_candidates}:
         score_raw = current_match.get("category_match_score", 0.0)
         try:
@@ -857,30 +1384,47 @@ def _build_category_rerank_candidates(
         except (TypeError, ValueError):
             score = 0.0
         primary_candidates.append((canonical, score))
+        probe_candidates.setdefault("guided", []).append((canonical, score))
 
-    evidence_neighbors: list[tuple[str, float]] = []
-    evidence_query = _build_category_rerank_evidence_query(
-        brand=predicted_brand,
-        ocr_text=ocr_text,
-        reasoning=reasoning,
-        family_context=raw_category,
-    )
-    if evidence_query:
-        try:
-            evidence_neighbors = list(
-                category_mapper.get_mapper_neighbor_categories(
-                    raw_category=evidence_query,
-                    predicted_brand="",
-                    ocr_summary="",
-                    top_k=evidence_limit,
-                )
+    if visual_matches:
+        visual_candidates: list[tuple[str, float]] = []
+        for label, score_raw in visual_matches[:4]:
+            normalized_label = str(label or "").strip()
+            if not normalized_label:
+                continue
+            try:
+                visual_score = float(score_raw or 0.0)
+            except (TypeError, ValueError):
+                visual_score = 0.0
+            visual_candidates.append((normalized_label, visual_score))
+        if visual_candidates:
+            probe_candidates["visual"] = visual_candidates
+            logger.info(
+                "category_rerank_probe probe=visual query=%r answers=%r",
+                "visual_matches",
+                _summarize_category_rerank_answers_for_log(visual_candidates),
             )
-        except Exception as exc:
-            logger.warning("category_rerank_evidence_neighbors_failed: %s", exc)
-            evidence_neighbors = []
 
+    merged_candidates = _merge_category_rerank_probe_candidates(
+        probe_candidates=probe_candidates,
+        probe_queries={probe_name: query_text for probe_name, query_text, _limit, _kwargs in probe_specs},
+        current_canonical=canonical,
+        combined_limit=combined_limit,
+    )
+    expanded_candidates = _expand_category_rerank_branch_candidates(
+        ranked_candidates=merged_candidates,
+        current_canonical=canonical,
+        probe_queries={probe_name: query_text for probe_name, query_text, _limit, _kwargs in probe_specs},
+        combined_limit=combined_limit,
+    )
+    logger.info(
+        "category_rerank_candidates raw=%r probe_queries=%r merged=%r",
+        raw_category,
+        {probe_name: query for probe_name, query in probe_debug_queries},
+        _summarize_category_rerank_answers_for_log(expanded_candidates),
+    )
     return (
-        _merge_ranked_candidates(primary_candidates, evidence_neighbors, limit=combined_limit),
+        expanded_candidates,
         evidence_neighbors,
         primary_candidates,
     )
@@ -950,15 +1494,17 @@ def _should_run_category_rerank(
         predicted_brand=brand,
         ocr_text=ocr_text,
         reasoning=reasoning,
+        visual_matches=_top_visual_matches(sorted_vision, limit=4),
     )
     candidate_categories = [label for label, _score in mapper_candidates]
     if len(candidate_categories) < 2:
         return False, "insufficient_candidates", candidate_categories, []
 
+    uncertainty_candidates = primary_candidates or mapper_candidates
     uncertainty_reasons: list[str] = []
-    top1_score = float(mapper_candidates[0][1])
-    top2_score = float(mapper_candidates[1][1]) if len(mapper_candidates) > 1 else 0.0
-    top3_score = float(mapper_candidates[2][1]) if len(mapper_candidates) > 2 else top2_score
+    top1_score = float(uncertainty_candidates[0][1])
+    top2_score = float(uncertainty_candidates[1][1]) if len(uncertainty_candidates) > 1 else 0.0
+    top3_score = float(uncertainty_candidates[2][1]) if len(uncertainty_candidates) > 2 else top2_score
     if top1_score < _resolve_category_rerank_top1_score_threshold():
         uncertainty_reasons.append(f"top1_score={top1_score:.4f}")
     if (top1_score - top2_score) < _resolve_category_rerank_top2_gap_threshold():
@@ -986,11 +1532,18 @@ def _should_run_category_rerank(
         exact_taxonomy_match=exact_taxonomy_match,
         primary_candidates=primary_candidates,
     )
+    head_mismatch_reason = _head_concept_mismatch_reason(
+        current_canonical=canonical,
+        raw_category=raw_category,
+        exact_taxonomy_match=exact_taxonomy_match,
+        primary_candidates=primary_candidates,
+    )
     if (
         not uncertainty_reasons
         and not family_preference_reason
         and not family_primary_reason
         and not freeform_mismatch_reason
+        and not head_mismatch_reason
     ):
         return False, "mapping_confident", candidate_categories, []
 
@@ -1026,6 +1579,8 @@ def _should_run_category_rerank(
             return True, family_primary_reason, candidate_categories, visual_matches
         if freeform_mismatch_reason:
             return True, freeform_mismatch_reason, candidate_categories, visual_matches
+        if head_mismatch_reason:
+            return True, head_mismatch_reason, candidate_categories, visual_matches
         return False, ";".join(uncertainty_reasons), candidate_categories, visual_matches
 
     reason_parts = [*uncertainty_reasons]
@@ -1035,6 +1590,8 @@ def _should_run_category_rerank(
         reason_parts.append(family_primary_reason)
     if freeform_mismatch_reason:
         reason_parts.append(freeform_mismatch_reason)
+    if head_mismatch_reason:
+        reason_parts.append(head_mismatch_reason)
     return (
         True,
         ";".join([*reason_parts, *contradiction_reasons]),
@@ -2908,6 +3465,11 @@ def process_single_video(
                     ocr_text=ocr_text,
                     reasoning=str(res.get("reasoning", "") or ""),
                     candidate_categories=category_rerank_candidates,
+                    candidate_category_contexts=category_mapper.get_category_context_map(
+                        category_rerank_candidates
+                    )
+                    if hasattr(category_mapper, "get_category_context_map")
+                    else None,
                     visual_matches=category_rerank_visual_matches,
                     context_size=ctx,
                     product_focus_guidance_enabled=product_focus_guidance_enabled,
@@ -3032,6 +3594,11 @@ def process_single_video(
                 current_category=str(res.get("category", "") or category_match.get("canonical_category", "") or ""),
                 ocr_text=ocr_text,
                 candidate_categories=specificity_candidates,
+                candidate_category_contexts=category_mapper.get_category_context_map(
+                    specificity_candidates
+                )
+                if hasattr(category_mapper, "get_category_context_map")
+                else None,
                 visual_matches=visual_matches,
                 context_size=ctx,
             )
@@ -3112,10 +3679,14 @@ def process_single_video(
                 )
         cat_out = category_match["canonical_category"]
         cat_id_out = category_match["category_id"]
+        industry_id_out = str(category_match.get("industry_id") or "")
+        industry_name_out = str(category_match.get("industry_name") or cat_out or "")
         signal_artifacts = {
             "mapper_plot": None,
             "mapper_top_matches": list(category_match.get("top_matches") or []),
             "mapper_query_fragments": list(category_match.get("mapping_query_fragments") or []),
+            "mapper_parent_category": str(category_match.get("parent_category") or ""),
+            "mapper_category_path_text": str(category_match.get("category_path_text") or ""),
             "visual_plot": None,
             "processing_trace": None,
             "llm_evidence_gallery": [],
@@ -3167,6 +3738,13 @@ def process_single_video(
             res.get("reasoning", ""),
             category_match["category_match_method"],
             category_match["category_match_score"],
+            res.get("brand", "Unknown"),
+            res.get("confidence", 0.0),
+            res.get("reasoning", ""),
+            industry_id_out,
+            industry_name_out,
+            cat_id_out,
+            cat_out,
         ]
         
         return sorted_vision, per_frame_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row, signal_artifacts
@@ -3180,7 +3758,7 @@ def process_single_video(
             "accepted_attempt_type": "",
             "trigger_reason": "pipeline_exception",
         }
-        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace, "llm_evidence_gallery": []}
+        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None, "Err", 0, str(e), "", "", "", ""], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace, "llm_evidence_gallery": []}
 
 def run_pipeline_job(
     src,

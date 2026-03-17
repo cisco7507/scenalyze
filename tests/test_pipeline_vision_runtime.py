@@ -2950,8 +2950,9 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
             top_k=5,
         ):
             if raw_category == "Hair Care":
-                assert predicted_brand == "Pantene"
-                assert reasoning_summary == "Pantene Miracle Rescue shampoos and conditioners."
+                if predicted_brand:
+                    assert predicted_brand == "Pantene"
+                    assert reasoning_summary == "Pantene Miracle Rescue shampoos and conditioners."
                 return [
                     ("Haircare products", 0.5612),
                     ("Haircare products - All else", 0.5499),
@@ -2960,7 +2961,10 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
                     ("Hair removal product", 0.4816),
                 ][:top_k]
 
-            assert raw_category == "Pantene Miracle Rescue shampoo conditioner"
+            assert raw_category in {
+                "Pantene Miracle Rescue shampoo conditioner",
+                "Pantene hair garbled should dominate compact query",
+            }
             return [
                 ("Shampoo/Conditioner", 0.6707),
                 ("Haircare products", 0.6112),
@@ -2981,13 +2985,7 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
     )
 
     labels = [label for label, _score in candidates]
-    assert labels[:5] == [
-        "Haircare products",
-        "Haircare products - All else",
-        "Hair loss product",
-        "Hair Care Services",
-        "Hair removal product",
-    ]
+    assert labels[0] == "Shampoo/Conditioner"
     assert primary_candidates[0][0] == "Haircare products"
     assert "Shampoo/Conditioner" in labels
     assert evidence_neighbors[0][0] == "Shampoo/Conditioner"
@@ -3050,3 +3048,189 @@ def test_category_rerank_triggers_for_specific_freeform_mismatch(monkeypatch):
         "Home Products",
         "Men's perfume",
     ]
+
+
+def test_category_rerank_candidates_expand_supported_family_branch(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Healthcare Services",
+            "Mental Healthcare",
+            "Rehabilitation Therapy Practices",
+            "Home Healthcare Services",
+            "Spa Services",
+            "Online Travel Services",
+        ]
+        cat_to_id = {
+            "Healthcare Services": "10",
+            "Mental Healthcare": "11",
+            "Rehabilitation Therapy Practices": "12",
+            "Home Healthcare Services": "13",
+            "Spa Services": "188",
+            "Online Travel Services": "200",
+        }
+        _parent_ids = {
+            "Mental Healthcare": "10",
+            "Rehabilitation Therapy Practices": "10",
+            "Home Healthcare Services": "10",
+        }
+        _path_text = {
+            "Healthcare Services": "Healthcare Services",
+            "Mental Healthcare": "Healthcare Services : Mental Healthcare",
+            "Rehabilitation Therapy Practices": "Healthcare Services : Rehabilitation Therapy Practices",
+            "Home Healthcare Services": "Healthcare Services : Home Healthcare Services",
+            "Spa Services": "Spa Services",
+            "Online Travel Services": "Online Travel Services",
+        }
+
+        @staticmethod
+        def get_category_parent_id(label):
+            return _DummyMapper._parent_ids.get(label, "")
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper._path_text.get(label, label)
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=5,
+        ):
+            query = str(raw_category or "")
+            if query == "Online Therapy Services" and not predicted_brand and not ocr_summary and not reasoning_summary:
+                return [
+                    ("Spa Services", 0.6699),
+                    ("Online Travel Services", 0.6574),
+                    ("Rehabilitation Therapy Practices", 0.6541),
+                    ("Home Healthcare Services", 0.6450),
+                ][:top_k]
+            if query == "Online Therapy Services" and predicted_brand == "betterhelp":
+                return [
+                    ("Spa Services", 0.6699),
+                    ("Rehabilitation Therapy Practices", 0.6541),
+                    ("Home Healthcare Services", 0.6450),
+                    ("Online Travel Services", 0.6420),
+                ][:top_k]
+            if "betterhelp" in query.lower() or "therapy" in query.lower() or "platform" in query.lower():
+                return [
+                    ("Rehabilitation Therapy Practices", 0.6610),
+                    ("Mental Healthcare", 0.6522),
+                    ("Home Healthcare Services", 0.6335),
+                ][:top_k]
+            return []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    candidates, evidence_neighbors, primary_candidates = pipeline_module._build_category_rerank_candidates(
+        raw_category="Online Therapy Services",
+        current_match={
+            "canonical_category": "Spa Services",
+            "category_match_score": 0.6699,
+        },
+        predicted_brand="betterhelp",
+        ocr_text="Discover the power of help on the world's largest online therapy platform. betterhelp.com",
+        reasoning="The ad promotes BetterHelp as an online therapy platform and mental health service.",
+    )
+
+    labels = [label for label, _score in candidates]
+    assert primary_candidates[0][0] == "Spa Services"
+    assert evidence_neighbors[0][0] == "Rehabilitation Therapy Practices"
+    assert "Mental Healthcare" in labels
+    assert labels.index("Rehabilitation Therapy Practices") < labels.index("Spa Services")
+
+
+def test_category_rerank_branch_expansion_does_not_flood_unrelated_siblings(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Pharmaceutical Manufacture and Sale - over the counter",
+            "Birth Control Products",
+            "Painkiller",
+            "Nasal products",
+            "Anti-Snoring",
+            "Anti-Nausea",
+            "Jam/preserves/honey",
+        ]
+        cat_to_id = {
+            "Pharmaceutical Manufacture and Sale - over the counter": "373",
+            "Birth Control Products": "384",
+            "Painkiller": "5344",
+            "Nasal products": "5357",
+            "Anti-Snoring": "5300",
+            "Anti-Nausea": "5301",
+            "Jam/preserves/honey": "6000",
+        }
+        _parent_ids = {
+            "Painkiller": "373",
+            "Nasal products": "373",
+            "Anti-Snoring": "373",
+            "Anti-Nausea": "373",
+        }
+        _path_text = {
+            "Pharmaceutical Manufacture and Sale - over the counter": "Pharmaceutical Manufacture and Sale - over the counter",
+            "Birth Control Products": "Birth Control Products",
+            "Painkiller": "Pharmaceutical Manufacture and Sale - over the counter : Painkiller",
+            "Nasal products": "Pharmaceutical Manufacture and Sale - over the counter : Nasal products",
+            "Anti-Snoring": "Pharmaceutical Manufacture and Sale - over the counter : Anti-Snoring",
+            "Anti-Nausea": "Pharmaceutical Manufacture and Sale - over the counter : Anti-Nausea",
+            "Jam/preserves/honey": "Food - Packaged : Jam/preserves/honey",
+        }
+
+        @staticmethod
+        def get_category_parent_id(label):
+            return _DummyMapper._parent_ids.get(label, "")
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper._path_text.get(label, label)
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=8,
+        ):
+            query = str(raw_category or "")
+            if query == "Over-the-Counter Medication":
+                return [
+                    ("Birth Control Products", 0.7351),
+                    ("Pharmaceutical Manufacture and Sale - over the counter", 0.7239),
+                    ("Painkiller", 0.6670),
+                    ("Nasal products", 0.6610),
+                ][:top_k]
+            if "SORE THROAT" in query or "VapoCOOL" in query:
+                return [
+                    ("Painkiller", 0.5813),
+                    ("Nasal products", 0.5790),
+                    ("Birth Control Products", 0.5684),
+                ][:top_k]
+            if "counter" in query.lower():
+                return [
+                    ("Jam/preserves/honey", 0.6190),
+                    ("Pharmaceutical Manufacture and Sale - over the counter", 0.5475),
+                    ("Birth Control Products", 0.5534),
+                ][:top_k]
+            return []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    candidates, _evidence_neighbors, _primary_candidates = pipeline_module._build_category_rerank_candidates(
+        raw_category="Over-the-Counter Medication",
+        current_match={
+            "canonical_category": "Birth Control Products",
+            "category_match_score": 0.7351,
+        },
+        predicted_brand="Vicks",
+        ocr_text="Vicks VapoCOOL VAPORIZE MAX Honey Lemon Chill SORE THROAT PAIN",
+        reasoning="Over-the-counter Vicks medication for sore throat relief.",
+        visual_matches=[("Nasal products", 0.0846)],
+    )
+
+    labels = [label for label, _score in candidates]
+    assert "Nasal products" in labels
+    assert "Painkiller" in labels
+    assert "Anti-Snoring" not in labels
+    assert "Anti-Nausea" not in labels

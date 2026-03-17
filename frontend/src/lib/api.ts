@@ -53,6 +53,11 @@ export interface JobStatus {
   brand?:     string;
   category?:  string;
   category_id?: string;
+  category_name?: string;
+  parent_category_id?: string;
+  parent_category?: string;
+  industry_id?: string;
+  industry_name?: string;
 }
 
 export interface ArtifactFrame {
@@ -72,6 +77,8 @@ export interface ArtifactVisionMatch {
   score: number;
   category_id?: number | null;
   matched_alias?: string;
+  parent_name?: string;
+  path_text?: string;
 }
 
 export interface SignalVectorPlotPoint {
@@ -79,6 +86,8 @@ export interface SignalVectorPlotPoint {
   y: number;
   label: string;
   category_id?: string | number | null;
+  parent_name?: string;
+  path_text?: string;
   score?: number | null;
   kind?: 'query' | 'selected' | 'neighbor' | 'leader' | 'background';
 }
@@ -99,6 +108,8 @@ export interface SignalVectorPlot {
   query_fragments?: string[];
   selected_label?: string;
   selected_category_id?: string | null;
+  selected_parent_name?: string;
+  selected_path_text?: string;
   points: SignalVectorPlotPoint[];
   full_bounds?: SignalVectorBounds;
   focus_bounds?: SignalVectorBounds;
@@ -115,6 +126,8 @@ export interface ArtifactVisionBoard {
 export interface ArtifactCategoryMapper {
   category?: string;
   category_id?: string | null;
+  parent_category?: string | null;
+  category_path_text?: string | null;
   method?: string;
   score?: number | null;
   confidence?: number | null;
@@ -192,6 +205,10 @@ export interface JobExplanationFinal {
   brand?: string;
   category?: string;
   category_id?: string | null;
+  parent_category_id?: string | null;
+  parent_category?: string | null;
+  industry_id?: string | null;
+  industry_name?: string | null;
   confidence?: number | null;
   mapper_method?: string;
   mapper_score?: number | null;
@@ -228,11 +245,15 @@ export interface OllamaModel {
 }
 
 export interface ResultRow {
-  Brand:       string;
-  Category:    string;
-  'Category ID': string;
-  Confidence:  number;
-  Reasoning:   string;
+  brand?: string;
+  confidence?: number;
+  reasoning?: string;
+  parent_category_id?: string;
+  parent_category?: string;
+  industry_id?: string;
+  industry_name?: string;
+  category_id?: string;
+  category_name?: string;
   [key: string]: unknown;
 }
 
@@ -794,7 +815,15 @@ export async function getClusterAnalytics(): Promise<AnalyticsData> {
 export function exportResultsCSV(rows: ResultRow[], filename = 'results.csv'): void {
   if (!rows.length) return;
 
-  const cols: (keyof ResultRow)[] = ['Brand', 'Category', 'Category ID', 'Confidence', 'Reasoning'];
+  const cols: (keyof ResultRow)[] = [
+    'brand',
+    'industry_id',
+    'industry_name',
+    'category_id',
+    'category_name',
+    'confidence',
+    'reasoning',
+  ];
   const header = cols.map(c => `"${String(c)}"`).join(',');
   const body   = rows.map(row =>
     cols.map(c => `"${String(row[c] ?? '').replace(/"/g, '""')}"`).join(',')

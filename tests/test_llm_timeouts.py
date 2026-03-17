@@ -399,7 +399,7 @@ def test_query_category_rerank_includes_device_over_provider_guidance(monkeypatc
             captured["user_prompt"] = user_prompt
             return {
                 "brand": "TELUS",
-                "category": "Handset/Mobile",
+                "category_index": 3,
                 "confidence": 0.92,
                 "reasoning": "The ad is centered on the iPhone device, not the carrier service plan.",
             }
@@ -420,24 +420,37 @@ def test_query_category_rerank_includes_device_over_provider_guidance(monkeypatc
             "Telecommunication Services",
             "Handset/Mobile",
         ],
+        candidate_category_contexts={
+            "Wireless Telecommunications Services": "Telecommunications : Wireless Telecommunications Services",
+            "Telecommunication Services": "Telecommunications : Telecommunication Services",
+            "Handset/Mobile": "Telecommunications : Handset/Mobile",
+        },
     )
 
     assert status == "ok"
     assert result["category"] == "Handset/Mobile"
+    assert result["category_index"] == 3
     assert "advertiser or provider brand does not automatically determine category" in captured["system_prompt"]
     assert "Decision Guidance: If the ad centers on a named phone/device model" in captured["user_prompt"]
+    assert "Parent/Leaf Path: Telecommunications : Handset/Mobile" in captured["user_prompt"]
+    assert "category_index" in captured["system_prompt"]
 
 
 def test_query_category_rerank_can_disable_product_focus_guidance(monkeypatch):
-    captured: dict[str, str] = {}
+    calls: list[dict[str, str]] = []
 
     class _CaptureProvider:
         def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
-            captured["system_prompt"] = system_prompt
-            captured["user_prompt"] = user_prompt
+            calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
+            if len(calls) == 1:
+                return {
+                    "brand": "TELUS",
+                    "category": "Wireless Telecommunications Services",
+                    "confidence": 0.9,
+                    "reasoning": "ok",
+                }
             return {
-                "brand": "TELUS",
-                "category": "Wireless Telecommunications Services",
+                "category_index": 1,
                 "confidence": 0.9,
                 "reasoning": "ok",
             }
@@ -463,8 +476,86 @@ def test_query_category_rerank_can_disable_product_focus_guidance(monkeypatch):
 
     assert status == "ok"
     assert result["category"] == "Wireless Telecommunications Services"
-    assert "advertiser or provider brand does not automatically determine category" not in captured["system_prompt"]
-    assert "Decision Guidance: None" in captured["user_prompt"]
+    assert len(calls) == 2
+    assert "advertiser or provider brand does not automatically determine category" not in calls[0]["system_prompt"]
+    assert "Decision Guidance: None" in calls[0]["user_prompt"]
+    assert "category_index is required" in calls[1]["system_prompt"]
+    assert "Do not return category text" in calls[1]["system_prompt"]
+
+
+def test_query_category_rerank_rejects_when_retry_still_omits_category_index(monkeypatch):
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            return {
+                "brand": "betterhelp",
+                "category": "Not A Candidate",
+                "confidence": 0.99,
+                "reasoning": "No valid index returned.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_category_rerank(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="betterhelp",
+        raw_category="Online Therapy Services",
+        mapped_category="Spa Services",
+        ocr_text="betterhelp.com online therapy platform",
+        reasoning="prior",
+        candidate_categories=[
+            "Rehabilitation Therapy Practices",
+            "Online Travel Services",
+            "Internet Service Providers",
+        ],
+    )
+
+    assert result is None
+    assert status == "missing_category_index"
+
+
+def test_query_category_rerank_accepts_exact_candidate_text_on_retry(monkeypatch):
+    calls = {"count": 0}
+
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "brand": "betterhelp",
+                    "category": "",
+                    "confidence": 0.99,
+                    "reasoning": "Missing category index.",
+                }
+            return {
+                "brand": "betterhelp",
+                "category": "Rehabilitation Therapy Practices",
+                "confidence": 0.95,
+                "reasoning": "Best exact candidate from the provided list.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_category_rerank(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="betterhelp",
+        raw_category="Online Therapy Services",
+        mapped_category="Spa Services",
+        ocr_text="betterhelp.com online therapy platform",
+        reasoning="prior",
+        candidate_categories=[
+            "Rehabilitation Therapy Practices",
+            "Online Travel Services",
+            "Internet Service Providers",
+        ],
+    )
+
+    assert status == "ok"
+    assert result["category"] == "Rehabilitation Therapy Practices"
+    assert result["category_index"] == 1
 
 
 def test_query_pipeline_prompt_prefers_promoted_product_over_provider_industry(monkeypatch):

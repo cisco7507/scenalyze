@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import pytest
 import torch
@@ -25,37 +26,47 @@ from video_service.core.embedding_models import (
 pytestmark = pytest.mark.unit
 
 
-def test_load_category_mapping_uses_explicit_columns_and_normalizes_whitespace(tmp_path: Path):
-    csv_path = tmp_path / "categories.csv"
-    csv_path.write_text(
-        "ID,Freewheel Industry Category\n"
-        " 1 ,  Agriculture   Crop Production  \n"
-        "2,Agriculture Livestock Production\n",
+def test_load_category_mapping_reconstructs_json_hierarchy_paths(tmp_path: Path):
+    json_path = tmp_path / "freewheel.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "groups": [],
+                "items": [
+                    {"id": 10, "name": "Travel", "level": 0, "parent_id": 0},
+                    {"id": 11, "name": "Hotels", "level": 1, "parent_id": 10},
+                    {"id": 12, "name": "Airlines", "level": 1, "parent_id": 10},
+                ],
+            }
+        ),
         encoding="utf-8",
     )
 
-    mapping_state = load_category_mapping(str(csv_path))
+    mapping_state = load_category_mapping(str(json_path))
 
     assert mapping_state.enabled is True
-    assert mapping_state.count == 2
-    assert mapping_state.category_to_id["Agriculture Crop Production"] == "1"
-    assert mapping_state.category_to_id["Agriculture Livestock Production"] == "2"
+    assert mapping_state.count == 3
+    assert mapping_state.category_to_id["Hotels"] == "11"
+    assert mapping_state.category_to_parent["Hotels"] == "Travel"
+    assert mapping_state.category_to_path_text["Hotels"] == "Travel : Hotels"
+    assert mapping_state.category_to_level["Hotels"] == 1
+    assert mapping_state.records[1].path_names == ("Travel", "Hotels")
     assert mapping_state.last_error is None
 
 
-def test_load_category_mapping_disables_when_required_columns_missing(tmp_path: Path):
-    csv_path = tmp_path / "bad_categories.csv"
-    csv_path.write_text(
-        "WrongID,WrongCategory\n1,Anything\n",
+def test_load_category_mapping_disables_when_items_missing(tmp_path: Path):
+    json_path = tmp_path / "bad_freewheel.json"
+    json_path.write_text(
+        json.dumps({"groups": []}),
         encoding="utf-8",
     )
 
-    mapping_state = load_category_mapping(str(csv_path))
+    mapping_state = load_category_mapping(str(json_path))
 
     assert mapping_state.enabled is False
     assert mapping_state.count == 0
     assert mapping_state.last_error is not None
-    assert "missing required columns" in mapping_state.last_error
+    assert "items" in mapping_state.last_error
 
 
 def test_select_mapping_input_text_fallback_order_without_suggested_categories_bias():
@@ -270,33 +281,71 @@ def test_build_taxonomy_retrieval_alias_rows_adds_hidden_slash_aliases():
             "Travel/Hotels/Airlines",
             "Anti-perspirant/Deodorant/ Body Spray",
             "Alcoholic beverages - All else",
-        ]
+        ],
+        [
+            "Travel : Travel/Hotels/Airlines",
+            "Personal Care : Anti-perspirant/Deodorant/ Body Spray",
+            "Alcoholic beverages - All else",
+        ],
     )
 
     travel_rows = [row for row in rows if row["category_index"] == 0]
     assert [row["text"] for row in travel_rows] == [
+        "Travel : Travel/Hotels/Airlines",
         "Travel/Hotels/Airlines",
         "Travel",
         "Hotels",
         "Airlines",
     ]
-    assert [row["is_alias"] for row in travel_rows] == [False, True, True, True]
+    assert [row["is_alias"] for row in travel_rows] == [False, True, True, True, True]
+    assert [row["alias_kind"] for row in travel_rows] == [
+        "primary",
+        "canonical",
+        "fragment",
+        "fragment",
+        "fragment",
+    ]
 
     all_else_rows = [row for row in rows if row["category_index"] == 2]
     assert [row["text"] for row in all_else_rows] == ["Alcoholic beverages - All else"]
+    assert [row["alias_kind"] for row in all_else_rows] == ["primary"]
 
 
-def test_collapse_alias_scores_uses_best_hidden_alias_per_canonical_label():
+def test_collapse_alias_scores_penalizes_hidden_aliases_against_primary_paths():
     scores, aliases = _collapse_alias_scores(
         torch.tensor([0.51, 0.98, 0.63, 0.72], dtype=torch.float32),
         [0, 0, 1, 1],
         ["Travel/Hotels/Airlines", "Hotels", "Beer/Cider/Lager", "Beer"],
+        ["primary", "fragment", "canonical", "fragment"],
         ["Travel/Hotels/Airlines", "Beer/Cider/Lager"],
     )
 
-    assert pytest.approx(float(scores[0].item()), rel=1e-6) == 0.98
-    assert pytest.approx(float(scores[1].item()), rel=1e-6) == 0.72
+    assert pytest.approx(float(scores[0].item()), rel=1e-6) == 0.92
+    assert pytest.approx(float(scores[1].item()), rel=1e-6) == 0.66
     assert aliases == ["Hotels", "Beer"]
+
+
+def test_collapse_alias_scores_prefers_primary_path_when_fragment_alias_is_only_slightly_higher():
+    scores, aliases = _collapse_alias_scores(
+        torch.tensor([0.7239, 0.7616], dtype=torch.float32),
+        [0, 1],
+        [
+            "Pharmaceutical Manufacture and Sale - over the counter",
+            "Pharmacy",
+        ],
+        ["primary", "fragment"],
+        [
+            "Pharmaceutical Manufacture and Sale - over the counter",
+            "Pharmacy/Chemist",
+        ],
+    )
+
+    assert pytest.approx(float(scores[0].item()), rel=1e-6) == 0.7239
+    assert pytest.approx(float(scores[1].item()), rel=1e-6) == 0.7016
+    assert aliases == [
+        "Pharmaceutical Manufacture and Sale - over the counter",
+        "Pharmacy",
+    ]
 
 
 def test_prepare_query_text_for_embedding_keeps_short_label_style_queries_raw():
