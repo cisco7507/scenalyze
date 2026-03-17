@@ -3016,6 +3016,192 @@ def test_pipeline_accepts_entity_search_rescue_for_movie_title(monkeypatch):
     assert processing_trace["attempts"][-1]["status"] == "accepted"
 
 
+def test_pipeline_runs_entity_search_before_category_rerank_for_movie_titles(monkeypatch):
+    calls = {"entity_grounding": 0, "entity_rescue": 0, "category_rerank": 0}
+
+    class _DummyMapper:
+        categories = ["Cinema Genre - All else", "Comedy Cinema", "Drama", "Movie Theatres"]
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(
+                    category_id="5280",
+                    name="Cinema Genre",
+                    path_names=("Movies & TV Production and Distribution", "Cinema Genre"),
+                    parent_id="303",
+                ),
+                types.SimpleNamespace(
+                    category_id="5287",
+                    name="Cinema Genre - All else",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Cinema Genre - All else",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5282",
+                    name="Comedy Cinema",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Comedy Cinema",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5290",
+                    name="Drama",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Drama",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5300",
+                    name="Movie Theatres",
+                    path_names=("Movies & TV Production and Distribution", "Movie Theatres"),
+                    parent_id="303",
+                ),
+            )
+        )
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Drama", 0.7106), ("Cinema Genre - All else", 0.6914), ("Comedy Cinema", 0.67)]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Cinema Genre - All else": "Movies & TV Production and Distribution : Cinema Genre : Cinema Genre - All else",
+                "Comedy Cinema": "Movies & TV Production and Distribution : Cinema Genre : Comedy Cinema",
+                "Drama": "Movies & TV Production and Distribution : Cinema Genre : Drama",
+                "Movie Theatres": "Movies & TV Production and Distribution : Movie Theatres",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            mapping = {
+                "Movie": ("Drama", "5290", 0.7106),
+                "Comedy Cinema": ("Comedy Cinema", "5282", 0.99),
+                "Cinema Genre - All else": ("Cinema Genre - All else", "5287", 0.99),
+            }
+            canonical, category_id, score = mapping.get(raw, (raw or "Drama", "5290", 0.5))
+            return {
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "LES FURIES AU CINEMA DES VENDREDI LESFURIES-FILM.COM"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Les Furies",
+                "category": "Movie",
+                "confidence": 1.0,
+                "reasoning": "broad movie label",
+            }
+
+        @staticmethod
+        def query_entity_grounding(*args, **kwargs):
+            calls["entity_grounding"] += 1
+            return (
+                {
+                    "entity_name": "Les Furies",
+                    "entity_kind": "film_release",
+                    "genres": ["comedy"],
+                    "confidence": 0.95,
+                    "reasoning": "grounded as a theatrical film",
+                    "_search_results": [
+                        {
+                            "title": "Les Furies film",
+                            "href": "https://example.test/les-furies",
+                            "body": "Les Furies is a comedy film opening in cinemas.",
+                        }
+                    ],
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_entity_search_rescue(*args, **kwargs):
+            calls["entity_rescue"] += 1
+            return (
+                {
+                    "brand": "Les Furies",
+                    "entity_name": "Les Furies",
+                    "entity_kind": "film_release",
+                    "genres": ["comedy"],
+                    "category": "Comedy Cinema",
+                    "confidence": 0.98,
+                    "reasoning": "grounded title and web evidence support comedy cinema",
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            calls["category_rerank"] += 1
+            return (
+                {
+                    "brand": "Les Furies",
+                    "category_index": 1,
+                    "confidence": 0.98,
+                    "reasoning": "should not be called when entity search already refined the title-driven movie",
+                },
+                "ok",
+            )
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 14.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(pipeline_module, "extract_frames_for_pipeline", lambda _url, **kwargs: (frames, None))
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/les-furies.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-entity-search-before-rerank",
+    )
+
+    assert row[2] == "5282"
+    assert row[3] == "Comedy Cinema"
+    assert calls["entity_grounding"] == 1
+    assert calls["entity_rescue"] == 1
+    assert calls["category_rerank"] == 0
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "entity_search_rescue"
+    assert [attempt["attempt_type"] for attempt in processing_trace["attempts"]] == [
+        "initial",
+        "entity_search_rescue",
+    ]
+
+
 def test_pipeline_accepts_entity_search_rescue_for_stage_presentation(monkeypatch):
     grounding_calls = []
     entity_calls = []

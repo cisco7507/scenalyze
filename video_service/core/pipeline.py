@@ -3638,6 +3638,173 @@ def process_single_video(
                 attempts[-1]["elapsed_ms"] = round((time.perf_counter() - attempt_started_at) * 1000.0, 1)
             return True
 
+        def _run_entity_search_refinement(
+            current_res: dict[str, object],
+            current_match: dict[str, object],
+        ) -> tuple[dict[str, object], dict[str, object], bool]:
+            entity_search_needed, entity_search_reason = _should_run_entity_search_rescue(
+                enable_search=bool(enable_search),
+                express_mode=express_mode,
+                result_payload=current_res,
+                category_match=current_match,
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
+            if not entity_search_needed:
+                return current_res, current_match, False
+
+            if stage_callback:
+                stage_callback("llm", f"entity search rescue provider={p.lower()} model={m}")
+            logger.info("[%s] fallback_triggered type=entity_search_rescue reason=%s", url, entity_search_reason)
+            entity_visual_matches = _top_visual_matches(sorted_vision, limit=4)
+            entity_candidates: list[str] = []
+            entity_grounding_fn = getattr(llm_engine, "query_entity_grounding", None)
+            entity_rescue_fn = getattr(llm_engine, "query_entity_search_rescue", None)
+            if not callable(entity_grounding_fn) or not callable(entity_rescue_fn):
+                entity_res, entity_reason = None, "unsupported"
+            else:
+                grounding_res, grounding_reason = entity_grounding_fn(
+                    p,
+                    m,
+                    brand=str(current_res.get("brand", "") or ""),
+                    raw_category=str(current_res.get("category", "") or ""),
+                    ocr_text=ocr_text,
+                    visual_matches=entity_visual_matches,
+                    context_size=ctx,
+                )
+                if isinstance(grounding_res, dict):
+                    entity_branch, entity_candidates = _build_entity_search_candidates(
+                        grounding=grounding_res,
+                        current_match=current_match,
+                        sorted_vision=sorted_vision,
+                    )
+                    logger.info(
+                        "[%s] entity_branch_selected entity_name=%r entity_kind=%r branch=%r genres=%r candidates=%s",
+                        url,
+                        str(grounding_res.get("entity_name", "") or ""),
+                        str(grounding_res.get("entity_kind", "") or ""),
+                        entity_branch,
+                        list(grounding_res.get("genres") or []),
+                        entity_candidates,
+                    )
+                    if not entity_branch or not entity_candidates:
+                        entity_res, entity_reason = None, "unsupported_entity_kind"
+                    elif len(entity_candidates) == 1:
+                        entity_res = {
+                            "brand": str(current_res.get("brand", "") or ""),
+                            "entity_name": str(grounding_res.get("entity_name", "") or ""),
+                            "entity_kind": str(grounding_res.get("entity_kind", "") or ""),
+                            "genres": list(grounding_res.get("genres") or []),
+                            "category": entity_candidates[0],
+                            "confidence": grounding_res.get("confidence", 0.0),
+                            "reasoning": str(grounding_res.get("reasoning", "") or ""),
+                        }
+                        entity_reason = "ok"
+                    else:
+                        entity_res, entity_reason = entity_rescue_fn(
+                            p,
+                            m,
+                            brand=str(current_res.get("brand", "") or ""),
+                            raw_category=str(current_res.get("category", "") or ""),
+                            current_category=str(current_match.get("canonical_category", "") or ""),
+                            entity_name=str(grounding_res.get("entity_name", "") or ""),
+                            entity_kind=str(grounding_res.get("entity_kind", "") or ""),
+                            ocr_text=ocr_text,
+                            genres=list(grounding_res.get("genres") or []),
+                            branch_label=entity_branch,
+                            search_results=list(grounding_res.get("_search_results") or []),
+                            candidate_categories=entity_candidates,
+                            candidate_category_contexts=category_mapper.get_category_context_map(
+                                entity_candidates
+                            )
+                            if hasattr(category_mapper, "get_category_context_map")
+                            else None,
+                            visual_matches=entity_visual_matches,
+                            context_size=ctx,
+                        )
+                else:
+                    entity_res, entity_reason = None, grounding_reason
+
+            if isinstance(entity_res, dict):
+                entity_candidates = list(entity_candidates or [])
+                entity_match = category_mapper.map_category(
+                    raw_category=entity_res.get("category", "Unknown"),
+                    job_id=job_id,
+                    suggested_categories_text="",
+                    predicted_brand=entity_res.get("brand", "Unknown"),
+                    ocr_summary=ocr_text,
+                )
+                entity_ok, entity_accept_reason = _accept_entity_search_result(
+                    current_match=current_match,
+                    refined_match=entity_match,
+                    candidate_categories=entity_candidates,
+                )
+                if entity_ok:
+                    logger.info(
+                        "[%s] fallback_accepted type=entity_search_rescue reason=%s",
+                        url,
+                        entity_accept_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="entity_search_rescue",
+                        title="Entity Search Rescue",
+                        status="accepted",
+                        source_frames=frames,
+                        detail="web entity refinement",
+                        trigger_reason=entity_search_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=entity_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(current_res, current_match),
+                        evidence_note=f"Entity grounding + branch selection refined the category because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+                    )
+                    return entity_res, entity_match, True
+
+                logger.info(
+                    "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
+                    url,
+                    entity_accept_reason,
+                    entity_search_reason,
+                )
+                _append_trace_attempt(
+                    attempt_type="entity_search_rescue",
+                    title="Entity Search Rescue",
+                    status="rejected",
+                    source_frames=frames,
+                    detail="web entity refinement",
+                    trigger_reason=entity_search_reason,
+                    ocr_text_value=ocr_text,
+                    result_payload=entity_res,
+                    ocr_mode_used="" if express_mode else om,
+                    llm_mode="standard",
+                    comparison_payload=_category_match_snapshot(current_res, current_match),
+                    evidence_note=f"Entity grounding + branch selection was rejected because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+                )
+                return current_res, current_match, False
+
+            logger.info(
+                "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
+                url,
+                entity_reason,
+                entity_search_reason,
+            )
+            _append_trace_attempt(
+                attempt_type="entity_search_rescue",
+                title="Entity Search Rescue",
+                status="rejected",
+                source_frames=frames,
+                detail="web entity refinement",
+                trigger_reason=entity_search_reason,
+                ocr_text_value=ocr_text,
+                result_payload=None,
+                ocr_mode_used="" if express_mode else om,
+                llm_mode="standard",
+                comparison_payload=_category_match_snapshot(current_res, current_match),
+                evidence_note=f"Entity grounding + branch selection did not run: {entity_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+            )
+            return current_res, current_match, False
+
         def _extract_full_video_rescue_frames() -> list[dict[str, object]]:
             rescue_frames, rescue_cap = extract_frames_for_pipeline(
                 url,
@@ -3768,12 +3935,23 @@ def process_single_video(
             ocr_summary=ocr_text,
             reasoning_summary=str(res.get("reasoning", "") or ""),
         )
-        category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = _should_run_category_rerank(
-            result_payload=res,
-            category_match=category_match,
-            ocr_text=ocr_text,
-            sorted_vision=sorted_vision,
-        )
+
+        res, category_match, entity_rescue_accepted = _run_entity_search_refinement(res, category_match)
+
+        if not entity_rescue_accepted:
+            category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = _should_run_category_rerank(
+                result_payload=res,
+                category_match=category_match,
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
+        else:
+            category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = (
+                False,
+                "entity_search_rescue_accepted",
+                [],
+                [],
+            )
         if category_rerank_needed:
             if stage_callback:
                 stage_callback("llm", f"category rerank provider={p.lower()} model={m}")
@@ -3783,6 +3961,7 @@ def process_single_video(
                 category_rerank_reason,
                 category_rerank_candidates,
             )
+            category_rerank_comparison = _category_match_snapshot(res, category_match)
             rerank_fn = getattr(llm_engine, "query_category_rerank", None)
             if not callable(rerank_fn):
                 reranked_res, rerank_status = None, "unsupported"
@@ -3822,7 +4001,7 @@ def process_single_video(
                         predicted_brand=reranked_res.get("brand", "Unknown"),
                         ocr_summary=ocr_text,
                         reasoning_summary=str(reranked_res.get("reasoning", "") or ""),
-                    )
+                )
                 rerank_ok, rerank_accept_reason = _accept_category_rerank_result(
                     category_match,
                     reranked_match,
@@ -3847,7 +4026,7 @@ def process_single_video(
                         result_payload=reranked_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
-                        comparison_payload=_category_match_snapshot(res, category_match),
+                        comparison_payload=category_rerank_comparison,
                         evidence_note=(
                             f"Reranked within mapper candidates because {rerank_accept_reason}. "
                             f"Candidates: {', '.join(category_rerank_candidates)}."
@@ -3871,7 +4050,7 @@ def process_single_video(
                         result_payload=reranked_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
-                        comparison_payload=_category_match_snapshot(res, category_match),
+                        comparison_payload=category_rerank_comparison,
                         evidence_note=(
                             f"Rerank was rejected because {rerank_accept_reason}. "
                             f"Candidates: {', '.join(category_rerank_candidates)}."
@@ -3899,165 +4078,6 @@ def process_single_video(
                         f"Rerank did not run: {rerank_status}. "
                         f"Candidates: {', '.join(category_rerank_candidates)}."
                     ),
-                )
-        entity_rescue_accepted = False
-        entity_search_needed, entity_search_reason = _should_run_entity_search_rescue(
-            enable_search=bool(enable_search),
-            express_mode=express_mode,
-            result_payload=res,
-            category_match=category_match,
-            ocr_text=ocr_text,
-            sorted_vision=sorted_vision,
-        )
-        if entity_search_needed:
-            if stage_callback:
-                stage_callback("llm", f"entity search rescue provider={p.lower()} model={m}")
-            logger.info("[%s] fallback_triggered type=entity_search_rescue reason=%s", url, entity_search_reason)
-            entity_visual_matches = _top_visual_matches(sorted_vision, limit=4)
-            entity_candidates: list[str] = []
-            entity_grounding_fn = getattr(llm_engine, "query_entity_grounding", None)
-            entity_rescue_fn = getattr(llm_engine, "query_entity_search_rescue", None)
-            if not callable(entity_grounding_fn) or not callable(entity_rescue_fn):
-                entity_res, entity_reason = None, "unsupported"
-            else:
-                grounding_res, grounding_reason = entity_grounding_fn(
-                    p,
-                    m,
-                    brand=str(res.get("brand", "") or ""),
-                    raw_category=str(res.get("category", "") or ""),
-                    ocr_text=ocr_text,
-                    visual_matches=entity_visual_matches,
-                    context_size=ctx,
-                )
-                if isinstance(grounding_res, dict):
-                    entity_branch, entity_candidates = _build_entity_search_candidates(
-                        grounding=grounding_res,
-                        current_match=category_match,
-                        sorted_vision=sorted_vision,
-                    )
-                    logger.info(
-                        "[%s] entity_branch_selected entity_name=%r entity_kind=%r branch=%r genres=%r candidates=%s",
-                        url,
-                        str(grounding_res.get("entity_name", "") or ""),
-                        str(grounding_res.get("entity_kind", "") or ""),
-                        entity_branch,
-                        list(grounding_res.get("genres") or []),
-                        entity_candidates,
-                    )
-                    if not entity_branch or not entity_candidates:
-                        entity_res, entity_reason = None, "unsupported_entity_kind"
-                    elif len(entity_candidates) == 1:
-                        entity_res = {
-                            "brand": str(res.get("brand", "") or ""),
-                            "entity_name": str(grounding_res.get("entity_name", "") or ""),
-                            "entity_kind": str(grounding_res.get("entity_kind", "") or ""),
-                            "genres": list(grounding_res.get("genres") or []),
-                            "category": entity_candidates[0],
-                            "confidence": grounding_res.get("confidence", 0.0),
-                            "reasoning": str(grounding_res.get("reasoning", "") or ""),
-                        }
-                        entity_reason = "ok"
-                    else:
-                        entity_res, entity_reason = entity_rescue_fn(
-                            p,
-                            m,
-                            brand=str(res.get("brand", "") or ""),
-                            raw_category=str(res.get("category", "") or ""),
-                            current_category=str(category_match.get("canonical_category", "") or ""),
-                            entity_name=str(grounding_res.get("entity_name", "") or ""),
-                            entity_kind=str(grounding_res.get("entity_kind", "") or ""),
-                            ocr_text=ocr_text,
-                            genres=list(grounding_res.get("genres") or []),
-                            branch_label=entity_branch,
-                            search_results=list(grounding_res.get("_search_results") or []),
-                            candidate_categories=entity_candidates,
-                            candidate_category_contexts=category_mapper.get_category_context_map(
-                                entity_candidates
-                            )
-                            if hasattr(category_mapper, "get_category_context_map")
-                            else None,
-                            visual_matches=entity_visual_matches,
-                            context_size=ctx,
-                        )
-                else:
-                    entity_res, entity_reason = None, grounding_reason
-            if isinstance(entity_res, dict):
-                entity_candidates = list(entity_candidates or [])
-                entity_match = category_mapper.map_category(
-                    raw_category=entity_res.get("category", "Unknown"),
-                    job_id=job_id,
-                    suggested_categories_text="",
-                    predicted_brand=entity_res.get("brand", "Unknown"),
-                    ocr_summary=ocr_text,
-                )
-                entity_ok, entity_accept_reason = _accept_entity_search_result(
-                    current_match=category_match,
-                    refined_match=entity_match,
-                    candidate_categories=entity_candidates,
-                )
-                if entity_ok:
-                    res = entity_res
-                    category_match = entity_match
-                    entity_rescue_accepted = True
-                    logger.info(
-                        "[%s] fallback_accepted type=entity_search_rescue reason=%s",
-                        url,
-                        entity_accept_reason,
-                    )
-                    _append_trace_attempt(
-                        attempt_type="entity_search_rescue",
-                        title="Entity Search Rescue",
-                        status="accepted",
-                        source_frames=frames,
-                        detail="web entity refinement",
-                        trigger_reason=entity_search_reason,
-                        ocr_text_value=ocr_text,
-                        result_payload=entity_res,
-                        ocr_mode_used="" if express_mode else om,
-                        llm_mode="standard",
-                        comparison_payload=_category_match_snapshot(res, category_match),
-                        evidence_note=f"Entity grounding + branch selection refined the category because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
-                    )
-                else:
-                    logger.info(
-                        "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
-                        url,
-                        entity_accept_reason,
-                        entity_search_reason,
-                    )
-                    _append_trace_attempt(
-                        attempt_type="entity_search_rescue",
-                        title="Entity Search Rescue",
-                        status="rejected",
-                        source_frames=frames,
-                        detail="web entity refinement",
-                        trigger_reason=entity_search_reason,
-                        ocr_text_value=ocr_text,
-                        result_payload=entity_res,
-                        ocr_mode_used="" if express_mode else om,
-                        llm_mode="standard",
-                        comparison_payload=_category_match_snapshot(res, category_match),
-                        evidence_note=f"Entity grounding + branch selection was rejected because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
-                    )
-            else:
-                logger.info(
-                    "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
-                    url,
-                    entity_reason,
-                    entity_search_reason,
-                )
-                _append_trace_attempt(
-                    attempt_type="entity_search_rescue",
-                    title="Entity Search Rescue",
-                    status="rejected",
-                    source_frames=frames,
-                    detail="web entity refinement",
-                    trigger_reason=entity_search_reason,
-                    ocr_text_value=ocr_text,
-                    result_payload=None,
-                    ocr_mode_used="" if express_mode else om,
-                    llm_mode="standard",
-                    evidence_note=f"Entity grounding + branch selection did not run: {entity_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
                 )
 
         specificity_needed, specificity_reason = (
