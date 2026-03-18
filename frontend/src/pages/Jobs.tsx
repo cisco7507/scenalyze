@@ -1,13 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { deleteJobsBulk, getClusterJobs, getProviderModels, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
-import type { JobStatus, JobSettings } from '../lib/api';
-import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon, TrashIcon, InfoCircledIcon } from '@radix-ui/react-icons';
+import {
+  CheckCircledIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ClockIcon,
+  Cross2Icon,
+  InfoCircledIcon,
+  MagnifyingGlassIcon,
+  PlayIcon,
+  TrashIcon,
+  UpdateIcon,
+} from '@radix-ui/react-icons';
 import { formatDistanceToNow } from 'date-fns';
 import { HelpTooltip } from '../components/HelpTooltip';
+import { deleteJobsBulk, getClusterJobs, getProviderModels, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
+import type { JobSettings, JobStatus } from '../lib/api';
 
 type InputMode = 'urls' | 'filepath' | 'dirpath';
+type QueueFilter = 'all' | 'processing' | 'queued' | 'completed' | 'failed';
+
 const PROVIDER_OPTIONS = ['Ollama', 'LM Studio', 'Llama Server', 'Gemini CLI'] as const;
 const CATEGORY_EMBEDDING_MODEL_OPTIONS = [
   'BAAI/bge-large-en-v1.5',
@@ -17,13 +30,17 @@ const CATEGORY_EMBEDDING_MODEL_OPTIONS = [
   'sentence-transformers/all-MiniLM-L6-v2',
   'google/embeddinggemma-300m',
 ] as const;
-const panelClass =
-  'bell-panel';
+
 const controlClass =
   'h-10 w-full rounded-[1.15rem] border border-slate-300 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15';
 const monoControlClass = `${controlClass} font-mono`;
-const queueColumns = 'xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_220px]';
-const queueFrameColumns = 'grid-cols-[36px_minmax(0,1fr)]';
+const statusTabs: Array<{ value: QueueFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'processing', label: 'Running' },
+  { value: 'queued', label: 'Pending' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed', label: 'Failed' },
+];
 
 function formatStageLabel(stage?: string): string {
   const raw = (stage || '').trim();
@@ -39,22 +56,6 @@ function formatDurationLabel(durationSeconds?: number | null): string {
   return `${minutes}m ${seconds}s`;
 }
 
-function getStatusBadgeClass(status: string): string {
-  if (status === 'completed') return 'bg-primary-50 text-primary-700 border-primary-200';
-  if (status === 'failed') return 'bg-red-50 text-red-700 border-red-200';
-  if (status === 'processing') return 'bg-primary-100 text-primary-800 border-primary-200';
-  if (status === 're-queued') return 'bg-[rgba(247,244,237,0.95)] text-slate-700 border-[#e5d9c7]';
-  return 'bg-[rgba(247,244,237,0.95)] text-slate-700 border-[#e5d9c7]';
-}
-
-function getStatusText(status: string): string {
-  return status === 're-queued' ? 'waiting (recovered)' : status;
-}
-
-function isTerminalStatus(status: string): boolean {
-  return status === 'completed' || status === 'failed';
-}
-
 function formatRelativeTimestamp(value?: string): string {
   if (!value) return '—';
   const normalized = value.includes('T') ? value : value.replace(' ', 'T');
@@ -68,6 +69,112 @@ function sanitizeDecorativeLabel(value?: string | null): string {
   if (!text) return '—';
   const cleaned = text.replace(/^[^\p{L}\p{N}]+/u, '').trim();
   return cleaned || text;
+}
+
+function formatConfidenceLabel(confidence?: number | string | null): string {
+  const numeric = Number(confidence);
+  if (!Number.isFinite(numeric)) return '—';
+  const normalized = numeric > 1 ? numeric : numeric * 100;
+  return `${normalized.toFixed(normalized >= 99.5 ? 0 : 1)}%`;
+}
+
+function normalizeConfidenceValue(confidence?: number | string | null): number | null {
+  const numeric = Number(confidence);
+  if (!Number.isFinite(numeric)) return null;
+  const normalized = numeric > 1 ? numeric : numeric * 100;
+  return Math.max(0, Math.min(100, normalized));
+}
+
+function getStatusBadgeClass(status: string): string {
+  if (status === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'failed') return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (status === 'processing') return 'border-primary-200 bg-primary-50 text-primary-700';
+  return 'border-slate-200 bg-slate-50 text-slate-600';
+}
+
+function getStatusText(status: string): string {
+  if (status === 'processing') return 'Running';
+  if (status === 'completed') return 'Completed';
+  if (status === 'failed') return 'Failed';
+  if (status === 're-queued') return 'Pending';
+  return 'Pending';
+}
+
+function shortenMiddle(value: string, edge = 16): string {
+  if (value.length <= edge * 2 + 3) return value;
+  return `${value.slice(0, edge)}...${value.slice(-edge)}`;
+}
+
+function getSourceMeta(rawSource?: string | null): { primary: string; secondary: string; tertiary: string; title: string } {
+  const raw = (rawSource || '').trim();
+  if (!raw) {
+    return {
+      primary: 'No source provided',
+      secondary: 'Unknown input',
+      tertiary: '—',
+      title: 'No source provided',
+    };
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      const hostname = parsed.hostname.replace(/^www\./i, '') || raw;
+      const pathBits = parsed.pathname.split('/').filter(Boolean);
+      const pathLabel = pathBits.length > 0 ? pathBits[pathBits.length - 1] : 'Remote URL';
+      return {
+        primary: hostname,
+        secondary: pathLabel,
+        tertiary: shortenMiddle(raw, 28),
+        title: raw,
+      };
+    } catch {
+      return {
+        primary: raw,
+        secondary: 'Remote URL',
+        tertiary: shortenMiddle(raw, 28),
+        title: raw,
+      };
+    }
+  }
+
+  const normalized = raw.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  const lastPart = parts[parts.length - 1] || raw;
+  const looksLikeFile = /\.[A-Za-z0-9]{2,6}$/.test(lastPart);
+  return {
+    primary: lastPart,
+    secondary: looksLikeFile ? 'Local file' : 'Server path',
+    tertiary: shortenMiddle(raw, 28),
+    title: raw,
+  };
+}
+
+function QueueSummaryCard({
+  label,
+  value,
+  detail,
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  detail: string;
+  accent: 'slate' | 'blue' | 'green' | 'rose';
+}) {
+  const accentClass = {
+    slate: 'text-slate-950',
+    blue: 'text-primary-700',
+    green: 'text-emerald-600',
+    rose: 'text-rose-600',
+  } as const;
+
+  return (
+    <div className="rounded-[1.7rem] border border-slate-200/90 bg-white px-5 py-4 shadow-[0_16px_30px_rgba(0,55,120,0.06)]">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</div>
+      <div className={`mt-3 text-[2.1rem] font-bold ${accentClass[accent]}`}>{value}</div>
+      <div className="mt-2 text-xs text-slate-500">{detail}</div>
+    </div>
+  );
 }
 
 function FieldLabel({
@@ -89,14 +196,14 @@ export function Jobs() {
   const [jobs, setJobs] = useState<JobStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [showLaunchPanel, setShowLaunchPanel] = useState(false);
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
-  // Submit form state
   const [submitLoading, setSubmitLoading] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('urls');
   const [urls, setUrls] = useState('https://www.youtube.com/watch?v=M7FIvfx5J10');
   const [filePath, setFilePath] = useState('');
   const [folderPath, setFolderPath] = useState('');
-
   const [mode, setMode] = useState('pipeline');
   const [categories, setCategories] = useState('');
   const [provider, setProvider] = useState('Llama Server');
@@ -114,9 +221,8 @@ export function Jobs() {
   const [productFocusGuidanceEnabled, setProductFocusGuidanceEnabled] = useState(true);
   const [contextSize, setContextSize] = useState(8192);
 
-  // Filtering
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<QueueFilter>('all');
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -209,7 +315,7 @@ export function Jobs() {
       enableLlmFrame,
       productFocusGuidanceEnabled,
       contextSize,
-    ]
+    ],
   );
 
   const handleSubmit = async (e: FormEvent) => {
@@ -232,6 +338,7 @@ export function Jobs() {
         await submitFolderPath({ folder_path: folderPath, mode, settings: settingsPayload });
       }
       await fetchJobs();
+      setShowLaunchPanel(false);
     } catch (err) {
       console.error(err);
     } finally {
@@ -239,23 +346,40 @@ export function Jobs() {
     }
   };
 
-  const filteredJobs = jobs.filter((j) => {
+  const filteredJobs = jobs.filter((job) => {
     if (statusFilter !== 'all') {
       if (statusFilter === 'queued') {
-        if (j.status !== 'queued' && j.status !== 're-queued') return false;
-      } else if (j.status !== statusFilter) {
+        if (job.status !== 'queued' && job.status !== 're-queued') return false;
+      } else if (job.status !== statusFilter) {
         return false;
       }
     }
-    if (!search) return true;
-    const q = search.toLowerCase();
+
+    if (!search.trim()) return true;
+    const query = search.toLowerCase();
     return (
-      j.job_id.toLowerCase().includes(q) ||
-      (j.brand || '').toLowerCase().includes(q) ||
-      (j.category || '').toLowerCase().includes(q) ||
-      (j.url || '').toLowerCase().includes(q)
+      job.job_id.toLowerCase().includes(query) ||
+      (job.brand || '').toLowerCase().includes(query) ||
+      (job.category_name || job.category || '').toLowerCase().includes(query) ||
+      (job.parent_category || '').toLowerCase().includes(query) ||
+      (job.url || '').toLowerCase().includes(query)
     );
   });
+
+  useEffect(() => {
+    if (filteredJobs.length === 0) {
+      setExpandedJobId(null);
+      return;
+    }
+    setExpandedJobId((current) => {
+      if (current && filteredJobs.some((job) => job.job_id === current)) return current;
+      return (
+        filteredJobs.find((job) => job.status === 'processing')?.job_id ||
+        filteredJobs.find((job) => job.status === 'failed')?.job_id ||
+        filteredJobs[0].job_id
+      );
+    });
+  }, [filteredJobs]);
 
   const summary = useMemo(() => {
     const counts = {
@@ -277,6 +401,9 @@ export function Jobs() {
     return counts;
   }, [jobs, filteredJobs.length]);
 
+  const finishedCount = summary.completed + summary.failed;
+  const completionRate = finishedCount > 0 ? Math.round((summary.completed / finishedCount) * 100) : 0;
+
   const disableSubmit =
     submitLoading ||
     (inputMode === 'urls' && !urls.trim()) ||
@@ -286,31 +413,19 @@ export function Jobs() {
   const toggleSelectJob = (jobId: string) => {
     setSelectedJobs((prev) => {
       const next = new Set(prev);
-      if (next.has(jobId)) {
-        next.delete(jobId);
-      } else {
-        next.add(jobId);
-      }
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
       return next;
     });
   };
 
   const toggleSelectAll = () => {
+    if (filteredJobs.length === 0) return;
     if (selectedJobs.size === filteredJobs.length) {
       setSelectedJobs(new Set());
       return;
     }
     setSelectedJobs(new Set(filteredJobs.map((job) => job.job_id)));
-  };
-
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
-    setSelectedJobs(new Set());
-  };
-
-  const handleStatusFilterChange = (value: string) => {
-    setStatusFilter(value);
-    setSelectedJobs(new Set());
   };
 
   const isAllSelected = filteredJobs.length > 0 && selectedJobs.size === filteredJobs.length;
@@ -340,649 +455,641 @@ export function Jobs() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="bell-hero">
-        <div className="relative z-10 mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
+      <section className="bell-hero">
+        <div className="relative z-10 flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-3xl">
             <div className="bell-badge">
-              <PlayIcon className="h-3.5 w-3.5" />
-              Launch pipeline
+              <CheckCircledIcon className="h-3.5 w-3.5" />
+              Queue control surface
             </div>
-            <h2 className="mt-4 max-w-2xl text-[2.9rem] font-bold text-primary-700">Start a new analysis run.</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              Pick the evidence path, model runtime, and OCR profile. The defaults stay fast for normal work; the advanced controls help when you need to probe harder edge cases.
+            <h2 className="mt-4 max-w-3xl text-[3rem] font-bold text-primary-700">Review the queue first, then launch the next run.</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+              This page is tuned for fast queue scanning. Brand, category, status, and stage lead the row. Technical run metadata stays available, but it now lives behind a cleaner run-profile disclosure.
             </p>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowLaunchPanel((current) => !current)}
+                className="bell-button-primary h-12 gap-2 px-5 text-sm uppercase tracking-[0.2em]"
+              >
+                <PlayIcon className="h-4 w-4" />
+                {showLaunchPanel ? 'Hide analysis form' : 'New analysis run'}
+              </button>
+              <div className="bell-data-pill">
+                <UpdateIcon className="h-3.5 w-3.5 text-primary-500" />
+                Auto-syncing every 4s
+              </div>
+              <div className="bell-data-pill">
+                <ClockIcon className="h-3.5 w-3.5 text-primary-500" />
+                Refreshed {formatDistanceToNow(lastUpdated, { addSuffix: true })}
+              </div>
+            </div>
           </div>
-          <div className="grid min-w-[17rem] grid-cols-2 gap-3">
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:w-[24rem]">
             <div className="rounded-[1.7rem] border border-white/90 bg-white/88 px-4 py-4 shadow-[0_14px_28px_rgba(0,55,120,0.08)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Primary mode</div>
-              <div className="mt-2 text-lg font-bold text-slate-950">{mode === 'pipeline' ? 'Pipeline' : 'Agent'}</div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Running now</div>
+              <div className="mt-2 text-4xl font-bold text-slate-950">{summary.processing}</div>
+              <div className="mt-2 text-sm text-slate-500">Jobs currently moving through OCR, vision, or LLM stages.</div>
             </div>
             <div className="rounded-[1.7rem] border border-primary-700/30 bg-primary-700 px-4 py-4 text-white shadow-[0_18px_36px_rgba(0,55,120,0.22)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/65">Model host</div>
-              <div className="mt-2 text-lg font-bold text-white">{provider}</div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/65">Needs review</div>
+              <div className="mt-2 text-4xl font-bold text-white">{summary.failed}</div>
+              <div className="mt-2 text-sm text-white/72">
+                {summary.failed > 0 ? 'Completed runs with failed status need operator attention.' : 'No failed runs at the moment.'}
+              </div>
             </div>
           </div>
         </div>
+      </section>
 
-        <form onSubmit={handleSubmit} className="relative z-10 flex flex-col gap-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="inline-flex w-fit rounded-full border border-primary-100 bg-white/88 p-1.5 shadow-[0_12px_24px_rgba(0,55,120,0.08)]">
-              <button type="button" onClick={() => setInputMode('urls')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'urls' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>URLs</button>
-              <button type="button" onClick={() => setInputMode('filepath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'filepath' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>File Path</button>
-              <button type="button" onClick={() => setInputMode('dirpath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'dirpath' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>Directory Path</button>
-            </div>
-
-            <div className="flex items-center justify-between gap-3 lg:min-w-[18rem] lg:justify-end">
-              <div className="hidden lg:block text-right">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Ready to run</div>
-                <div className="mt-1 text-sm text-slate-500">
-                  {inputMode === 'urls' ? 'Submit the current URL batch.' : inputMode === 'filepath' ? 'Analyze one server-side file path.' : 'Scan one server-side directory.'}
+      {showLaunchPanel ? (
+        <section className="bell-panel overflow-hidden">
+          <div className="border-b border-slate-200/80 bg-primary-50/75 px-6 py-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="bell-badge">
+                  <PlayIcon className="h-3.5 w-3.5" />
+                  Launch pipeline
                 </div>
+                <h3 className="mt-3 text-xl font-bold text-slate-950">Start a new analysis run.</h3>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+                  Pick the evidence path, runtime, and OCR profile. The defaults stay fast for normal work; the advanced controls stay here when you need them.
+                </p>
               </div>
               <button
-                type="submit"
-                disabled={disableSubmit}
-                className="bell-button-primary h-12 min-w-[13rem] gap-2 px-5 text-sm uppercase tracking-[0.22em] disabled:opacity-50"
+                type="button"
+                onClick={() => setShowLaunchPanel(false)}
+                className="bell-button-secondary h-11 gap-2 px-4 text-xs uppercase tracking-[0.2em]"
               >
-                {submitLoading ? <UpdateIcon className="h-4 w-4 animate-spin" /> : <PlayIcon className="h-4 w-4" />}
-                {submitLoading ? 'Submitting…' : 'Execute'}
+                <Cross2Icon className="h-4 w-4" />
+                Close panel
               </button>
             </div>
           </div>
 
-          <div className="rounded-[1.9rem] border border-slate-200/90 bg-white/74 p-3 shadow-[inset_0_0_0_1px_rgba(212,221,230,0.55)]">
-            {inputMode === 'urls' && (
-              <textarea
-                value={urls}
-                onChange={(e) => setUrls(e.target.value)}
-                placeholder="Enter URLs (one per line)..."
-                className="h-36 w-full resize-none rounded-[1.5rem] border border-slate-200 bg-white/96 p-4 font-mono text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
-              />
-            )}
-            {inputMode === 'filepath' && (
-              <input
-                value={filePath}
-                onChange={(e) => setFilePath(e.target.value)}
-                placeholder={'C:\\videos\\ad.mp4 or \\\\server\\share\\ads\\spot.mp4'}
-                className={`${monoControlClass} h-12 rounded-[20px]`}
-              />
-            )}
-            {inputMode === 'dirpath' && (
-              <input
-                value={folderPath}
-                onChange={(e) => setFolderPath(e.target.value)}
-                placeholder={'C:\\videos\\ads or \\\\server\\share\\ads or /mnt/media/ads'}
-                className={`${monoControlClass} h-12 rounded-[20px]`}
-              />
-            )}
-          </div>
+          <form onSubmit={handleSubmit} className="space-y-5 px-6 py-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="inline-flex w-fit rounded-full border border-primary-100 bg-white p-1.5 shadow-[0_12px_24px_rgba(0,55,120,0.08)]">
+                <button type="button" onClick={() => setInputMode('urls')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'urls' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>URLs</button>
+                <button type="button" onClick={() => setInputMode('filepath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'filepath' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>File Path</button>
+                <button type="button" onClick={() => setInputMode('dirpath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'dirpath' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>Directory Path</button>
+              </div>
 
-          {inputMode !== 'urls' && (
-            <div className="flex items-start gap-3 rounded-[1.45rem] border border-primary-100 bg-primary-50/80 px-4 py-3 text-sm text-slate-600">
-              <InfoCircledIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary-500" />
-              <div className="space-y-1">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary-700">Server path note</div>
-                <div>
-                  File and directory paths are resolved on the backend server, not in your browser. UNC paths only work if the server can reach that share and has permission to read it.
+              <div className="flex items-center justify-between gap-3 lg:min-w-[18rem] lg:justify-end">
+                <div className="hidden lg:block text-right">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Ready to run</div>
+                  <div className="mt-1 text-sm text-slate-500">
+                    {inputMode === 'urls'
+                      ? 'Submit the current URL batch.'
+                      : inputMode === 'filepath'
+                        ? 'Analyze one server-side file path.'
+                        : 'Scan one server-side directory.'}
+                  </div>
                 </div>
+                <button
+                  type="submit"
+                  disabled={disableSubmit}
+                  className="bell-button-primary h-12 min-w-[13rem] gap-2 px-5 text-sm uppercase tracking-[0.22em] disabled:opacity-50"
+                >
+                  {submitLoading ? <UpdateIcon className="h-4 w-4 animate-spin" /> : <PlayIcon className="h-4 w-4" />}
+                  {submitLoading ? 'Submitting…' : 'Execute'}
+                </button>
               </div>
             </div>
-          )}
 
-          <div className="grid grid-cols-2 gap-3 rounded-[2rem] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.88)_0%,rgba(244,247,250,0.96)_100%)] p-5 md:grid-cols-4">
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Mode"
-                help="Standard Pipeline uses the deterministic OCR + vision + LLM flow. ReACT Agent lets the model reason in steps and call tools during analysis."
-              />
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className={controlClass}>
-                <option value="pipeline">Standard Pipeline</option>
-                <option value="agent">ReACT Agent</option>
-              </select>
+            <div className="rounded-[1.9rem] border border-slate-200/90 bg-white/74 p-3 shadow-[inset_0_0_0_1px_rgba(212,221,230,0.55)]">
+              {inputMode === 'urls' && (
+                <textarea
+                  value={urls}
+                  onChange={(e) => setUrls(e.target.value)}
+                  placeholder="Enter URLs (one per line)..."
+                  className="h-36 w-full resize-none rounded-[1.5rem] border border-slate-200 bg-white/96 p-4 font-mono text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
+                />
+              )}
+              {inputMode === 'filepath' && (
+                <input
+                  value={filePath}
+                  onChange={(e) => setFilePath(e.target.value)}
+                  placeholder={'C:\\videos\\ad.mp4 or \\\\server\\share\\ads\\spot.mp4'}
+                  className={`${monoControlClass} h-12 rounded-[20px]`}
+                />
+              )}
+              {inputMode === 'dirpath' && (
+                <input
+                  value={folderPath}
+                  onChange={(e) => setFolderPath(e.target.value)}
+                  placeholder={'C:\\videos\\ads or \\\\server\\share\\ads or /mnt/media/ads'}
+                  className={`${monoControlClass} h-12 rounded-[20px]`}
+                />
+              )}
             </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Web Search"
-                help="Lets the classifier query the web when local evidence is weak. Improves recovery on ambiguous brands but adds latency and more external dependency."
-              />
-              <select value={enableWebSearch ? 'true' : 'false'} onChange={(e) => setEnableWebSearch(e.target.value === 'true')} className={controlClass}>
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Scan Strategy"
-                help="Tail Only samples the end of the ad where brand cards usually appear. Full Video scans across the whole video for more coverage at higher cost."
-              />
-              <select value={scanMode} onChange={(e) => setScanMode(e.target.value)} className={controlClass}>
-                <option value="Tail Only">Tail Only</option>
-                <option value="Full Video">Full Video</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Express Mode"
-                help="Skips the normal OCR-heavy path and classifies from a key visual frame. Fastest option, but it trades away some text evidence."
-              />
-              <select
-                value={expressMode ? 'true' : 'false'}
-                onChange={(e) => setExpressMode(e.target.value === 'true')}
-                className={controlClass}
-              >
-                <option value="false">Disabled</option>
-                <option value="true">Enabled (Vision only)</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Vision Board"
-                help="Computes category similarity scores from the selected frames. Useful for debugging why the visual encoder leaned toward certain categories."
-              />
-              <select value={enableVisionBoard ? 'true' : 'false'} onChange={(e) => setEnableVisionBoard(e.target.value === 'true')} className={controlClass}>
-                <option value="true">Generate Vision Board (SigLIP/OpenCLIP)</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="LLM Keyframe"
-                help="Sends a representative video frame to the multimodal model. Disable this only if you want the LLM to rely on OCR text alone."
-              />
-              <select value={enableLlmFrame ? 'true' : 'false'} onChange={(e) => setEnableLlmFrame(e.target.value === 'true')} className={controlClass}>
-                <option value="true">Send Keyframe to LLM</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Product Focus Guidance"
-                help="Adds prompt guidance that prefers the promoted product family over the advertiser's broader industry when both appear. Disable this to evaluate the model without that bias."
-              />
-              <select
-                value={productFocusGuidanceEnabled ? 'true' : 'false'}
-                onChange={(e) => setProductFocusGuidanceEnabled(e.target.value === 'true')}
-                className={controlClass}
-              >
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Category Embedding Model"
-                help="Allowlisted sentence-transformer model used by the taxonomy mapper. This affects semantic category matching, neighbor lookup, and mapper-space debug plots."
-              />
-              <select
-                value={categoryEmbeddingModel}
-                onChange={(e) => setCategoryEmbeddingModel(e.target.value)}
-                className={controlClass}
-              >
-                {CATEGORY_EMBEDDING_MODEL_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="OCR Engine"
-                help="EasyOCR is lighter and faster for most runs. Florence-2 is heavier but can recover harder text cases when speed matters less than recall."
-              />
-              <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className={controlClass}>
-                <option value="EasyOCR">EasyOCR</option>
-                <option value="Florence-2 (Microsoft)">Florence-2</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="OCR Mode"
-                help="Fast favors latency and aggressive shortcuts. Detailed keeps more OCR work enabled for harder frames and better text recovery."
-              />
-              <select value={ocrMode} onChange={(e) => setOcrMode(e.target.value)} className={controlClass}>
-                <option value="Fast">Fast</option>
-                <option value="Detailed">Detailed</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Context Limit"
-                help="Maximum prompt context passed to the selected model. Higher values can preserve more evidence but use more memory and may slow inference."
-              />
-              <input type="number" min={512} step={512} value={contextSize} onChange={(e) => setContextSize(Number(e.target.value || 8192))} className={monoControlClass} />
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel
-                label="Provider"
-                help="Runtime that serves the LLM. Different providers support different models, multimodal behavior, JSON modes, and latency profiles."
-              />
-              <select value={provider} onChange={(e) => setProvider(e.target.value)} className={controlClass}>
-                {PROVIDER_OPTIONS.map((providerOption) => (
-                  <option key={providerOption} value={providerOption}>{providerOption}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5 md:col-span-2">
-              <FieldLabel
-                label="Model"
-                help="Specific model loaded under the chosen provider. This controls reasoning style, multimodal support, speed, and memory usage."
-              />
-              {showProviderModelPicker ? (
-                <div className="space-y-2">
-                  <select
-                    value={modelInProviderList ? modelName : '__custom__'}
-                    onChange={(e) => {
-                      if (e.target.value === '__custom__') {
-                        if (modelInProviderList) setModelName('');
-                        return;
-                      }
-                      setModelName(e.target.value);
-                    }}
-                    className={controlClass}
-                  >
-                    {providerModels.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                    <option value="__custom__">Custom model...</option>
-                  </select>
-                  {!modelInProviderList && (
-                    <input
-                      value={modelName}
-                      onChange={(e) => setModelName(e.target.value)}
-                      placeholder="Type custom model name..."
+
+            {inputMode !== 'urls' && (
+              <div className="flex items-start gap-3 rounded-[1.45rem] border border-primary-100 bg-primary-50/80 px-4 py-3 text-sm text-slate-600">
+                <InfoCircledIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary-500" />
+                <div className="space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary-700">Server path note</div>
+                  <div>
+                    File and directory paths are resolved on the backend server, not in your browser. UNC paths only work if the server can reach that share and has permission to read it.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 rounded-[2rem] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.88)_0%,rgba(244,247,250,0.96)_100%)] p-5 md:grid-cols-4">
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Mode"
+                  help="Standard Pipeline uses the deterministic OCR + vision + LLM flow. ReACT Agent lets the model reason in steps and call tools during analysis."
+                />
+                <select value={mode} onChange={(e) => setMode(e.target.value)} className={controlClass}>
+                  <option value="pipeline">Standard Pipeline</option>
+                  <option value="agent">ReACT Agent</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Web Search"
+                  help="Lets the classifier query the web when local evidence is weak. Improves recovery on ambiguous brands but adds latency and more external dependency."
+                />
+                <select value={enableWebSearch ? 'true' : 'false'} onChange={(e) => setEnableWebSearch(e.target.value === 'true')} className={controlClass}>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Scan Strategy"
+                  help="Tail Only samples the end of the ad where brand cards usually appear. Full Video scans across the whole video for more coverage at higher cost."
+                />
+                <select value={scanMode} onChange={(e) => setScanMode(e.target.value)} className={controlClass}>
+                  <option value="Tail Only">Tail Only</option>
+                  <option value="Full Video">Full Video</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Express Mode"
+                  help="Skips the normal OCR-heavy path and classifies from a key visual frame. Fastest option, but it trades away some text evidence."
+                />
+                <select
+                  value={expressMode ? 'true' : 'false'}
+                  onChange={(e) => setExpressMode(e.target.value === 'true')}
+                  className={controlClass}
+                >
+                  <option value="false">Disabled</option>
+                  <option value="true">Enabled (Vision only)</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Vision Board"
+                  help="Computes category similarity scores from the selected frames. Useful for debugging why the visual encoder leaned toward certain categories."
+                />
+                <select value={enableVisionBoard ? 'true' : 'false'} onChange={(e) => setEnableVisionBoard(e.target.value === 'true')} className={controlClass}>
+                  <option value="true">Generate Vision Board (SigLIP/OpenCLIP)</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="LLM Keyframe"
+                  help="Sends a representative video frame to the multimodal model. Disable this only if you want the LLM to rely on OCR text alone."
+                />
+                <select value={enableLlmFrame ? 'true' : 'false'} onChange={(e) => setEnableLlmFrame(e.target.value === 'true')} className={controlClass}>
+                  <option value="true">Send Keyframe to LLM</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Product Focus Guidance"
+                  help="Adds prompt guidance that prefers the promoted product family over the advertiser's broader industry when both appear. Disable this to evaluate the model without that bias."
+                />
+                <select
+                  value={productFocusGuidanceEnabled ? 'true' : 'false'}
+                  onChange={(e) => setProductFocusGuidanceEnabled(e.target.value === 'true')}
+                  className={controlClass}
+                >
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Category Embedding Model"
+                  help="Allowlisted sentence-transformer model used by the taxonomy mapper. This affects semantic category matching, neighbor lookup, and mapper-space debug plots."
+                />
+                <select
+                  value={categoryEmbeddingModel}
+                  onChange={(e) => setCategoryEmbeddingModel(e.target.value)}
+                  className={controlClass}
+                >
+                  {CATEGORY_EMBEDDING_MODEL_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="OCR Engine"
+                  help="EasyOCR is lighter and faster for most runs. Florence-2 is heavier but can recover harder text cases when speed matters less than recall."
+                />
+                <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className={controlClass}>
+                  <option value="EasyOCR">EasyOCR</option>
+                  <option value="Florence-2 (Microsoft)">Florence-2</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="OCR Mode"
+                  help="Fast favors latency and aggressive shortcuts. Detailed keeps more OCR work enabled for harder frames and better text recovery."
+                />
+                <select value={ocrMode} onChange={(e) => setOcrMode(e.target.value)} className={controlClass}>
+                  <option value="Fast">Fast</option>
+                  <option value="Detailed">Detailed</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Context Limit"
+                  help="Maximum prompt context passed to the selected model. Higher values can preserve more evidence but use more memory and may slow inference."
+                />
+                <input type="number" min={512} step={512} value={contextSize} onChange={(e) => setContextSize(Number(e.target.value || 8192))} className={monoControlClass} />
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel
+                  label="Provider"
+                  help="Runtime that serves the LLM. Different providers support different models, multimodal behavior, JSON modes, and latency profiles."
+                />
+                <select value={provider} onChange={(e) => setProvider(e.target.value)} className={controlClass}>
+                  {PROVIDER_OPTIONS.map((providerOption) => (
+                    <option key={providerOption} value={providerOption}>{providerOption}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <FieldLabel
+                  label="Model"
+                  help="Specific model loaded under the chosen provider. This controls reasoning style, multimodal support, speed, and memory usage."
+                />
+                {showProviderModelPicker ? (
+                  <div className="space-y-2">
+                    <select
+                      value={modelInProviderList ? modelName : '__custom__'}
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          if (modelInProviderList) setModelName('');
+                          return;
+                        }
+                        setModelName(e.target.value);
+                      }}
                       className={controlClass}
-                    />
-                  )}
-                </div>
-              ) : (
-                <input value={modelName} onChange={(e) => setModelName(e.target.value)} className={controlClass} />
-              )}
-              {(providerName === 'ollama' || providerName === 'llama-server' || providerName === 'llama server') && providerModelsLoading && (
-                <div className="text-[10px] text-gray-400">
-                  Loading available {providerName === 'ollama' ? 'Ollama' : 'Llama Server'} models...
-                </div>
-              )}
-            </div>
-            <div className="space-y-1.5 md:col-span-4">
-              <FieldLabel
-                label="Target Categories (Comma Separated)"
-                help="Optional hint list passed into the pipeline. Leave blank to let the system classify against the full taxonomy."
-              />
-              <input value={categories} onChange={(e) => setCategories(e.target.value)} className={monoControlClass} />
-            </div>
-          </div>
-        </form>
-      </div>
-
-      <div className={`${panelClass} flex flex-col overflow-hidden`}>
-        <div className="border-b border-slate-200/80 bg-primary-50/70 px-6 py-5">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-3">
-                <h3 className="text-xl font-bold text-slate-950">Job queue</h3>
-                <div className="bell-data-pill">
-                  <ClockIcon className="h-3.5 w-3.5 text-primary-500" />
-                  Auto-syncing
-                </div>
+                    >
+                      {providerModels.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                      <option value="__custom__">Custom model...</option>
+                    </select>
+                    {!modelInProviderList && (
+                      <input
+                        value={modelName}
+                        onChange={(e) => setModelName(e.target.value)}
+                        placeholder="Type custom model name..."
+                        className={controlClass}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input value={modelName} onChange={(e) => setModelName(e.target.value)} className={controlClass} />
+                )}
+                {(providerName === 'ollama' || providerName === 'llama-server' || providerName === 'llama server') && providerModelsLoading && (
+                  <div className="text-[10px] text-gray-400">
+                    Loading available {providerName === 'ollama' ? 'Ollama' : 'Llama Server'} models...
+                  </div>
+                )}
               </div>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-                Track active runs, spot failures, and jump straight into the evidence trail.
-              </p>
-              <div className="mt-2 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+              <div className="space-y-1.5 md:col-span-4">
+                <FieldLabel
+                  label="Target Categories (Comma Separated)"
+                  help="Optional hint list passed into the pipeline. Leave blank to let the system classify against the full taxonomy."
+                />
+                <input value={categories} onChange={(e) => setCategories(e.target.value)} className={monoControlClass} />
+              </div>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      <section className="bell-panel overflow-hidden">
+        <div className="border-b border-slate-200/80 bg-primary-50/75 px-6 py-5">
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-3">
+                  <h3 className="text-xl font-bold text-slate-950">Job queue</h3>
+                  <div className="bell-data-pill">
+                    <ClockIcon className="h-3.5 w-3.5 text-primary-500" />
+                    Auto-syncing
+                  </div>
+                </div>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+                  Scan outcomes first. Open technical run details only when you need to investigate why a job landed where it did.
+                </p>
+              </div>
+
+              <div className="flex w-full flex-col gap-3 lg:flex-row xl:w-auto">
+                <div className="relative min-w-0 lg:w-[24rem] xl:w-[28rem]">
+                  <MagnifyingGlassIcon className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+                  <input
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setSelectedJobs(new Set());
+                    }}
+                    placeholder="Search jobs, brands, or categories..."
+                    className="h-11 w-full rounded-full border border-slate-300 bg-white pl-10 pr-3 text-sm text-slate-700 shadow-sm focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowLaunchPanel((current) => !current)}
+                  className="bell-button-primary h-11 shrink-0 gap-2 px-4 text-xs uppercase tracking-[0.18em]"
+                >
+                  <PlayIcon className="h-3.5 w-3.5" />
+                  New analysis run
+                </button>
+                <button
+                  type="button"
+                  onClick={fetchJobs}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-primary-700 shadow-sm transition-colors hover:border-primary-300 hover:bg-primary-50"
+                  title="Refresh queue"
+                >
+                  <UpdateIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <QueueSummaryCard label="Total jobs" value={summary.total} detail={`${summary.visible} in current view`} accent="slate" />
+              <QueueSummaryCard label="Running" value={summary.processing} detail={summary.processing > 0 ? 'Active now' : 'No live runs'} accent="blue" />
+              <QueueSummaryCard label="Completed" value={summary.completed} detail={finishedCount > 0 ? `${completionRate}% success rate` : 'No finished jobs yet'} accent="green" />
+              <QueueSummaryCard label="Failed" value={summary.failed} detail={summary.failed > 0 ? 'Action required' : 'No action required'} accent="rose" />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex flex-wrap items-center rounded-full border border-slate-200 bg-white p-1.5 shadow-[0_10px_24px_rgba(0,55,120,0.06)]">
+                {statusTabs.map((tab) => {
+                  const active = statusFilter === tab.value;
+                  return (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      onClick={() => {
+                        setStatusFilter(tab.value);
+                        setSelectedJobs(new Set());
+                      }}
+                      className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition-colors ${active ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.18)]' : 'text-slate-600 hover:bg-primary-50 hover:text-primary-700'}`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
                 Last refreshed {formatDistanceToNow(lastUpdated, { addSuffix: true })}
               </div>
             </div>
-
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px_48px] xl:min-w-[42rem]">
-              <div className="relative">
-                <MagnifyingGlassIcon className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
-                <input
-                  value={search}
-                  onChange={(e) => handleSearchChange(e.target.value)}
-                  placeholder="Search job, brand, category..."
-                  className="h-11 w-full rounded-full border border-slate-300 bg-white pl-10 pr-3 font-mono text-sm text-slate-700 shadow-sm focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
-                />
-              </div>
-              <select
-                value={statusFilter}
-                onChange={(e) => handleStatusFilterChange(e.target.value)}
-                className="h-11 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold tracking-wide text-slate-700 shadow-sm focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
-              >
-                <option value="all">ALL STATUSES</option>
-                <option value="queued">QUEUED</option>
-                <option value="re-queued">RE-QUEUED</option>
-                <option value="processing">PROCESSING</option>
-                <option value="completed">COMPLETED</option>
-                <option value="failed">FAILED</option>
-              </select>
-              <button
-                onClick={fetchJobs}
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-primary-700 shadow-sm transition-colors hover:border-primary-300 hover:bg-primary-50"
-                title="Refresh queue"
-              >
-                <UpdateIcon className="w-4 h-4" />
-              </button>
-            </div>
           </div>
         </div>
 
-        {hasSelection && (
-          <div className="flex items-center justify-between border-b border-rose-200 bg-rose-50/80 px-6 py-3 animate-in fade-in slide-in-from-top-2 duration-200">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-700">
-                <span className="font-bold text-gray-900">{selectedJobs.size}</span> job{selectedJobs.size > 1 ? 's' : ''} selected
-              </span>
-              <button
-                onClick={() => setSelectedJobs(new Set())}
-                className="text-xs text-gray-400 hover:text-gray-700 transition-colors underline"
-              >
-                Clear selection
-              </button>
-            </div>
-            <button
-              onClick={handleBulkDelete}
-              disabled={deleteLoading}
-              className="flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg bg-red-600 hover:bg-red-500 active:bg-red-700 text-white transition-colors disabled:opacity-50 shadow-sm"
-            >
-              {deleteLoading ? (
-                <UpdateIcon className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <TrashIcon className="w-3.5 h-3.5" />
-              )}
-              {deleteLoading ? 'Deleting...' : `Delete ${selectedJobs.size} Job${selectedJobs.size > 1 ? 's' : ''}`}
-            </button>
-          </div>
-        )}
-
-        <div className="border-b border-slate-200/80 bg-white/85 px-6 py-4">
-          <div className="overflow-hidden rounded-[1.9rem] border border-slate-200 bg-white shadow-[0_16px_32px_rgba(0,55,120,0.06)]">
-            <div className="grid grid-cols-2 divide-x divide-y divide-slate-200 xl:grid-cols-5 xl:divide-y-0">
-              <div className="flex min-h-[110px] flex-col gap-3 px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Jobs</div>
-                <div className="text-2xl font-bold text-slate-950">{summary.total}</div>
-                <div className="mt-auto text-xs text-slate-500">{summary.visible} visible</div>
-              </div>
-              <div className="flex min-h-[110px] flex-col gap-3 bg-primary-50/65 px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary-600">Processing</div>
-                <div className="text-2xl font-bold text-primary-800">{summary.processing}</div>
-                <div className="mt-auto text-xs text-primary-700">active now</div>
-              </div>
-              <div className="flex min-h-[110px] flex-col gap-3 bg-slate-50 px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Queued</div>
-                <div className="text-2xl font-bold text-slate-900">{summary.queued}</div>
-                <div className="mt-auto text-xs text-slate-600">waiting or re-queued</div>
-              </div>
-              <div className="flex min-h-[110px] flex-col gap-3 bg-[rgba(221,238,250,0.65)] px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary-600">Completed</div>
-                <div className="text-2xl font-bold text-primary-800">{summary.completed}</div>
-                <div className="mt-auto text-xs text-primary-700">finished successfully</div>
-              </div>
-              <div className="flex min-h-[110px] flex-col gap-3 bg-red-50/55 px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-red-500">Failed</div>
-                <div className="text-2xl font-bold text-red-800">{summary.failed}</div>
-                <div className="mt-auto text-xs text-red-700">needs attention</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="border-b border-slate-200/80 bg-white/75 px-6 py-4">
-          <div className={`grid items-center gap-4 ${queueFrameColumns}`}>
-            <div className="flex items-center justify-center pt-0.5">
+        <div className="px-6 py-4">
+          <div className="hidden items-center gap-4 border-b border-slate-200/80 px-4 py-3 lg:grid lg:grid-cols-[36px_minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,1.05fr)_100px_110px_110px_40px]">
+            <div className="flex items-center justify-center">
               <input
                 type="checkbox"
                 checked={isAllSelected}
                 onChange={toggleSelectAll}
-                className="w-3.5 h-3.5 rounded border-gray-300 bg-gray-100 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
+                className="h-4 w-4 rounded border-slate-300 bg-white text-primary-500 focus:ring-primary-500/20"
                 title={isAllSelected ? 'Deselect all visible jobs' : 'Select all visible jobs'}
               />
             </div>
-            <div className={`grid items-center gap-4 ${queueColumns}`}>
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Identity & Source</div>
-                <div className="mt-1 text-sm text-slate-600">Select visible jobs for bulk actions.</div>
-              </div>
-              <div className="hidden xl:block text-[10px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Classification</div>
-              <div className="hidden xl:block text-[10px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Execution State</div>
-              <div className="hidden xl:block text-right text-[10px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Runtime</div>
-            </div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Brand</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Final category</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Status & stage</div>
+            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Confidence</div>
+            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Runtime</div>
+            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Updated</div>
+            <div />
           </div>
-        </div>
 
-        <div className="min-h-[400px] divide-y divide-gray-100">
-          {loading && jobs.length === 0 ? (
-            <div className="px-6 py-12 text-center text-gray-400">Syncing node cluster state...</div>
-          ) : filteredJobs.length === 0 ? (
-            <div className="px-6 py-12 text-center text-gray-400">No jobs found.</div>
-          ) : filteredJobs.map((job) => {
-            const selected = selectedJobs.has(job.job_id);
-            const progressValue =
-              job.status === 'completed'
-                ? 100
-                : job.status === 'processing'
-                  ? Math.max(0, Math.min(100, Number(job.progress || 0)))
-                  : 0;
-            const providerLabel = job.settings?.provider || '—';
-            const modelLabel = job.settings?.model_name || '—';
-            const ocrEngineLabel = job.settings?.ocr_engine || '—';
-            const ocrModeLabel = sanitizeDecorativeLabel(job.settings?.ocr_mode);
-            const scanModeLabel = sanitizeDecorativeLabel(job.settings?.scan_mode);
-            const categoryLabel = job.category_name || job.category || '—';
-            const brandLabel = job.brand || '—';
-            const categoryId = (job.category_id || '').trim();
-            const parentCategoryLabel = (job.parent_category || '').trim();
-            const parentCategoryId = (job.parent_category_id || '').trim();
-            const showParentMeta =
-              Boolean(parentCategoryLabel) &&
-              parentCategoryLabel.toLowerCase() !== categoryLabel.toLowerCase() &&
-              categoryLabel !== '—';
-            const taxonomyMetaLabel = showParentMeta ? `Under ${parentCategoryLabel}` : 'Top-level category';
-            const terminal = isTerminalStatus(job.status);
-            const ageLabel =
-              job.status === 'processing'
-                ? 'Running Since'
-                : job.status === 'queued' || job.status === 're-queued'
-                  ? 'Queued Since'
-                  : 'Age';
+          <div className="divide-y divide-slate-100">
+            {loading && jobs.length === 0 ? (
+              <div className="px-4 py-12 text-center text-slate-400">Syncing node cluster state...</div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="px-4 py-12 text-center text-slate-400">No jobs found.</div>
+            ) : (
+              filteredJobs.map((job) => {
+                const categoryLabel = job.category_name || job.category || '—';
+                const categoryId = (job.category_id || '').trim();
+                const parentCategory = (job.parent_category || '').trim();
+                const parentCategoryId = (job.parent_category_id || '').trim();
+                const sourceMeta = getSourceMeta(job.url);
+                const selected = selectedJobs.has(job.job_id);
+                const expanded = expandedJobId === job.job_id;
+                const confidenceValue = normalizeConfidenceValue(job.confidence);
+                const statusText = getStatusText(job.status);
+                const providerLabel = job.settings?.provider || '—';
+                const modelLabel = job.settings?.model_name || '—';
+                const ocrLabel = `${job.settings?.ocr_engine || '—'} · ${sanitizeDecorativeLabel(job.settings?.ocr_mode)}`;
+                const scanLabel = sanitizeDecorativeLabel(job.settings?.scan_mode);
+                const stageLabel = formatStageLabel(job.stage);
+                const stageDetail = job.error || job.stage_detail || 'No additional stage detail recorded.';
+                const showDistinctStage =
+                  stageLabel &&
+                  stageLabel.toLowerCase() !== 'unknown' &&
+                  stageLabel.toLowerCase() !== statusText.toLowerCase();
 
-            return (
-              <div
-                key={job.job_id}
-                className={`px-6 py-5 transition-colors ${selected ? 'bg-primary-50/70' : 'bg-white hover:bg-gray-50/80'}`}
-              >
-                <div className={`grid items-start gap-4 ${queueFrameColumns}`}>
-                  <div className="pt-1" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleSelectJob(job.job_id)}
-                      className="w-3.5 h-3.5 rounded border-gray-300 bg-gray-100 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
-                    />
-                  </div>
-
-                  <div className={`min-w-0 grid grid-cols-1 gap-4 ${queueColumns}`}>
-                    <div className="min-w-0 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Link
-                          to={`/jobs/${job.job_id}`}
-                          className="font-mono text-xs text-primary-600 hover:text-primary-700 transition-colors break-all"
-                        >
-                          {job.job_id}
-                        </Link>
-                        <span className={`px-2 py-1 rounded inline-flex text-[10px] font-bold tracking-wider uppercase border ${getStatusBadgeClass(job.status)} ${job.status === 'processing' ? 'animate-pulse' : ''}`}>
-                          {/** Native title tooltip for compressed row status */}
-                          <span title={`Status: ${getStatusText(job.status)}`}>
-                            {getStatusText(job.status)}
-                          </span>
-                        </span>
-                        <span
-                          title={`Execution mode: ${job.mode || '—'}`}
-                          className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600"
-                        >
-                          {job.mode || '—'}
-                        </span>
-                      </div>
-                      <div
-                        className="break-all font-mono text-[11px] text-slate-600"
-                        title={job.url}
-                      >
-                        {job.url}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
-                        <span className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1">
-                          <span title={`Provider: ${providerLabel}`}>{providerLabel}</span>
-                        </span>
-                        <span
-                          className="inline-flex max-w-full items-center truncate rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono"
-                          title={`Model: ${modelLabel}`}
-                        >
-                          {modelLabel}
-                        </span>
-                        <span
-                          className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1"
-                          title={`OCR engine: ${ocrEngineLabel}`}
-                        >
-                          {ocrEngineLabel}
-                        </span>
-                        <span
-                          className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1"
-                          title={`OCR mode: ${ocrModeLabel}`}
-                        >
-                          {ocrModeLabel}
-                        </span>
-                        <span
-                          className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1"
-                          title={`Scan mode: ${scanModeLabel}`}
-                        >
-                          {scanModeLabel}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 space-y-2">
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Brand</div>
-                        <div className="mt-1 break-words text-sm font-semibold text-slate-900">{brandLabel}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Category</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <span
-                            className="break-words text-sm font-medium text-slate-800"
-                            title={`Category: ${categoryLabel}`}
-                          >
-                            {categoryLabel}
-                          </span>
-                          {categoryId && (
-                            <span
-                              title={`Category ID: ${categoryId}`}
-                              className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-[10px] font-mono font-semibold text-primary-700"
-                            >
-                              ID {categoryId}
-                            </span>
-                          )}
-                        </div>
-                        {categoryLabel !== '—' && (
-                          <div
-                            className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500"
-                            title={showParentMeta ? parentCategoryLabel : 'Top-level category'}
-                          >
-                            <span className="font-semibold uppercase tracking-[0.16em] text-slate-400">
-                              Taxonomy
-                            </span>
-                            <span className="min-w-0 truncate text-slate-600">
-                              {taxonomyMetaLabel}
-                            </span>
-                            {showParentMeta && parentCategoryId && (
-                              <span className="shrink-0 font-mono text-[10px] text-slate-400">
-                                #{parentCategoryId}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 space-y-2">
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Stage</div>
-                        <div className="mt-1 text-sm font-semibold capitalize text-slate-900">
-                          <span title={`Stage: ${formatStageLabel(job.stage)}`}>
-                            {formatStageLabel(job.stage)}
-                          </span>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Detail</div>
-                        <div
-                          className="mt-1 break-words text-xs text-slate-700"
-                          title={job.stage_detail || '—'}
-                        >
-                          {job.stage_detail || '—'}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-500">
-                          <span>Progress</span>
-                          <span className="font-mono text-slate-700">
-                            {job.status === 'completed'
-                              ? '100%'
-                              : job.status === 'processing'
-                                ? `${progressValue.toFixed(1)}%`
-                                : '—'}
-                          </span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              job.status === 'failed'
-                                ? 'bg-red-400'
-                                : job.status === 'completed'
-                                  ? 'bg-primary-500'
-                                  : 'bg-primary-500'
-                            }`}
-                            style={{ width: `${job.status === 'failed' ? 100 : progressValue}%` }}
+                return (
+                  <div key={job.job_id} className={`py-2 transition-colors ${selected ? 'bg-primary-50/55' : ''}`}>
+                    <div className="rounded-[1.7rem] px-4 py-4 transition-colors hover:bg-slate-50/80">
+                      <div className="grid gap-4 lg:grid-cols-[36px_minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,1.05fr)_100px_110px_110px_40px] lg:items-center">
+                        <div className="flex items-start justify-center pt-1 lg:pt-0">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleSelectJob(job.job_id)}
+                            className="h-4 w-4 rounded border-slate-300 bg-white text-primary-500 focus:ring-primary-500/20"
                           />
                         </div>
-                      </div>
-                    </div>
 
-                    <div className="min-w-0 flex flex-col xl:items-end gap-2">
-                      <div className={`grid gap-2 w-full xl:w-auto ${terminal ? 'grid-cols-1' : 'grid-cols-2 xl:grid-cols-1'}`}>
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Duration</div>
-                          <div
-                            className="mt-1 text-sm font-mono text-slate-900"
-                            title={job.duration_seconds != null ? `${job.duration_seconds.toFixed(3)} seconds` : 'No duration recorded'}
-                          >
-                            {formatDurationLabel(job.duration_seconds)}
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Brand</div>
+                          <Link to={`/jobs/${job.job_id}`} className="block text-lg font-bold text-slate-950 transition-colors hover:text-primary-700">
+                            {job.brand || 'Unknown brand'}
+                          </Link>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500" title={sourceMeta.title}>
+                            <span className="font-medium text-slate-700">{sourceMeta.primary}</span>
+                            <span className="text-slate-300">·</span>
+                            <span>{sourceMeta.secondary}</span>
+                          </div>
+                          <div className="mt-2 font-mono text-[11px] text-slate-400" title={job.job_id}>
+                            {shortenMiddle(job.job_id, 16)}
                           </div>
                         </div>
-                        {!terminal && (
-                          <div className="rounded-lg border border-primary-100 bg-primary-50/70 px-3 py-2">
-                            <div className="text-[10px] font-semibold uppercase tracking-wider text-primary-600">{ageLabel}</div>
-                            <div className="mt-1 text-sm text-primary-900" title={job.created_at}>
-                              {formatRelativeTimestamp(job.created_at)}
+
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Final category</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-900">{categoryLabel}</span>
+                            {categoryId ? (
+                              <span className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-[10px] font-mono font-semibold text-primary-700">
+                                ID {categoryId}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 text-xs text-slate-500">
+                            {parentCategory && parentCategory.toLowerCase() !== categoryLabel.toLowerCase()
+                              ? `Parent: ${parentCategory}${parentCategoryId ? ` · ID ${parentCategoryId}` : ''}`
+                              : 'Top-level taxonomy result'}
+                          </div>
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Status & stage</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] ${getStatusBadgeClass(job.status)}`}>
+                              {statusText}
+                            </span>
+                            {showDistinctStage ? <span className="text-sm font-medium text-slate-800">{stageLabel}</span> : null}
+                          </div>
+                          <div className="mt-2 truncate text-xs text-slate-500" title={stageDetail}>
+                            {stageDetail}
+                          </div>
+                        </div>
+
+                        <div className="text-left lg:text-right">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Confidence</div>
+                          <div className="text-sm font-semibold text-slate-900">{formatConfidenceLabel(job.confidence)}</div>
+                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 lg:ml-auto lg:w-14">
+                            <div
+                              className="h-full rounded-full bg-primary-500 transition-all"
+                              style={{ width: `${confidenceValue ?? 0}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="text-left lg:text-right">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Runtime</div>
+                          <div className="text-sm font-semibold text-slate-900">{formatDurationLabel(job.duration_seconds)}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {job.status === 'processing' ? 'in progress' : 'wall time'}
+                          </div>
+                        </div>
+
+                        <div className="text-left lg:text-right">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Updated</div>
+                          <div className="text-sm font-semibold text-slate-900">{formatRelativeTimestamp(job.updated_at)}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {job.status === 'processing' ? 'live status' : 'last persisted'}
+                          </div>
+                        </div>
+
+                        <div className="flex items-start justify-end lg:justify-center">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedJobId((current) => (current === job.job_id ? null : job.job_id))}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
+                            aria-label={expanded ? 'Collapse run profile' : 'Expand run profile'}
+                          >
+                            {expanded ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {expanded ? (
+                        <div className="mt-4 rounded-[1.5rem] border border-slate-200/90 bg-slate-50/70 p-4">
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                            {[
+                              { label: 'Provider', value: providerLabel },
+                              { label: 'Model', value: modelLabel },
+                              { label: 'OCR', value: ocrLabel },
+                              { label: 'Scan', value: scanLabel },
+                              {
+                                label: 'Signals',
+                                value: [
+                                  job.settings?.enable_search ? 'Search on' : 'Search off',
+                                  job.settings?.enable_vision_board ? 'Vision board on' : 'Vision board off',
+                                  job.settings?.enable_llm_frame ? 'LLM frame on' : 'LLM frame off',
+                                ].join(' · '),
+                              },
+                            ].map((item) => (
+                              <div key={`${job.job_id}-${item.label}`} className="rounded-[1.25rem] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{item.label}</div>
+                                <div className="mt-2 text-sm font-semibold text-slate-900 break-words">{item.value}</div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="min-w-0">
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Source</div>
+                              <div className="mt-1 truncate text-sm text-slate-600" title={sourceMeta.title}>
+                                {sourceMeta.title}
+                              </div>
+                              <div className="mt-2 font-mono text-[11px] text-slate-400" title={job.job_id}>
+                                {job.job_id}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                {job.mode || '—'}
+                              </span>
+                              <Link
+                                to={`/jobs/${job.job_id}`}
+                                className="bell-button-secondary h-10 gap-2 px-4 text-xs uppercase tracking-[0.18em]"
+                              >
+                                Open details
+                              </Link>
                             </div>
                           </div>
-                        )}
-                      </div>
-                      <div className="text-right text-xs text-slate-600" title={job.updated_at}>
-                        Updated {formatRelativeTimestamp(job.updated_at)}
-                      </div>
-                      <Link
-                        to={`/jobs/${job.job_id}`}
-                        className="inline-flex items-center justify-center rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs font-semibold text-primary-700 hover:bg-primary-100 transition-colors"
-                      >
-                        Open details
-                      </Link>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })
+            )}
+          </div>
         </div>
-      </div>
+      </section>
+
+      {hasSelection ? (
+        <div className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-full border border-primary-900/80 bg-primary-950 px-5 py-3 text-white shadow-[0_22px_44px_rgba(0,18,43,0.32)]">
+          <div className="text-sm font-semibold">
+            {selectedJobs.size} job{selectedJobs.size > 1 ? 's' : ''} selected
+          </div>
+          <div className="h-5 w-px bg-white/16" />
+          <button
+            type="button"
+            onClick={handleBulkDelete}
+            disabled={deleteLoading}
+            className="inline-flex items-center gap-2 text-sm font-semibold text-rose-200 transition-colors hover:text-white disabled:opacity-50"
+          >
+            {deleteLoading ? <UpdateIcon className="h-4 w-4 animate-spin" /> : <TrashIcon className="h-4 w-4" />}
+            {deleteLoading ? 'Deleting…' : 'Delete'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedJobs(new Set())}
+            className="inline-flex items-center gap-2 text-sm font-semibold text-white/78 transition-colors hover:text-white"
+          >
+            <Cross2Icon className="h-4 w-4" />
+            Clear
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

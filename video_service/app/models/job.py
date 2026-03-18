@@ -116,6 +116,7 @@ class JobStatus(BaseModel):
     status: str
     stage: Optional[str] = None
     stage_detail: Optional[str] = None
+    confidence: Optional[float] = None
     duration_seconds: Optional[float] = None
     created_at: str
     updated_at: str

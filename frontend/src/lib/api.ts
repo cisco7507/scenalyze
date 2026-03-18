@@ -42,6 +42,7 @@ export interface JobStatus {
   status:     string;
   stage?:     string;
   stage_detail?: string;
+  confidence?: number | null;
   duration_seconds?: number | null;
   created_at: string;
   updated_at: string;

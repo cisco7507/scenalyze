@@ -166,6 +166,21 @@ def _extract_result_summary(result_json: str | None) -> dict:
     return _normalize_result_row_payload(first_row)
 
 
+def _extract_artifact_mapper_summary(artifacts_json: str | None) -> dict:
+    if not artifacts_json:
+        return {}
+    try:
+        payload = json.loads(artifacts_json)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    mapper_payload = payload.get("category_mapper")
+    if not isinstance(mapper_payload, dict):
+        return {}
+    return mapper_payload
+
+
 def _percentile(values: list[float], quantile: float) -> float | None:
     if not values:
         return None
@@ -2180,10 +2195,17 @@ def _get_jobs_from_db(limit: int = 100) -> list:
     result: list[JobStatus] = []
     for r in rows:
         result_summary = _extract_result_summary(row_value(r, "result_json"))
+        mapper_summary = _extract_artifact_mapper_summary(row_value(r, "artifacts_json"))
+        confidence_value = result_summary.get("confidence")
+        if confidence_value is None:
+            confidence_value = mapper_summary.get("confidence")
+        if confidence_value is None:
+            confidence_value = mapper_summary.get("score")
         result.append(
             JobStatus(
             job_id=r["id"], status=r["status"],
             stage=row_value(r, "stage"), stage_detail=row_value(r, "stage_detail"),
+            confidence=confidence_value,
             duration_seconds=row_value(r, "duration_seconds"),
             created_at=r["created_at"], updated_at=r["updated_at"],
             progress=r["progress"], error=row_value(r, "error"),
@@ -2234,9 +2256,16 @@ async def get_job(req: Request, job_id: str):
     def row_value(r, key: str, default=None):
         return r[key] if key in r.keys() else default
     result_summary = _extract_result_summary(row_value(row, "result_json"))
+    mapper_summary = _extract_artifact_mapper_summary(row_value(row, "artifacts_json"))
+    confidence_value = result_summary.get("confidence")
+    if confidence_value is None:
+        confidence_value = mapper_summary.get("confidence")
+    if confidence_value is None:
+        confidence_value = mapper_summary.get("score")
     return JobStatus(
         job_id=row["id"], status=row["status"],
         stage=row_value(row, "stage"), stage_detail=row_value(row, "stage_detail"),
+        confidence=confidence_value,
         duration_seconds=row_value(row, "duration_seconds"),
         created_at=row["created_at"], updated_at=row["updated_at"],
         progress=row["progress"], error=row_value(row, "error"),
