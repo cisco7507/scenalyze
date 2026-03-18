@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { ReactElement } from "react";
 import { useParams, Link } from "react-router-dom";
+import { createPortal } from "react-dom";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 import {
@@ -1840,6 +1841,28 @@ export function JobDetail() {
   useEffect(() => {
     videoPrimedRef.current = false;
   }, [videoSource?.url]);
+
+  useEffect(() => {
+    if (!selectedExplainFrame) return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedExplainFrame(null);
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedExplainFrame]);
 
   const primeVideoFirstFrame = useCallback(() => {
     const video = videoRef.current;
@@ -3860,60 +3883,69 @@ export function JobDetail() {
                   )}
                 </div>
 
-                {selectedExplainFrame && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4">
-                    <div className="relative w-full max-w-4xl rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedExplainFrame(null)}
-                        className="absolute right-4 top-4 rounded-full border border-slate-600 bg-slate-900 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                {selectedExplainFrame &&
+                  typeof document !== "undefined" &&
+                  createPortal(
+                    <div
+                      className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/82 p-4"
+                      onClick={() => setSelectedExplainFrame(null)}
+                    >
+                      <div
+                        className="relative flex max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-[28px] border border-slate-700 bg-slate-950 shadow-[0_30px_90px_rgba(2,8,23,0.55)]"
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        Close
-                      </button>
-                      <div className="grid gap-0 md:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-                        <div className="border-b border-slate-800 md:border-b-0 md:border-r">
-                          <img
-                            src={toApiUrl(selectedExplainFrame.frame.url)}
-                            alt={selectedExplainFrame.timestampLabel}
-                            className="h-full w-full object-contain bg-black rounded-t-2xl md:rounded-l-2xl md:rounded-tr-none"
-                          />
-                        </div>
-                        <div className="p-5 space-y-4 text-slate-200">
-                          <div>
-                            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-                              Attempt
-                            </div>
-                            <div className="mt-1 text-lg font-semibold">
-                              {selectedExplainFrame.attemptTitle}
-                            </div>
-                            <div className="mt-2 inline-flex items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-mono text-cyan-200">
-                              {selectedExplainFrame.timestampLabel}
-                            </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedExplainFrame(null)}
+                          className="absolute right-4 top-4 z-10 rounded-full border border-slate-600 bg-slate-900/95 px-3 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                        >
+                          Close
+                        </button>
+                        <div className="grid min-h-0 w-full gap-0 md:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+                          <div className="flex min-h-0 items-center justify-center border-b border-slate-800 bg-black md:border-b-0 md:border-r">
+                            <img
+                              src={toApiUrl(selectedExplainFrame.frame.url)}
+                              alt={selectedExplainFrame.timestampLabel}
+                              className="max-h-[88vh] w-full object-contain"
+                            />
                           </div>
-
-                          {selectedExplainFrame.ocrExcerpt ? (
-                            <div className="rounded-xl border border-slate-700 bg-slate-900 p-3">
-                              <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
-                                OCR / Evidence
+                          <div className="min-h-0 overflow-y-auto p-5 text-slate-200">
+                            <div>
+                              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                                Attempt
                               </div>
-                              <div className="text-xs font-mono leading-relaxed text-cyan-200 whitespace-pre-wrap">
-                                {selectedExplainFrame.ocrExcerpt}
+                              <div className="mt-1 text-lg font-semibold">
+                                {selectedExplainFrame.attemptTitle}
+                              </div>
+                              <div className="mt-2 inline-flex items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-mono text-cyan-200">
+                                {selectedExplainFrame.timestampLabel}
                               </div>
                             </div>
-                          ) : (
-                            <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400">
-                              No OCR snippet was attached to this attempt.
-                            </div>
-                          )}
 
-                          <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400">
-                            This overlay shows persisted evidence only. Opening it does not re-run OCR, vision scoring, or the classifier.
+                            {selectedExplainFrame.ocrExcerpt ? (
+                              <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900 p-3">
+                                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                                  OCR / Evidence
+                                </div>
+                                <div className="text-xs font-mono leading-relaxed text-cyan-200 whitespace-pre-wrap">
+                                  {selectedExplainFrame.ocrExcerpt}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400">
+                                No OCR snippet was attached to this attempt.
+                              </div>
+                            )}
+
+                            <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400">
+                              This overlay shows persisted evidence only. Opening it does not re-run OCR, vision scoring, or the classifier.
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                )}
+                    </div>,
+                    document.body,
+                  )}
               </>
             )}
           </div>

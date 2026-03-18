@@ -3,8 +3,6 @@ import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CheckCircledIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
   ClockIcon,
   Cross2Icon,
   InfoCircledIcon,
@@ -58,17 +56,59 @@ function formatDurationLabel(durationSeconds?: number | null): string {
 
 function formatRelativeTimestamp(value?: string): string {
   if (!value) return '—';
-  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+  const normalizedBase = value.includes('T') ? value : value.replace(' ', 'T');
+  const normalized = hasTimezone ? normalizedBase : `${normalizedBase}Z`;
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return value;
-  return formatDistanceToNow(parsed, { addSuffix: true });
+  const diffMs = Date.now() - parsed.getTime();
+  if (Math.abs(diffMs) < 60_000) return 'just now';
+  const future = diffMs < 0;
+  const absMs = Math.abs(diffMs);
+  const minutes = Math.round(absMs / 60_000);
+  if (minutes < 60) return future ? `in ${minutes}m` : `${minutes}m ago`;
+  const hours = Math.round(absMs / 3_600_000);
+  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`;
+  const days = Math.round(absMs / 86_400_000);
+  if (days < 7) return future ? `in ${days}d` : `${days}d ago`;
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function sanitizeDecorativeLabel(value?: string | null): string {
-  const text = (value || '').trim();
-  if (!text) return '—';
-  const cleaned = text.replace(/^[^\p{L}\p{N}]+/u, '').trim();
-  return cleaned || text;
+function isLowValueStageDetail(detail?: string | null): boolean {
+  const normalized = (detail || '').trim().toLowerCase();
+  return normalized === 'result persisted' || normalized === 'job completed' || normalized === 'pipeline done';
+}
+
+function getQueueBrandLabel(job: JobStatus): string {
+  const brand = (job.brand || '').trim();
+  if (brand) return brand;
+  if (job.status === 'processing') return 'Brand pending';
+  if (job.status === 'queued' || job.status === 're-queued') return 'Awaiting analysis';
+  if (job.status === 'failed') return 'Brand unavailable';
+  return 'Brand pending';
+}
+
+function formatBrandDisplay(value: string): string {
+  const text = value.trim();
+  if (!text || /\p{Ll}/u.test(text) || !/\p{L}/u.test(text)) return text;
+
+  return text
+    .split(/(\s+)/)
+    .map((token) => {
+      if (!token.trim() || !/\p{L}/u.test(token)) return token;
+
+      const letterCount = (token.match(/\p{L}/gu) || []).length;
+      if (/^[A-ZÀ-Ÿ0-9&./-]+$/u.test(token) && (letterCount <= 3 || token.includes('-') || token.includes('&'))) {
+        return token;
+      }
+
+      return token
+        .toLocaleLowerCase()
+        .replace(/(^|[-'/])(\p{L})/gu, (_match, prefix: string, letter: string) => {
+          return `${prefix}${letter.toLocaleUpperCase()}`;
+        });
+    })
+    .join('');
 }
 
 function formatConfidenceLabel(confidence?: number | string | null): string {
@@ -197,7 +237,6 @@ export function Jobs() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [showLaunchPanel, setShowLaunchPanel] = useState(false);
-  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
   const [submitLoading, setSubmitLoading] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('urls');
@@ -366,21 +405,6 @@ export function Jobs() {
     );
   });
 
-  useEffect(() => {
-    if (filteredJobs.length === 0) {
-      setExpandedJobId(null);
-      return;
-    }
-    setExpandedJobId((current) => {
-      if (current && filteredJobs.some((job) => job.job_id === current)) return current;
-      return (
-        filteredJobs.find((job) => job.status === 'processing')?.job_id ||
-        filteredJobs.find((job) => job.status === 'failed')?.job_id ||
-        filteredJobs[0].job_id
-      );
-    });
-  }, [filteredJobs]);
-
   const summary = useMemo(() => {
     const counts = {
       total: jobs.length,
@@ -463,9 +487,6 @@ export function Jobs() {
               Queue control surface
             </div>
             <h2 className="mt-4 max-w-3xl text-[3rem] font-bold text-primary-700">Review the queue first, then launch the next run.</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              This page is tuned for fast queue scanning. Brand, category, status, and stage lead the row. Technical run metadata stays available, but it now lives behind a cleaner run-profile disclosure.
-            </p>
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -475,10 +496,6 @@ export function Jobs() {
                 <PlayIcon className="h-4 w-4" />
                 {showLaunchPanel ? 'Hide analysis form' : 'New analysis run'}
               </button>
-              <div className="bell-data-pill">
-                <UpdateIcon className="h-3.5 w-3.5 text-primary-500" />
-                Auto-syncing every 4s
-              </div>
               <div className="bell-data-pill">
                 <ClockIcon className="h-3.5 w-3.5 text-primary-500" />
                 Refreshed {formatDistanceToNow(lastUpdated, { addSuffix: true })}
@@ -864,8 +881,8 @@ export function Jobs() {
           </div>
         </div>
 
-        <div className="px-6 py-4">
-          <div className="hidden items-center gap-4 border-b border-slate-200/80 px-4 py-3 lg:grid lg:grid-cols-[36px_minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,1.05fr)_100px_110px_110px_40px]">
+        <div className="max-h-[70vh] overflow-y-auto px-6 pb-4 pt-0">
+          <div className="sticky top-0 z-20 hidden items-center gap-4 border-b border-slate-200 bg-white px-4 py-3 shadow-[0_1px_0_rgba(212,221,230,0.98)] lg:grid lg:grid-cols-[36px_minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,1.05fr)_100px_110px_110px_96px]">
             <div className="flex items-center justify-center">
               <input
                 type="checkbox"
@@ -875,13 +892,13 @@ export function Jobs() {
                 title={isAllSelected ? 'Deselect all visible jobs' : 'Select all visible jobs'}
               />
             </div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Brand</div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Final category</div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Status & stage</div>
-            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Confidence</div>
-            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Runtime</div>
-            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Updated</div>
-            <div />
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">Brand</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">Final category</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">Status & stage</div>
+            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">Confidence</div>
+            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">Runtime</div>
+            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">Updated</div>
+            <div className="text-right text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">Open</div>
           </div>
 
           <div className="divide-y divide-slate-100">
@@ -897,24 +914,22 @@ export function Jobs() {
                 const parentCategoryId = (job.parent_category_id || '').trim();
                 const sourceMeta = getSourceMeta(job.url);
                 const selected = selectedJobs.has(job.job_id);
-                const expanded = expandedJobId === job.job_id;
                 const confidenceValue = normalizeConfidenceValue(job.confidence);
                 const statusText = getStatusText(job.status);
-                const providerLabel = job.settings?.provider || '—';
-                const modelLabel = job.settings?.model_name || '—';
-                const ocrLabel = `${job.settings?.ocr_engine || '—'} · ${sanitizeDecorativeLabel(job.settings?.ocr_mode)}`;
-                const scanLabel = sanitizeDecorativeLabel(job.settings?.scan_mode);
                 const stageLabel = formatStageLabel(job.stage);
-                const stageDetail = job.error || job.stage_detail || 'No additional stage detail recorded.';
+                const rawStageDetail = (job.error || job.stage_detail || '').trim();
+                const stageDetail = isLowValueStageDetail(rawStageDetail) ? '' : rawStageDetail;
                 const showDistinctStage =
                   stageLabel &&
                   stageLabel.toLowerCase() !== 'unknown' &&
                   stageLabel.toLowerCase() !== statusText.toLowerCase();
+                const brandLabel = formatBrandDisplay(getQueueBrandLabel(job));
+                const sourceTypeLabel = sourceMeta.secondary;
 
                 return (
                   <div key={job.job_id} className={`py-2 transition-colors ${selected ? 'bg-primary-50/55' : ''}`}>
-                    <div className="rounded-[1.7rem] px-4 py-4 transition-colors hover:bg-slate-50/80">
-                      <div className="grid gap-4 lg:grid-cols-[36px_minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,1.05fr)_100px_110px_110px_40px] lg:items-center">
+                    <div className="rounded-[1.7rem] px-4 py-4 transition-colors hover:bg-slate-50/70">
+                      <div className="grid gap-4 lg:grid-cols-[36px_minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,1.05fr)_100px_110px_110px_96px] lg:items-center">
                         <div className="flex items-start justify-center pt-1 lg:pt-0">
                           <input
                             type="checkbox"
@@ -926,23 +941,21 @@ export function Jobs() {
 
                         <div className="min-w-0">
                           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Brand</div>
-                          <Link to={`/jobs/${job.job_id}`} className="block text-lg font-bold text-slate-950 transition-colors hover:text-primary-700">
-                            {job.brand || 'Unknown brand'}
+                          <Link
+                            to={`/jobs/${job.job_id}`}
+                            className="block text-[1.02rem] font-medium leading-6 text-slate-800 transition-colors hover:text-primary-700"
+                          >
+                            {brandLabel}
                           </Link>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500" title={sourceMeta.title}>
-                            <span className="font-medium text-slate-700">{sourceMeta.primary}</span>
-                            <span className="text-slate-300">·</span>
-                            <span>{sourceMeta.secondary}</span>
-                          </div>
-                          <div className="mt-2 font-mono text-[11px] text-slate-400" title={job.job_id}>
-                            {shortenMiddle(job.job_id, 16)}
+                          <div className="mt-1 text-sm text-slate-400">
+                            {sourceTypeLabel}
                           </div>
                         </div>
 
                         <div className="min-w-0">
                           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Final category</div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-slate-900">{categoryLabel}</span>
+                            <span className="text-sm font-medium text-slate-800">{categoryLabel}</span>
                             {categoryId ? (
                               <span className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-[10px] font-mono font-semibold text-primary-700">
                                 ID {categoryId}
@@ -964,14 +977,16 @@ export function Jobs() {
                             </span>
                             {showDistinctStage ? <span className="text-sm font-medium text-slate-800">{stageLabel}</span> : null}
                           </div>
-                          <div className="mt-2 truncate text-xs text-slate-500" title={stageDetail}>
-                            {stageDetail}
-                          </div>
+                          {stageDetail ? (
+                            <div className="mt-2 truncate text-xs text-slate-500" title={stageDetail}>
+                              {stageDetail}
+                            </div>
+                          ) : null}
                         </div>
 
                         <div className="text-left lg:text-right">
                           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Confidence</div>
-                          <div className="text-sm font-semibold text-slate-900">{formatConfidenceLabel(job.confidence)}</div>
+                          <div className="text-sm font-medium text-slate-700">{formatConfidenceLabel(job.confidence)}</div>
                           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 lg:ml-auto lg:w-14">
                             <div
                               className="h-full rounded-full bg-primary-500 transition-all"
@@ -982,80 +997,23 @@ export function Jobs() {
 
                         <div className="text-left lg:text-right">
                           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Runtime</div>
-                          <div className="text-sm font-semibold text-slate-900">{formatDurationLabel(job.duration_seconds)}</div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {job.status === 'processing' ? 'in progress' : 'wall time'}
-                          </div>
+                          <div className="text-sm font-medium text-slate-700">{formatDurationLabel(job.duration_seconds)}</div>
                         </div>
 
                         <div className="text-left lg:text-right">
                           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 lg:hidden">Updated</div>
-                          <div className="text-sm font-semibold text-slate-900">{formatRelativeTimestamp(job.updated_at)}</div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {job.status === 'processing' ? 'live status' : 'last persisted'}
-                          </div>
+                          <div className="text-sm font-medium text-slate-700">{formatRelativeTimestamp(job.updated_at)}</div>
                         </div>
 
-                        <div className="flex items-start justify-end lg:justify-center">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedJobId((current) => (current === job.job_id ? null : job.job_id))}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
-                            aria-label={expanded ? 'Collapse run profile' : 'Expand run profile'}
+                        <div className="flex items-center justify-start lg:justify-end">
+                          <Link
+                            to={`/jobs/${job.job_id}`}
+                            className="inline-flex h-9 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-700 transition-colors hover:border-primary-200 hover:bg-primary-50"
                           >
-                            {expanded ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />}
-                          </button>
+                            Open
+                          </Link>
                         </div>
                       </div>
-
-                      {expanded ? (
-                        <div className="mt-4 rounded-[1.5rem] border border-slate-200/90 bg-slate-50/70 p-4">
-                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                            {[
-                              { label: 'Provider', value: providerLabel },
-                              { label: 'Model', value: modelLabel },
-                              { label: 'OCR', value: ocrLabel },
-                              { label: 'Scan', value: scanLabel },
-                              {
-                                label: 'Signals',
-                                value: [
-                                  job.settings?.enable_search ? 'Search on' : 'Search off',
-                                  job.settings?.enable_vision_board ? 'Vision board on' : 'Vision board off',
-                                  job.settings?.enable_llm_frame ? 'LLM frame on' : 'LLM frame off',
-                                ].join(' · '),
-                              },
-                            ].map((item) => (
-                              <div key={`${job.job_id}-${item.label}`} className="rounded-[1.25rem] border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{item.label}</div>
-                                <div className="mt-2 text-sm font-semibold text-slate-900 break-words">{item.value}</div>
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="min-w-0">
-                              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Source</div>
-                              <div className="mt-1 truncate text-sm text-slate-600" title={sourceMeta.title}>
-                                {sourceMeta.title}
-                              </div>
-                              <div className="mt-2 font-mono text-[11px] text-slate-400" title={job.job_id}>
-                                {job.job_id}
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-3">
-                              <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                {job.mode || '—'}
-                              </span>
-                              <Link
-                                to={`/jobs/${job.job_id}`}
-                                className="bell-button-secondary h-10 gap-2 px-4 text-xs uppercase tracking-[0.18em]"
-                              >
-                                Open details
-                              </Link>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                 );

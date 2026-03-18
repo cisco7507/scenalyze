@@ -58,10 +58,6 @@ export function Layout() {
               <span className="hidden md:inline">Shared-nothing routing</span>
             </div>
             <div className="flex items-center gap-3">
-              <span className="hidden items-center gap-2 rounded-full border border-white/18 bg-white/10 px-3 py-1 text-[10px] font-bold tracking-[0.16em] text-white/88 lg:inline-flex">
-                <LightningBoltIcon className="h-3.5 w-3.5" />
-                Observability on
-              </span>
               <button
                 type="button"
                 onClick={() => setDebugConsoleOpen((current) => !current)}
@@ -97,12 +93,6 @@ export function Layout() {
                 );
               })}
             </nav>
-
-            <div className="hidden xl:flex xl:items-center xl:justify-end">
-              <span className="rounded-full border border-white/18 bg-white/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/88">
-                Proxy-to-owner enabled
-              </span>
-            </div>
           </div>
         </div>
 
