@@ -222,6 +222,68 @@ _GENERIC_FAMILY_CONTEXT_TOKENS = {
     "telecommunications",
     "technology",
 }
+_GENERIC_BRANCH_TOKEN_CACHE_KEY: tuple[str, int] | None = None
+_GENERIC_BRANCH_TOKEN_CACHE: dict[str, object] | None = None
+
+
+def _normalize_generic_category_token(token: str) -> str:
+    normalized = normalize_whitespace(token or "").lower()
+    normalized = re.sub(r"[^a-z0-9]+", "", normalized)
+    if not normalized:
+        return ""
+    if normalized.endswith("ies") and len(normalized) > 4:
+        normalized = f"{normalized[:-3]}y"
+    elif normalized.endswith("s") and len(normalized) > 4:
+        normalized = normalized[:-1]
+    return normalized
+
+
+def _generic_category_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in (
+            _normalize_generic_category_token(raw_token)
+            for raw_token in re.findall(r"[A-Za-z0-9]+", normalize_whitespace(value or ""))
+        )
+        if token
+    }
+
+
+def _get_generic_branch_token_stats() -> dict[str, object]:
+    global _GENERIC_BRANCH_TOKEN_CACHE_KEY, _GENERIC_BRANCH_TOKEN_CACHE
+
+    records = tuple(getattr(CATEGORY_MAPPING_STATE, "records", ()) or ())
+    cache_key = (str(getattr(CATEGORY_MAPPING_STATE, "json_path_used", "") or ""), len(records))
+    if _GENERIC_BRANCH_TOKEN_CACHE_KEY == cache_key and _GENERIC_BRANCH_TOKEN_CACHE is not None:
+        return _GENERIC_BRANCH_TOKEN_CACHE
+
+    child_parent_ids = {
+        str(record.parent_id or "").strip()
+        for record in records
+        if str(record.parent_id or "").strip() not in {"", "0"}
+    }
+    branch_token_sets: list[set[str]] = []
+    branch_tokens: set[str] = set()
+    branch_token_frequency: dict[str, int] = {}
+    for record in records:
+        record_id = str(record.category_id or "").strip()
+        if record_id not in child_parent_ids and int(getattr(record, "level", 0) or 0) > 1:
+            continue
+        tokens = _generic_category_tokens(getattr(record, "name", ""))
+        if not tokens:
+            continue
+        branch_token_sets.append(tokens)
+        branch_tokens.update(tokens)
+        for token in tokens:
+            branch_token_frequency[token] = int(branch_token_frequency.get(token, 0)) + 1
+
+    _GENERIC_BRANCH_TOKEN_CACHE_KEY = cache_key
+    _GENERIC_BRANCH_TOKEN_CACHE = {
+        "branch_token_sets": tuple(branch_token_sets),
+        "branch_tokens": branch_tokens,
+        "branch_token_frequency": branch_token_frequency,
+    }
+    return _GENERIC_BRANCH_TOKEN_CACHE
 
 
 def normalize_whitespace(value: str) -> str:
@@ -265,14 +327,23 @@ def _looks_generic_freeform_category(value: str) -> bool:
         "search",
         "engine",
     }
-    tokens = {
-        token
-        for token in re.findall(r"[a-z0-9]+", normalized.replace("/", " "))
-        if token
-    }
+    tokens = _generic_category_tokens(normalized.replace("/", " "))
     if not tokens:
         return False
-    return tokens.issubset(generic_terms)
+    if tokens.issubset(generic_terms):
+        return True
+
+    branch_stats = _get_generic_branch_token_stats()
+    branch_token_sets = tuple(branch_stats.get("branch_token_sets", ()) or ())
+    branch_tokens = set(branch_stats.get("branch_tokens", set()) or set())
+    branch_token_frequency = dict(branch_stats.get("branch_token_frequency", {}) or {})
+    if any(tokens == branch_tokens_candidate for branch_tokens_candidate in branch_token_sets):
+        return True
+    if len(tokens) <= 2 and tokens.issubset(branch_tokens) and all(
+        int(branch_token_frequency.get(token, 0)) > 1 for token in tokens
+    ):
+        return True
+    return False
 
 
 def _looks_ambiguous_product_family_category(value: str) -> bool:

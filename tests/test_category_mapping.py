@@ -5,10 +5,13 @@ import pytest
 import torch
 
 from video_service.core.category_mapping import (
+    CategoryMappingState,
+    CategoryTaxonomyRecord,
     build_product_cue_query_text,
     load_category_mapping,
     select_mapping_input_text,
 )
+from video_service.core import category_mapping as category_mapping_module
 from video_service.core.categories import (
     _build_taxonomy_retrieval_alias_rows,
     _collapse_alias_scores,
@@ -124,6 +127,55 @@ def test_select_mapping_input_text_uses_compact_cues_for_food_and_beverage():
     assert result.startswith("Food & Beverage\nAvocados From Mexico")
     assert "guacamole" in result.lower()
     assert "guac" in result.lower()
+
+
+def test_looks_generic_freeform_category_uses_taxonomy_branch_tokens(monkeypatch):
+    branch_state = CategoryMappingState(
+        enabled=True,
+        category_to_id={"Banking": "10", "Mortgage Banking": "11"},
+        category_to_industry_id={"Banking": "10", "Mortgage Banking": "10"},
+        category_to_industry_name={"Banking": "Banking", "Mortgage Banking": "Banking"},
+        category_to_parent_id={"Banking": "", "Mortgage Banking": "10"},
+        category_to_parent={"Banking": "", "Mortgage Banking": "Banking"},
+        category_to_path_text={
+            "Banking": "Banking",
+            "Mortgage Banking": "Banking : Mortgage Banking",
+        },
+        category_to_level={"Banking": 0, "Mortgage Banking": 1},
+        records=(
+            CategoryTaxonomyRecord(
+                category_id="10",
+                name="Banking",
+                parent_id="0",
+                parent_name="",
+                level=0,
+                path_ids=("10",),
+                path_names=("Banking",),
+                path_text="Banking",
+                industry_id="10",
+                industry_name="Banking",
+            ),
+            CategoryTaxonomyRecord(
+                category_id="11",
+                name="Mortgage Banking",
+                parent_id="10",
+                parent_name="Banking",
+                level=1,
+                path_ids=("10", "11"),
+                path_names=("Banking", "Mortgage Banking"),
+                path_text="Banking : Mortgage Banking",
+                industry_id="10",
+                industry_name="Banking",
+            ),
+        ),
+        json_path_used="/tmp/test-taxonomy.json",
+        last_error=None,
+    )
+    monkeypatch.setattr(category_mapping_module, "CATEGORY_MAPPING_STATE", branch_state)
+    monkeypatch.setattr(category_mapping_module, "_GENERIC_BRANCH_TOKEN_CACHE_KEY", None)
+    monkeypatch.setattr(category_mapping_module, "_GENERIC_BRANCH_TOKEN_CACHE", None)
+
+    assert category_mapping_module._looks_generic_freeform_category("Banking") is True
 
 
 def test_select_mapping_input_text_preserves_exact_taxonomy_match():

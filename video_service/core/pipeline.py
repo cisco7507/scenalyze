@@ -1298,7 +1298,8 @@ def _broad_neighbor_dispersion_reason(
         return None
     if not current_canonical or not raw_category or len(primary_candidates) < 2:
         return None
-    if not _looks_generic_freeform_category(raw_category):
+    raw_tokens = _category_overlap_tokens(raw_category)
+    if not raw_tokens or len(raw_tokens) > 4:
         return None
 
     try:
@@ -1326,6 +1327,10 @@ def _broad_neighbor_dispersion_reason(
         if family_label not in family_labels:
             family_labels.append(family_label)
     if len(family_labels) < 2:
+        return None
+
+    canonical_tokens = _category_overlap_tokens(current_canonical)
+    if raw_tokens & canonical_tokens and len(family_labels) == 2 and len(considered) == 2:
         return None
 
     return (
