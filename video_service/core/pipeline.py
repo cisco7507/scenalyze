@@ -639,6 +639,37 @@ def _label_in_taxonomy_branch(label_name: str, branch_name: str) -> bool:
     return bool(branch_folded and branch_folded in path_names)
 
 
+def _taxonomy_parent_label_for_label(label_name: str) -> str:
+    clean = str(label_name or "").strip()
+    if not clean:
+        return ""
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    parent_by_label = dict(taxonomy_stats.get("parent_by_label", {}) or {})
+    id_to_label = dict(taxonomy_stats.get("id_to_label", {}) or {})
+    parent_id = str(parent_by_label.get(clean, "") or "").strip()
+    if not parent_id:
+        return clean
+    return str(id_to_label.get(parent_id, "") or "").strip() or clean
+
+
+def _build_category_family_candidates(candidate_labels: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    ordered_families: list[str] = []
+    family_members: dict[str, list[str]] = {}
+    for candidate_label in candidate_labels:
+        clean = str(candidate_label or "").strip()
+        if not clean:
+            continue
+        family_label = _taxonomy_parent_label_for_label(clean)
+        if not family_label:
+            family_label = clean
+        if family_label not in ordered_families:
+            ordered_families.append(family_label)
+        members = family_members.setdefault(family_label, [])
+        if clean not in members:
+            members.append(clean)
+    return ordered_families, family_members
+
+
 def _is_broad_media_taxonomy_label(label_name: str) -> bool:
     clean = str(label_name or "").strip()
     if not clean:
@@ -1962,7 +1993,7 @@ def _should_run_entity_search_rescue(
     except (TypeError, ValueError):
         mapper_score = 0.0
 
-    if not any((raw_generic, canonical_broad, visual_media, domain)):
+    if not any((raw_generic, canonical_broad, visual_media)):
         return False, "no_entity_signal"
 
     if mapper_score >= 0.95 and canonical and _is_specific_media_taxonomy_label(canonical):
@@ -3963,27 +3994,91 @@ def process_single_video(
             )
             category_rerank_comparison = _category_match_snapshot(res, category_match)
             rerank_fn = getattr(llm_engine, "query_category_rerank", None)
+            family_selection_fn = getattr(llm_engine, "query_category_family_selection", None)
             if not callable(rerank_fn):
                 reranked_res, rerank_status = None, "unsupported"
+                rerank_candidate_categories = list(category_rerank_candidates)
+                family_note = ""
             else:
-                reranked_res, rerank_status = rerank_fn(
-                    p,
-                    m,
-                    brand=str(res.get("brand", "") or ""),
-                    raw_category=str(res.get("category", "") or ""),
-                    mapped_category=str(category_match.get("canonical_category", "") or ""),
-                    ocr_text=ocr_text,
-                    reasoning=str(res.get("reasoning", "") or ""),
-                    candidate_categories=category_rerank_candidates,
-                    candidate_category_contexts=category_mapper.get_category_context_map(
-                        category_rerank_candidates
+                rerank_candidate_categories = list(category_rerank_candidates)
+                family_note = ""
+                if callable(family_selection_fn):
+                    family_candidates, family_members = _build_category_family_candidates(
+                        rerank_candidate_categories
                     )
-                    if hasattr(category_mapper, "get_category_context_map")
-                    else None,
-                    visual_matches=category_rerank_visual_matches,
-                    context_size=ctx,
-                    product_focus_guidance_enabled=product_focus_guidance_enabled,
-                )
+                    if len(family_candidates) > 1:
+                        family_res, family_status = family_selection_fn(
+                            p,
+                            m,
+                            brand=str(res.get("brand", "") or ""),
+                            raw_category=str(res.get("category", "") or ""),
+                            mapped_category=str(category_match.get("canonical_category", "") or ""),
+                            ocr_text=ocr_text,
+                            reasoning=str(res.get("reasoning", "") or ""),
+                            candidate_families=family_candidates,
+                            candidate_family_contexts=category_mapper.get_category_context_map(
+                                family_candidates
+                            )
+                            if hasattr(category_mapper, "get_category_context_map")
+                            else None,
+                            family_members=family_members,
+                            visual_matches=category_rerank_visual_matches,
+                            context_size=ctx,
+                        )
+                        if isinstance(family_res, dict):
+                            selected_family = str(family_res.get("family", "") or "").strip()
+                            selected_members = list(family_members.get(selected_family, []))
+                            if selected_family and selected_members:
+                                rerank_candidate_categories = selected_members
+                                family_note = f"Selected family {selected_family!r}. "
+                                logger.info(
+                                    "[%s] category_family_selected family=%r candidates=%s",
+                                    url,
+                                    selected_family,
+                                    rerank_candidate_categories,
+                                )
+                            else:
+                                logger.info(
+                                    "[%s] category_family_selection_ignored reason=invalid_family family=%r",
+                                    url,
+                                    selected_family,
+                                )
+                        else:
+                            logger.info(
+                                "[%s] category_family_selection_skipped reason=%s",
+                                url,
+                                family_status,
+                            )
+                if len(rerank_candidate_categories) == 1:
+                    reranked_res = {
+                        "brand": str(res.get("brand", "") or ""),
+                        "category": rerank_candidate_categories[0],
+                        "confidence": res.get("confidence", 0.0),
+                        "reasoning": (
+                            f"{family_note}The selected family constrained the rerank to the sole "
+                            f"remaining candidate {rerank_candidate_categories[0]!r}."
+                        ).strip(),
+                    }
+                    rerank_status = "ok"
+                else:
+                    reranked_res, rerank_status = rerank_fn(
+                        p,
+                        m,
+                        brand=str(res.get("brand", "") or ""),
+                        raw_category=str(res.get("category", "") or ""),
+                        mapped_category=str(category_match.get("canonical_category", "") or ""),
+                        ocr_text=ocr_text,
+                        reasoning=str(res.get("reasoning", "") or ""),
+                        candidate_categories=rerank_candidate_categories,
+                        candidate_category_contexts=category_mapper.get_category_context_map(
+                            rerank_candidate_categories
+                        )
+                        if hasattr(category_mapper, "get_category_context_map")
+                        else None,
+                        visual_matches=category_rerank_visual_matches,
+                        context_size=ctx,
+                        product_focus_guidance_enabled=product_focus_guidance_enabled,
+                    )
             if isinstance(reranked_res, dict):
                 reranked_exact_match = _exact_taxonomy_match_from_label(
                     str(reranked_res.get("category", "") or "")
@@ -4005,7 +4100,7 @@ def process_single_video(
                 rerank_ok, rerank_accept_reason = _accept_category_rerank_result(
                     category_match,
                     reranked_match,
-                    category_rerank_candidates,
+                    rerank_candidate_categories,
                 )
                 if rerank_ok:
                     res = reranked_res
@@ -4029,7 +4124,8 @@ def process_single_video(
                         comparison_payload=category_rerank_comparison,
                         evidence_note=(
                             f"Reranked within mapper candidates because {rerank_accept_reason}. "
-                            f"Candidates: {', '.join(category_rerank_candidates)}."
+                            f"{family_note}"
+                            f"Candidates: {', '.join(rerank_candidate_categories)}."
                         ),
                     )
                 else:
@@ -4053,7 +4149,8 @@ def process_single_video(
                         comparison_payload=category_rerank_comparison,
                         evidence_note=(
                             f"Rerank was rejected because {rerank_accept_reason}. "
-                            f"Candidates: {', '.join(category_rerank_candidates)}."
+                            f"{family_note}"
+                            f"Candidates: {', '.join(rerank_candidate_categories)}."
                         ),
                     )
             else:
@@ -4076,7 +4173,8 @@ def process_single_video(
                     llm_mode="standard",
                     evidence_note=(
                         f"Rerank did not run: {rerank_status}. "
-                        f"Candidates: {', '.join(category_rerank_candidates)}."
+                        f"{family_note}"
+                        f"Candidates: {', '.join(rerank_candidate_categories)}."
                     ),
                 )
 

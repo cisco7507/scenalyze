@@ -611,6 +611,50 @@ def test_lm_studio_entity_branch_selection_uses_category_index_schema(monkeypatc
     assert "category" not in schema["properties"]
 
 
+def test_lm_studio_category_family_selection_uses_family_index_schema(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"family_index":2,"confidence":0.91,"reasoning":"ok"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    llm = HybridLLM()
+    result, status = llm.query_category_family_selection(
+        provider="LM Studio",
+        backend_model="local-model",
+        brand="Audible",
+        raw_category="Audio Books",
+        mapped_category="Bookstores",
+        ocr_text="Audible original audiobook now streaming",
+        reasoning="The ad promotes an audiobook service.",
+        candidate_families=["Household Appliance Manufacture", "Book Publishers", "Bookstores"],
+        family_members={
+            "Household Appliance Manufacture": ["Personal Audio"],
+            "Book Publishers": ["Book Publishers"],
+            "Bookstores": ["Bookstores"],
+        },
+    )
+
+    assert status == "ok"
+    assert result["family"] == "Book Publishers"
+    schema = calls[0]["json"]["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["family_index", "confidence", "reasoning"]
+    assert "brand" not in schema["properties"]
+    assert "category" not in schema["properties"]
+
+
 def test_ollama_pipeline_omits_categories_from_prompt_and_sends_no_schema(monkeypatch):
     calls: list[dict] = []
 
@@ -762,6 +806,47 @@ def test_query_category_rerank_rejects_when_retry_still_omits_category_index(mon
 
     assert result is None
     assert status == "missing_category_index"
+
+
+def test_query_category_family_selection_accepts_exact_family_text_on_retry(monkeypatch):
+    calls = {"count": 0}
+
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "confidence": 0.99,
+                    "reasoning": "Missing family index.",
+                }
+            return {
+                "category": "Book Publishers",
+                "confidence": 0.95,
+                "reasoning": "Best exact family from the provided list.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_category_family_selection(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="Audible",
+        raw_category="Audio Books",
+        mapped_category="Bookstores",
+        ocr_text="Audible original audiobook now streaming",
+        reasoning="The ad promotes an audiobook service.",
+        candidate_families=["Household Appliance Manufacture", "Book Publishers", "Bookstores"],
+        family_members={
+            "Household Appliance Manufacture": ["Personal Audio"],
+            "Book Publishers": ["Book Publishers"],
+            "Bookstores": ["Bookstores"],
+        },
+    )
+
+    assert status == "ok"
+    assert result["family"] == "Book Publishers"
+    assert result["family_index"] == 2
 
 
 def test_query_category_rerank_accepts_exact_candidate_text_on_retry(monkeypatch):

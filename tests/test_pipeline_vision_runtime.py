@@ -1016,6 +1016,154 @@ def test_pipeline_category_rerank_triggers_for_weak_freeform_mapping_without_ext
     )
 
 
+def test_pipeline_category_rerank_selects_supported_family_before_leaf(monkeypatch):
+    family_calls = {"count": 0}
+    rerank_calls = {"count": 0}
+
+    class _DummyMapper:
+        categories = [
+            "Book Publishers",
+            "Bookstores",
+            "Retail Subscription Services",
+            "Household Appliance Manufacture",
+            "Personal Audio",
+        ]
+        cat_to_id = {
+            "Book Publishers": "290",
+            "Bookstores": "200",
+            "Retail Subscription Services": "9345",
+            "Household Appliance Manufacture": "123",
+            "Personal Audio": "9141",
+        }
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(category_id="290", name="Book Publishers", path_names=("Book Publishers",), parent_id="0"),
+                types.SimpleNamespace(category_id="200", name="Bookstores", path_names=("Bookstores",), parent_id="0"),
+                types.SimpleNamespace(category_id="9345", name="Retail Subscription Services", path_names=("Retail Subscription Services",), parent_id="0"),
+                types.SimpleNamespace(category_id="123", name="Household Appliance Manufacture", path_names=("Household Appliance Manufacture",), parent_id="0"),
+                types.SimpleNamespace(category_id="9141", name="Personal Audio", path_names=("Household Appliance Manufacture", "Personal Audio"), parent_id="123"),
+            )
+        )
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            mapping = {
+                "Audio Books": ("Bookstores", "200", 0.58),
+                "Book Publishers": ("Book Publishers", "290", 0.99),
+                "Personal Audio": ("Personal Audio", "9141", 0.99),
+            }
+            canonical, category_id, score = mapping.get(raw, (raw or "Bookstores", "", 0.5))
+            return {
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", reasoning_summary="", top_k=8):
+            query = str(raw_category or "")
+            if query == "Audio Books":
+                return [
+                    ("Bookstores", 0.58),
+                    ("Personal Audio", 0.57),
+                    ("Book Publishers", 0.56),
+                    ("Retail Subscription Services", 0.55),
+                ][:top_k]
+            if "Audible" in query or "audiobook" in query.lower():
+                return [
+                    ("Book Publishers", 0.62),
+                    ("Bookstores", 0.60),
+                    ("Retail Subscription Services", 0.59),
+                    ("Personal Audio", 0.52),
+                ][:top_k]
+            return [("Bookstores", 0.58), ("Personal Audio", 0.57), ("Book Publishers", 0.56)][:top_k]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Book Publishers": "Book Publishers",
+                "Bookstores": "Bookstores",
+                "Retail Subscription Services": "Retail Subscription Services",
+                "Household Appliance Manufacture": "Household Appliance Manufacture",
+                "Personal Audio": "Household Appliance Manufacture : Personal Audio",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Audible original audiobook listen now"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Audible",
+                "category": "Audio Books",
+                "confidence": 0.99,
+                "reasoning": "The ad promotes audiobook listening through Audible.",
+            }
+
+        @staticmethod
+        def query_category_family_selection(*args, **kwargs):
+            family_calls["count"] += 1
+            return (
+                {
+                    "family": "Book Publishers",
+                    "family_index": 3,
+                    "confidence": 0.94,
+                    "reasoning": "The ad is about audiobook content, not audio hardware.",
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls["count"] += 1
+            return None, "should_not_run_after_family_constrains_to_single_candidate"
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/audible.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-family-audible",
+    )
+
+    assert family_calls["count"] == 1
+    assert rerank_calls["count"] == 0
+    assert row[2] == "290"
+    assert row[3] == "Book Publishers"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank"
+        and attempt.get("status") == "accepted"
+        and "Selected family 'Book Publishers'" in str(attempt.get("evidence_note", ""))
+        for attempt in attempts
+    )
+
+
 def test_extract_ocr_focus_region_returns_smaller_crop_for_text_band():
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
     cv2.putText(frame, "BRAND.COM", (34, 178), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
@@ -3200,6 +3348,113 @@ def test_pipeline_runs_entity_search_before_category_rerank_for_movie_titles(mon
         "initial",
         "entity_search_rescue",
     ]
+
+
+def test_pipeline_skips_entity_search_for_non_media_domain_hints(monkeypatch):
+    entity_calls = {"grounding": 0, "rescue": 0}
+
+    class _DummyMapper:
+        categories = ["Consumer Electronics Stores", "Furniture Stores", "Movie Theatres"]
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(category_id="205", name="Consumer Electronics Stores", path_names=("Consumer Electronics Stores",), parent_id="0"),
+                types.SimpleNamespace(category_id="206", name="Furniture Stores", path_names=("Furniture Stores",), parent_id="0"),
+                types.SimpleNamespace(category_id="178", name="Movie Theatres", path_names=("Movie Theatres",), parent_id="0"),
+            )
+        )
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            if raw == "Retail - Electronics & Home Goods":
+                return {
+                    "canonical_category": "Consumer Electronics Stores",
+                    "category_id": "205",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.91,
+                }
+            return {
+                "canonical_category": raw or "Consumer Electronics Stores",
+                "category_id": "205",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [
+                ("Consumer Electronics Stores", 0.91),
+                ("Furniture Stores", 0.80),
+                ("Movie Theatres", 0.40),
+            ]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Consumer Electronics Stores": "Consumer Electronics Stores",
+                "Furniture Stores": "Furniture Stores",
+                "Movie Theatres": "Movie Theatres",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "The Brick thebrick.com low prices on home electronics and furniture"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "The Brick",
+                "category": "Retail - Electronics & Home Goods",
+                "confidence": 0.99,
+                "reasoning": "The ad promotes a retail chain selling electronics and home goods.",
+            }
+
+        @staticmethod
+        def query_entity_grounding(*args, **kwargs):
+            entity_calls["grounding"] += 1
+            return None, "should_not_run"
+
+        @staticmethod
+        def query_entity_search_rescue(*args, **kwargs):
+            entity_calls["rescue"] += 1
+            return None, "should_not_run"
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/the-brick.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-entity-search-non-media-skip",
+    )
+
+    assert entity_calls == {"grounding": 0, "rescue": 0}
+    assert row[2] == "205"
+    assert row[3] == "Consumer Electronics Stores"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert not any(attempt.get("attempt_type") == "entity_search_rescue" for attempt in attempts)
 
 
 def test_pipeline_accepts_entity_search_rescue_for_stage_presentation(monkeypatch):

@@ -57,6 +57,19 @@ def _category_index_response_schema() -> dict:
     }
 
 
+def _family_index_response_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "family_index": {"type": "integer"},
+            "confidence": {"type": "number"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["family_index", "confidence", "reasoning"],
+        "additionalProperties": True,
+    }
+
+
 def _entity_grounding_response_schema() -> dict:
     return {
         "type": "object",
@@ -1456,6 +1469,169 @@ class HybridLLM:
             canonical_candidate,
             original_category_text,
             res.get("category_index"),
+        )
+        return res, "ok"
+
+    def query_category_family_selection(
+        self,
+        provider,
+        backend_model,
+        brand: str,
+        raw_category: str,
+        mapped_category: str,
+        ocr_text: str,
+        reasoning: str,
+        candidate_families: list[str] | None = None,
+        candidate_family_contexts: dict[str, str] | None = None,
+        family_members: dict[str, list[str]] | None = None,
+        visual_matches: list[tuple[str, float]] | None = None,
+        context_size=8192,
+    ) -> tuple[dict | None, str]:
+        try:
+            provider_plugin = create_provider(provider, backend_model, context_size=int(context_size))
+        except ValueError as exc:
+            return None, f"provider_error:{exc}"
+
+        normalized_families = {
+            str(candidate or "").strip().casefold(): str(candidate or "").strip()
+            for candidate in (candidate_families or [])
+            if str(candidate or "").strip()
+        }
+        if len(normalized_families) < 2:
+            return None, "insufficient_families"
+
+        visual_hint_text = ""
+        if visual_matches:
+            visual_hint_text = " | ".join(
+                f"{label} ({score:.4f})" for label, score in visual_matches[:4]
+            )
+
+        ordered_families = list(normalized_families.values())
+        family_lines: list[str] = []
+        for idx, family in enumerate(ordered_families, start=1):
+            family_lines.append(f"{idx}. {family}")
+            path_text = ""
+            if candidate_family_contexts:
+                path_text = str(candidate_family_contexts.get(family, "") or "").strip()
+            if path_text and path_text != family:
+                family_lines.append(f"   Family Path: {path_text}")
+            members = [str(member or "").strip() for member in (family_members or {}).get(family, []) if str(member or "").strip()]
+            if members:
+                family_lines.append(f"   Candidate Labels: {', '.join(members[:6])}")
+        family_text = "\n".join(family_lines)
+        ocr_excerpt = " ".join((ocr_text or "").split())[:500]
+        reasoning_excerpt = " ".join((reasoning or "").split())[:500]
+
+        system_prompt = (
+            "You are selecting the taxonomy family or branch before the final leaf category is chosen. "
+            "Choose exactly one family from the supplied numbered family list only. "
+            "Return the 1-based family_index for the chosen family. "
+            "The family_index is authoritative. "
+            "Prefer the family that best represents what is being advertised overall: the product, service, content, retailer, institution, or venue actually promoted. "
+            "Do not choose an incidental device, channel, or medium unless the ad is primarily about that device, channel, or medium. "
+            "Output STRICT JSON: {\"family_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}"
+        )
+        user_prompt = (
+            f"Brand: {brand}\n"
+            f"LLM Category Guess: {raw_category}\n"
+            f"Current Mapped Category: {mapped_category}\n"
+            f"Candidate Families:\n{family_text}\n"
+            f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+            f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
+            f"Visual Hints: {visual_hint_text or 'None'}\n"
+            "Return the single best-supported family_index from the family list."
+        )
+
+        def _resolve_index(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_index = payload.get("family_index")
+            try:
+                family_index = int(chosen_index)
+            except (TypeError, ValueError):
+                return None, 0
+            if 1 <= family_index <= len(ordered_families):
+                return ordered_families[family_index - 1], family_index
+            return None, 0
+
+        def _resolve_exact_family_text(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_text = str(payload.get("family", "") or payload.get("category", "") or "").strip()
+            if not chosen_text:
+                return None, 0
+            canonical_family = normalized_families.get(chosen_text.casefold())
+            if canonical_family is None:
+                return None, 0
+            for idx, family in enumerate(ordered_families, start=1):
+                if family == canonical_family:
+                    return canonical_family, idx
+            return None, 0
+
+        try:
+            res = provider_plugin.generate_json(
+                system_prompt,
+                user_prompt,
+                response_schema=_family_index_response_schema(),
+                schema_name="category_family_selection",
+            )
+        except Exception as exc:
+            return None, f"provider_error:{exc}"
+        if not isinstance(res, dict):
+            return None, "invalid_llm_response"
+
+        original_family_text = str(res.get("family", "") or res.get("category", "") or "").strip()
+        canonical_family, resolved_index = _resolve_index(res)
+        resolution_source = f"family_index:{resolved_index}" if resolved_index else ""
+        if canonical_family is None:
+            logger.info(
+                "category_family_selection_retry_triggered reason=missing_family_index family_text=%r family_index=%r",
+                original_family_text,
+                res.get("family_index"),
+            )
+            retry_system_prompt = (
+                "You must select exactly one family from the numbered family list. "
+                "Return STRICT JSON only as {\"family_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}. "
+                "The family_index is required and must be the 1-based number of the chosen family. "
+                "Do not return family text. Do not explain alternatives outside the list."
+            )
+            retry_user_prompt = (
+                f"Candidate Families:\n{family_text}\n"
+                f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+                f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
+                f"Visual Hints: {visual_hint_text or 'None'}\n"
+                "Return only the single best family_index from the family list."
+            )
+            try:
+                retry_res = provider_plugin.generate_json(
+                    retry_system_prompt,
+                    retry_user_prompt,
+                    response_schema=_family_index_response_schema(),
+                    schema_name="category_family_selection_retry",
+                )
+            except Exception as exc:
+                return None, f"provider_error:{exc}"
+            if not isinstance(retry_res, dict):
+                return None, "invalid_llm_response"
+            original_family_text = str(retry_res.get("family", "") or retry_res.get("category", "") or "").strip()
+            canonical_family, resolved_index = _resolve_index(retry_res)
+            if canonical_family is None:
+                canonical_family, resolved_index = _resolve_exact_family_text(retry_res)
+                if canonical_family is None:
+                    return None, "missing_family_index"
+                resolution_source = f"retry_family_text_exact:{resolved_index}"
+            else:
+                resolution_source = f"retry_family_index:{resolved_index}"
+            res = retry_res
+
+        res["family"] = canonical_family
+        res["family_index"] = resolved_index
+        logger.info(
+            "category_family_selection_resolved source=%s family=%r family_text=%r family_index=%r",
+            resolution_source or "unknown",
+            canonical_family,
+            original_family_text,
+            res.get("family_index"),
         )
         return res, "ok"
 
