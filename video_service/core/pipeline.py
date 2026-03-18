@@ -521,6 +521,42 @@ _ENTITY_SEARCH_GENERIC_MEDIA_CATEGORIES = {
     "theater",
     "theatre",
 }
+_ENTITY_SEARCH_MEDIA_OCR_CUES = {
+    "official trailer",
+    "trailer",
+    "now playing",
+    "coming soon",
+    "only in theatres",
+    "only in theaters",
+    "in theatres",
+    "in theaters",
+    "streaming now",
+    "watch now",
+    "season premiere",
+    "series premiere",
+    "episode",
+    "on stage",
+    "live on stage",
+    "broadway",
+    "imax",
+}
+_ENTITY_SEARCH_MEDIA_DOMAIN_TOKENS = {
+    "movie",
+    "movies",
+    "film",
+    "films",
+    "cinema",
+    "theater",
+    "theatre",
+    "broadway",
+    "imax",
+    "trailer",
+    "stream",
+    "streaming",
+    "episode",
+    "series",
+    "tv",
+}
 _BROAD_MEDIA_TAXONOMY_LABELS = {
     "Movies & TV Production and Distribution",
     "Movies & TV Production and Distribution - All else",
@@ -826,6 +862,23 @@ def _extract_ocr_domains(text: str) -> list[str]:
             match for match in matches if match and _is_valid_search_domain(match.split("/", 1)[0])
         )
     )
+
+
+def _has_media_domain_hint(domains: list[str]) -> bool:
+    for domain in domains:
+        raw_parts = re.split(r"[^a-z0-9]+", str(domain or "").lower())
+        normalized_parts = {
+            _normalize_category_overlap_token(part)
+            for part in raw_parts
+            if _normalize_category_overlap_token(part)
+        }
+        if normalized_parts & _ENTITY_SEARCH_MEDIA_DOMAIN_TOKENS:
+            return True
+    return False
+
+
+def _has_media_ocr_cue(text: str) -> bool:
+    return _text_has_any_cue(text, _ENTITY_SEARCH_MEDIA_OCR_CUES)
 
 
 def _top_visual_matches(sorted_vision: dict[str, float], limit: int = 3) -> list[tuple[str, float]]:
@@ -2145,6 +2198,8 @@ def _should_run_entity_search_rescue(
     raw_generic = _looks_like_generic_media_category(raw_category)
     canonical_broad = _is_broad_media_taxonomy_label(canonical)
     domain = _extract_ocr_domains(ocr_text)
+    media_domain = _has_media_domain_hint(domain)
+    ocr_media = _has_media_ocr_cue(ocr_text)
 
     visual_matches = _top_visual_matches(sorted_vision, limit=2)
     visual_media = any(
@@ -2162,7 +2217,10 @@ def _should_run_entity_search_rescue(
     except (TypeError, ValueError):
         mapper_score = 0.0
 
-    if not any((raw_generic, canonical_broad, visual_media)):
+    # Media entity search is a media-only rescue path. Vision can reinforce a
+    # likely media decision, but it should not be the sole trigger for entering
+    # this flow when the textual/category evidence is clearly non-media.
+    if not any((raw_generic, canonical_broad, media_domain, ocr_media)):
         return False, "no_entity_signal"
 
     if mapper_score >= 0.95 and canonical and _is_specific_media_taxonomy_label(canonical):
@@ -2173,12 +2231,14 @@ def _should_run_entity_search_rescue(
         f"canonical={canonical!r}",
         f"mapper_score={mapper_score:.4f}",
     ]
-    if domain:
-        reasons.append(f"domain_hint={domain[0]!r}")
+    if media_domain and domain:
+        reasons.append(f"media_domain_hint={domain[0]!r}")
     if raw_generic:
         reasons.append("generic_media_raw")
     if canonical_broad:
         reasons.append("broad_media_canonical")
+    if ocr_media:
+        reasons.append("ocr_media_hint")
     if visual_media:
         reasons.append("visual_media_hint")
     return True, ";".join(reasons)

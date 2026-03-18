@@ -3457,6 +3457,50 @@ def test_pipeline_skips_entity_search_for_non_media_domain_hints(monkeypatch):
     assert not any(attempt.get("attempt_type") == "entity_search_rescue" for attempt in attempts)
 
 
+def test_entity_search_requires_non_visual_media_signal():
+    should_run, reason = pipeline_module._should_run_entity_search_rescue(
+        enable_search=True,
+        express_mode=False,
+        result_payload={
+            "brand": "No Frills",
+            "category": "Grocery",
+        },
+        category_match={
+            "canonical_category": "Grocery Stores",
+            "category_match_score": 0.8882,
+        },
+        ocr_text="No Frills grocery fresh produce and weekly specials",
+        sorted_vision={
+            "Movie Theatres": 0.81,
+            "Entertainment and Performance Arts - All else": 0.72,
+        },
+    )
+
+    assert should_run is False
+    assert reason == "no_entity_signal"
+
+
+def test_entity_search_allows_media_text_or_domain_signal_without_media_mapping():
+    should_run, reason = pipeline_module._should_run_entity_search_rescue(
+        enable_search=True,
+        express_mode=False,
+        result_payload={
+            "brand": "Mercy",
+            "category": "Retail",
+        },
+        category_match={
+            "canonical_category": "Retail",
+            "category_match_score": 0.74,
+        },
+        ocr_text="Mercy movie.ca official trailer now playing in IMAX",
+        sorted_vision={},
+    )
+
+    assert should_run is True
+    assert "media_domain_hint='movie.ca'" in reason
+    assert "ocr_media_hint" in reason
+
+
 def test_pipeline_accepts_entity_search_rescue_for_stage_presentation(monkeypatch):
     grounding_calls = []
     entity_calls = []
