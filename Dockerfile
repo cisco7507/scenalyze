@@ -12,7 +12,7 @@
 #
 # Apple Silicon (MPS):
 #   MPS is not available inside Docker; use direct venv setup on host.
-#   See docs/DEPLOYMENT.md → "Local Development".
+#   See docs/technical/09-deployment-and-runbooks.md → "Local Development".
 # ============================================================
 
 FROM python:3.11-slim AS base

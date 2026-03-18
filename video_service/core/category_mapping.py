@@ -1,18 +1,14 @@
+import json
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
-import pandas as pd
-
 from video_service.core.utils import logger
 
-ID_COLUMN = "ID"
-CATEGORY_COLUMN = "Freewheel Industry Category"
-REQUIRED_COLUMNS = (ID_COLUMN, CATEGORY_COLUMN)
-DEFAULT_CATEGORY_CSV_PATH = (
-    Path(__file__).resolve().parent.parent / "data" / "categories.csv"
+DEFAULT_CATEGORY_JSON_PATH = (
+    Path(__file__).resolve().parents[2] / "freewheel.json"
 ).resolve()
 UNKNOWN_CATEGORY_VALUES = {"unknown", "none", "n/a", "n-a", ""}
 _critical_messages_logged: set[str] = set()
@@ -226,6 +222,68 @@ _GENERIC_FAMILY_CONTEXT_TOKENS = {
     "telecommunications",
     "technology",
 }
+_GENERIC_BRANCH_TOKEN_CACHE_KEY: tuple[str, int] | None = None
+_GENERIC_BRANCH_TOKEN_CACHE: dict[str, object] | None = None
+
+
+def _normalize_generic_category_token(token: str) -> str:
+    normalized = normalize_whitespace(token or "").lower()
+    normalized = re.sub(r"[^a-z0-9]+", "", normalized)
+    if not normalized:
+        return ""
+    if normalized.endswith("ies") and len(normalized) > 4:
+        normalized = f"{normalized[:-3]}y"
+    elif normalized.endswith("s") and len(normalized) > 4:
+        normalized = normalized[:-1]
+    return normalized
+
+
+def _generic_category_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in (
+            _normalize_generic_category_token(raw_token)
+            for raw_token in re.findall(r"[A-Za-z0-9]+", normalize_whitespace(value or ""))
+        )
+        if token
+    }
+
+
+def _get_generic_branch_token_stats() -> dict[str, object]:
+    global _GENERIC_BRANCH_TOKEN_CACHE_KEY, _GENERIC_BRANCH_TOKEN_CACHE
+
+    records = tuple(getattr(CATEGORY_MAPPING_STATE, "records", ()) or ())
+    cache_key = (str(getattr(CATEGORY_MAPPING_STATE, "json_path_used", "") or ""), len(records))
+    if _GENERIC_BRANCH_TOKEN_CACHE_KEY == cache_key and _GENERIC_BRANCH_TOKEN_CACHE is not None:
+        return _GENERIC_BRANCH_TOKEN_CACHE
+
+    child_parent_ids = {
+        str(record.parent_id or "").strip()
+        for record in records
+        if str(record.parent_id or "").strip() not in {"", "0"}
+    }
+    branch_token_sets: list[set[str]] = []
+    branch_tokens: set[str] = set()
+    branch_token_frequency: dict[str, int] = {}
+    for record in records:
+        record_id = str(record.category_id or "").strip()
+        if record_id not in child_parent_ids and int(getattr(record, "level", 0) or 0) > 1:
+            continue
+        tokens = _generic_category_tokens(getattr(record, "name", ""))
+        if not tokens:
+            continue
+        branch_token_sets.append(tokens)
+        branch_tokens.update(tokens)
+        for token in tokens:
+            branch_token_frequency[token] = int(branch_token_frequency.get(token, 0)) + 1
+
+    _GENERIC_BRANCH_TOKEN_CACHE_KEY = cache_key
+    _GENERIC_BRANCH_TOKEN_CACHE = {
+        "branch_token_sets": tuple(branch_token_sets),
+        "branch_tokens": branch_tokens,
+        "branch_token_frequency": branch_token_frequency,
+    }
+    return _GENERIC_BRANCH_TOKEN_CACHE
 
 
 def normalize_whitespace(value: str) -> str:
@@ -245,6 +303,9 @@ def _looks_generic_freeform_category(value: str) -> bool:
         return False
 
     generic_terms = {
+        "food",
+        "beverage",
+        "beverages",
         "technology",
         "internet",
         "service",
@@ -266,10 +327,23 @@ def _looks_generic_freeform_category(value: str) -> bool:
         "search",
         "engine",
     }
-    tokens = {token for token in normalized.replace("/", " ").split() if token}
+    tokens = _generic_category_tokens(normalized.replace("/", " "))
     if not tokens:
         return False
-    return tokens.issubset(generic_terms)
+    if tokens.issubset(generic_terms):
+        return True
+
+    branch_stats = _get_generic_branch_token_stats()
+    branch_token_sets = tuple(branch_stats.get("branch_token_sets", ()) or ())
+    branch_tokens = set(branch_stats.get("branch_tokens", set()) or set())
+    branch_token_frequency = dict(branch_stats.get("branch_token_frequency", {}) or {})
+    if any(tokens == branch_tokens_candidate for branch_tokens_candidate in branch_token_sets):
+        return True
+    if len(tokens) <= 2 and tokens.issubset(branch_tokens) and all(
+        int(branch_token_frequency.get(token, 0)) > 1 for token in tokens
+    ):
+        return True
+    return False
 
 
 def _looks_ambiguous_product_family_category(value: str) -> bool:
@@ -550,10 +624,31 @@ def select_mapping_input_text(
 
 
 @dataclass(frozen=True)
+class CategoryTaxonomyRecord:
+    category_id: str
+    name: str
+    parent_id: str
+    parent_name: str
+    level: int
+    path_ids: tuple[str, ...]
+    path_names: tuple[str, ...]
+    path_text: str
+    industry_id: str
+    industry_name: str
+
+
+@dataclass(frozen=True)
 class CategoryMappingState:
     enabled: bool
     category_to_id: Dict[str, str]
-    csv_path_used: str
+    category_to_industry_id: Dict[str, str]
+    category_to_industry_name: Dict[str, str]
+    category_to_parent_id: Dict[str, str]
+    category_to_parent: Dict[str, str]
+    category_to_path_text: Dict[str, str]
+    category_to_level: Dict[str, int]
+    records: tuple[CategoryTaxonomyRecord, ...]
+    json_path_used: str
     last_error: Optional[str]
 
     @property
@@ -564,72 +659,229 @@ class CategoryMappingState:
         return {
             "category_mapping_enabled": self.enabled,
             "category_mapping_count": self.count,
-            "category_csv_path_used": self.csv_path_used,
+            "category_json_path_used": self.json_path_used,
             "last_error": self.last_error,
         }
 
 
-def resolve_category_csv_path(csv_path: Optional[str] = None) -> Path:
-    env_path = os.environ.get("CATEGORY_CSV_PATH")
-    chosen = csv_path or env_path or str(DEFAULT_CATEGORY_CSV_PATH)
+def resolve_category_json_path(json_path: Optional[str] = None) -> Path:
+    env_path = os.environ.get("CATEGORY_JSON_PATH")
+    chosen = json_path or env_path or str(DEFAULT_CATEGORY_JSON_PATH)
     return Path(chosen).expanduser().resolve()
 
 
-def load_category_mapping(csv_path: Optional[str] = None) -> CategoryMappingState:
-    path = resolve_category_csv_path(csv_path)
+def _normalize_category_id(value: object) -> str:
+    return normalize_whitespace(str(value or ""))
+
+
+def _normalize_parent_id(value: object) -> str:
+    normalized = _normalize_category_id(value)
+    return normalized or "0"
+
+
+def _normalize_category_level(value: object) -> int:
+    try:
+        return int(str(value or "0").strip() or "0")
+    except (TypeError, ValueError):
+        return 0
+
+
+def _build_taxonomy_path(
+    item_id: str,
+    item_lookup: dict[str, dict[str, object]],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    path_ids: list[str] = []
+    path_names: list[str] = []
+    current_id = item_id
+    seen: set[str] = set()
+
+    while current_id and current_id != "0" and current_id in item_lookup:
+        if current_id in seen:
+            raise ValueError(f"Cycle detected in taxonomy at item_id={current_id}")
+        seen.add(current_id)
+        current_item = item_lookup[current_id]
+        path_ids.append(current_id)
+        current_name = normalize_whitespace(str(current_item.get("name") or ""))
+        if current_name:
+            path_names.append(current_name)
+        current_id = _normalize_parent_id(current_item.get("parent_id"))
+
+    path_ids.reverse()
+    path_names.reverse()
+    return tuple(path_ids), tuple(path_names)
+
+
+def load_category_mapping(json_path: Optional[str] = None) -> CategoryMappingState:
+    path = resolve_category_json_path(json_path)
     path_str = str(path)
 
     if not path.exists():
-        error = f"category mapper disabled: CSV not found at '{path_str}'"
+        error = f"category mapper disabled: taxonomy JSON not found at '{path_str}'"
         _log_critical_once(error)
         return CategoryMappingState(
             enabled=False,
             category_to_id={},
-            csv_path_used=path_str,
+            category_to_industry_id={},
+            category_to_industry_name={},
+            category_to_parent_id={},
+            category_to_parent={},
+            category_to_path_text={},
+            category_to_level={},
+            records=(),
+            json_path_used=path_str,
             last_error=error,
         )
 
     try:
-        df = pd.read_csv(path, dtype=str)
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        error = f"category mapper disabled: failed to read CSV at '{path_str}': {exc}"
+        error = f"category mapper disabled: failed to read taxonomy JSON at '{path_str}': {exc}"
         _log_critical_once(error)
         return CategoryMappingState(
             enabled=False,
             category_to_id={},
-            csv_path_used=path_str,
+            category_to_industry_id={},
+            category_to_industry_name={},
+            category_to_parent_id={},
+            category_to_parent={},
+            category_to_path_text={},
+            category_to_level={},
+            records=(),
+            json_path_used=path_str,
             last_error=error,
         )
 
-    missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
-    if missing:
-        error = (
-            f"category mapper disabled: missing required columns {missing} "
-            f"in '{path_str}' (required={list(REQUIRED_COLUMNS)})"
-        )
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        error = f"category mapper disabled: missing non-empty 'items' array in '{path_str}'"
         _log_critical_once(error)
         return CategoryMappingState(
             enabled=False,
             category_to_id={},
-            csv_path_used=path_str,
+            category_to_industry_id={},
+            category_to_industry_name={},
+            category_to_parent_id={},
+            category_to_parent={},
+            category_to_path_text={},
+            category_to_level={},
+            records=(),
+            json_path_used=path_str,
             last_error=error,
         )
 
-    cat_df = df[[ID_COLUMN, CATEGORY_COLUMN]].copy()
-    cat_df[ID_COLUMN] = cat_df[ID_COLUMN].astype(str).map(normalize_whitespace)
-    cat_df[CATEGORY_COLUMN] = cat_df[CATEGORY_COLUMN].astype(str).map(normalize_whitespace)
-    cat_df = cat_df[(cat_df[ID_COLUMN] != "") & (cat_df[CATEGORY_COLUMN] != "")]
+    item_lookup: dict[str, dict[str, object]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        category_id = _normalize_category_id(item.get("id"))
+        category_name = normalize_whitespace(str(item.get("name") or ""))
+        if not category_id or not category_name:
+            continue
+        normalized_item = {
+            "id": category_id,
+            "name": category_name,
+            "level": _normalize_category_level(item.get("level")),
+            "parent_id": _normalize_parent_id(item.get("parent_id")),
+        }
+        item_lookup[category_id] = normalized_item
 
-    category_to_id = dict(zip(cat_df[CATEGORY_COLUMN], cat_df[ID_COLUMN]))
+    if not item_lookup:
+        error = f"category mapper disabled: no valid taxonomy items found in '{path_str}'"
+        _log_critical_once(error)
+        return CategoryMappingState(
+            enabled=False,
+            category_to_id={},
+            category_to_industry_id={},
+            category_to_industry_name={},
+            category_to_parent_id={},
+            category_to_parent={},
+            category_to_path_text={},
+            category_to_level={},
+            records=(),
+            json_path_used=path_str,
+            last_error=error,
+        )
+
+    records: list[CategoryTaxonomyRecord] = []
+    category_to_id: dict[str, str] = {}
+    category_to_industry_id: dict[str, str] = {}
+    category_to_industry_name: dict[str, str] = {}
+    category_to_parent_id: dict[str, str] = {}
+    category_to_parent: dict[str, str] = {}
+    category_to_path_text: dict[str, str] = {}
+    category_to_level: dict[str, int] = {}
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        category_id = _normalize_category_id(item.get("id"))
+        if not category_id or category_id not in item_lookup:
+            continue
+        normalized_item = item_lookup[category_id]
+        category_name = str(normalized_item["name"])
+        if category_name in category_to_id:
+            error = (
+                f"category mapper disabled: duplicate category name {category_name!r} "
+                f"found in '{path_str}'"
+            )
+            _log_critical_once(error)
+            return CategoryMappingState(
+                enabled=False,
+                category_to_id={},
+                category_to_industry_id={},
+                category_to_industry_name={},
+                category_to_parent_id={},
+                category_to_parent={},
+                category_to_path_text={},
+                category_to_level={},
+                records=(),
+                json_path_used=path_str,
+                last_error=error,
+            )
+
+        path_ids, path_names = _build_taxonomy_path(category_id, item_lookup)
+        parent_id = str(normalized_item["parent_id"])
+        parent_item = item_lookup.get(parent_id)
+        parent_name = str(parent_item["name"]) if parent_item else ""
+        industry_id = path_ids[0] if path_ids else category_id
+        industry_name = path_names[0] if path_names else category_name
+        record = CategoryTaxonomyRecord(
+            category_id=category_id,
+            name=category_name,
+            parent_id=parent_id,
+            parent_name=parent_name,
+            level=int(normalized_item["level"]),
+            path_ids=path_ids,
+            path_names=path_names,
+            path_text=" : ".join(path_names) if path_names else category_name,
+            industry_id=industry_id,
+            industry_name=industry_name,
+        )
+        records.append(record)
+        category_to_id[record.name] = record.category_id
+        category_to_industry_id[record.name] = record.industry_id
+        category_to_industry_name[record.name] = record.industry_name
+        category_to_parent_id[record.name] = record.parent_id if record.parent_id != "0" else ""
+        category_to_parent[record.name] = record.parent_name
+        category_to_path_text[record.name] = record.path_text
+        category_to_level[record.name] = record.level
+
     logger.info(
-        "category mapper enabled: loaded %d rows from %s",
-        len(category_to_id),
+        "category mapper enabled: loaded %d taxonomy items from %s",
+        len(records),
         path_str,
     )
     return CategoryMappingState(
         enabled=True,
         category_to_id=category_to_id,
-        csv_path_used=path_str,
+        category_to_industry_id=category_to_industry_id,
+        category_to_industry_name=category_to_industry_name,
+        category_to_parent_id=category_to_parent_id,
+        category_to_parent=category_to_parent,
+        category_to_path_text=category_to_path_text,
+        category_to_level=category_to_level,
+        records=tuple(records),
+        json_path_used=path_str,
         last_error=None,
     )
 

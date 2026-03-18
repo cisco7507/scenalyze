@@ -1,0 +1,8812 @@
+{
+  "groups": [
+    {
+      "id": 428,
+      "name": "Aerospace",
+      "children": [
+        {
+          "id": 93,
+          "name": "Aerospace Products and Parts Manufacture"
+        },
+        {
+          "id": 94,
+          "name": "Aircraft Parts Manufacture"
+        },
+        {
+          "id": 319,
+          "name": "Airlines"
+        },
+        {
+          "id": 146,
+          "name": "Railroad Equipment Manufacturing"
+        }
+      ]
+    },
+    {
+      "id": 396,
+      "name": "Amusement and Recreation",
+      "children": [
+        {
+          "id": 161,
+          "name": "Amusement Parks & Arcades"
+        },
+        {
+          "id": 100,
+          "name": "Boat Building"
+        },
+        {
+          "id": 163,
+          "name": "Boat Dealers"
+        },
+        {
+          "id": 164,
+          "name": "Bowling Centers"
+        },
+        {
+          "id": 171,
+          "name": "Fitness Centers"
+        },
+        {
+          "id": 115,
+          "name": "Fitness Equipment"
+        },
+        {
+          "id": 174,
+          "name": "Golf Courses"
+        },
+        {
+          "id": 177,
+          "name": "Marinas"
+        },
+        {
+          "id": 180,
+          "name": "Museums, Zoos, and Parks"
+        },
+        {
+          "id": 230,
+          "name": "Recreational Vehicle Dealers"
+        },
+        {
+          "id": 147,
+          "name": "Recreational Vehicle Manufacture"
+        },
+        {
+          "id": 186,
+          "name": "Recreational Vehicle Parks"
+        },
+        {
+          "id": 187,
+          "name": "Ski Facilities"
+        },
+        {
+          "id": 188,
+          "name": "Spa Services"
+        },
+        {
+          "id": 189,
+          "name": "Sporting Goods Retailers"
+        }
+      ]
+    },
+    {
+      "id": 397,
+      "name": "Apparel",
+      "children": [
+        {
+          "id": 95,
+          "name": "Apparel Manufacture"
+        },
+        {
+          "id": 202,
+          "name": "Clothing Stores"
+        },
+        {
+          "id": 208,
+          "name": "Department Stores & Discount Stores"
+        },
+        {
+          "id": 117,
+          "name": "Footwear Manufacture, Wholesale, and Retail"
+        },
+        {
+          "id": 232,
+          "name": "Shoe Stores"
+        },
+        {
+          "id": 155,
+          "name": "Textile Manufacturing"
+        }
+      ]
+    },
+    {
+      "id": 435,
+      "name": "Apparel/Accessories",
+      "children": [
+        {
+          "id": 208,
+          "name": "Department Stores & Discount Stores"
+        },
+        {
+          "id": 5109,
+          "name": "Fashion accessories"
+        },
+        {
+          "id": 117,
+          "name": "Footwear Manufacture, Wholesale, and Retail"
+        },
+        {
+          "id": 232,
+          "name": "Shoe Stores"
+        }
+      ]
+    },
+    {
+      "id": 415,
+      "name": "Appliances",
+      "children": [
+        {
+          "id": 98,
+          "name": "Battery Manufacture"
+        },
+        {
+          "id": 123,
+          "name": "Household Appliance Manufacture"
+        },
+        {
+          "id": 220,
+          "name": "Household Appliance Stores"
+        }
+      ]
+    },
+    {
+      "id": 421,
+      "name": "Associations",
+      "children": [
+        {
+          "id": 166,
+          "name": "Churches & Religious Groups"
+        },
+        {
+          "id": 167,
+          "name": "Colleges and Universities"
+        },
+        {
+          "id": 182,
+          "name": "Nonprofit Institutions"
+        }
+      ]
+    },
+    {
+      "id": 432,
+      "name": "Audio and Video Equipment",
+      "children": [
+        {
+          "id": 205,
+          "name": "Consumer Electronics Stores"
+        }
+      ]
+    },
+    {
+      "id": 399,
+      "name": "Automotive",
+      "children": [
+        {
+          "id": 193,
+          "name": "Automobile Dealers - Luxury"
+        },
+        {
+          "id": 194,
+          "name": "Automobile Dealerships"
+        },
+        {
+          "id": 96,
+          "name": "Automobile Manufacture"
+        },
+        {
+          "id": 195,
+          "name": "Automobile Parts Wholesale-Retail"
+        },
+        {
+          "id": 97,
+          "name": "Automobile Parts and Accessories Manufacture"
+        },
+        {
+          "id": 244,
+          "name": "Automobile Rental and Leasing"
+        },
+        {
+          "id": 245,
+          "name": "Automotive Repair Shops"
+        },
+        {
+          "id": 9143,
+          "name": "Automotive Roadside Assistance"
+        },
+        {
+          "id": 100,
+          "name": "Boat Building"
+        },
+        {
+          "id": 163,
+          "name": "Boat Dealers"
+        },
+        {
+          "id": 248,
+          "name": "Car Washes"
+        },
+        {
+          "id": 206,
+          "name": "Convenience Stores and Gas Stations"
+        },
+        {
+          "id": 259,
+          "name": "Fast Lube / Auto Oil Change Service"
+        },
+        {
+          "id": 133,
+          "name": "Motor, Generator, Pump, and Compressor Mfg"
+        },
+        {
+          "id": 223,
+          "name": "Motorcycle Dealers"
+        },
+        {
+          "id": 134,
+          "name": "Motorcycle Manufacturing"
+        },
+        {
+          "id": 230,
+          "name": "Recreational Vehicle Dealers"
+        },
+        {
+          "id": 147,
+          "name": "Recreational Vehicle Manufacture"
+        },
+        {
+          "id": 236,
+          "name": "Tire Dealers"
+        },
+        {
+          "id": 156,
+          "name": "Tire Manufacturers"
+        },
+        {
+          "id": 372,
+          "name": "Tire Wholesalers"
+        },
+        {
+          "id": 159,
+          "name": "Truck and Bus Manufacturing"
+        }
+      ]
+    },
+    {
+      "id": 400,
+      "name": "Beer/Wine/Liquor",
+      "children": [
+        {
+          "id": 197,
+          "name": "Bars and Nightclubs"
+        },
+        {
+          "id": 198,
+          "name": "Beer, Wine, and Liquor Stores"
+        },
+        {
+          "id": 8,
+          "name": "Breweries"
+        },
+        {
+          "id": 377,
+          "name": "Spirits, Liquor Producers & Distilleries"
+        },
+        {
+          "id": 29,
+          "name": "Wineries"
+        }
+      ]
+    },
+    {
+      "id": 401,
+      "name": "Beverages",
+      "children": [
+        {
+          "id": 4963,
+          "name": "Alcoholic beverages"
+        },
+        {
+          "id": 6,
+          "name": "Beverage Manufacture and Bottling"
+        },
+        {
+          "id": 203,
+          "name": "Coffee Shops"
+        },
+        {
+          "id": 10,
+          "name": "Coffee and Tea Manufacture"
+        },
+        {
+          "id": 5323,
+          "name": "Non-alcoholic beverages"
+        }
+      ]
+    },
+    {
+      "id": 393,
+      "name": "Business Services",
+      "children": [
+        {
+          "id": 57,
+          "name": "Accounting Services"
+        },
+        {
+          "id": 241,
+          "name": "Advertising and Marketing"
+        },
+        {
+          "id": 30,
+          "name": "Architects Offices"
+        },
+        {
+          "id": 246,
+          "name": "Aviation Services"
+        },
+        {
+          "id": 248,
+          "name": "Car Washes"
+        },
+        {
+          "id": 249,
+          "name": "Catering Services"
+        },
+        {
+          "id": 352,
+          "name": "Chemicals Distributors"
+        },
+        {
+          "id": 165,
+          "name": "Child-care Facilities"
+        },
+        {
+          "id": 33,
+          "name": "Commercial Construction Contractors"
+        },
+        {
+          "id": 11,
+          "name": "Commercial Fishing and Seafood Distribution"
+        },
+        {
+          "id": 251,
+          "name": "Commercial and Industrial Equipment Rental"
+        },
+        {
+          "id": 293,
+          "name": "Computer Software Development"
+        },
+        {
+          "id": 34,
+          "name": "Concrete and Masonry Contractors"
+        },
+        {
+          "id": 59,
+          "name": "Consulting Services"
+        },
+        {
+          "id": 374,
+          "name": "Consumer Product Rental"
+        },
+        {
+          "id": 62,
+          "name": "Credit Collections and Services"
+        },
+        {
+          "id": 327,
+          "name": "Deep Sea Shipping"
+        },
+        {
+          "id": 255,
+          "name": "Direct Marketing Services"
+        },
+        {
+          "id": 256,
+          "name": "Dry Cleaning and Laundry Facilities"
+        },
+        {
+          "id": 36,
+          "name": "Drywall, Plaster, Acoustic & Insulation Contractors"
+        },
+        {
+          "id": 170,
+          "name": "Electric Energy Distribution"
+        },
+        {
+          "id": 37,
+          "name": "Electrical Contractors"
+        },
+        {
+          "id": 38,
+          "name": "Engineering Services"
+        },
+        {
+          "id": 39,
+          "name": "Erosion Control"
+        },
+        {
+          "id": 259,
+          "name": "Fast Lube / Auto Oil Change Service"
+        },
+        {
+          "id": 63,
+          "name": "Financial Planners and Investment Advisors"
+        },
+        {
+          "id": 40,
+          "name": "Framing Contractors"
+        },
+        {
+          "id": 5158,
+          "name": "Franchises and Business Opportunities"
+        },
+        {
+          "id": 263,
+          "name": "Freight Shipping Services"
+        },
+        {
+          "id": 264,
+          "name": "Funeral Operations"
+        },
+        {
+          "id": 41,
+          "name": "Government Contractors"
+        },
+        {
+          "id": 298,
+          "name": "Graphic Design Services"
+        },
+        {
+          "id": 265,
+          "name": "Hair Care Services"
+        },
+        {
+          "id": 64,
+          "name": "Hedge Fund Management"
+        },
+        {
+          "id": 361,
+          "name": "Industrial Machinery Wholesalers"
+        },
+        {
+          "id": 362,
+          "name": "Industrial Supply Wholesalers"
+        },
+        {
+          "id": 375,
+          "name": "Inland Barge Transport"
+        },
+        {
+          "id": 267,
+          "name": "Interior Design Services"
+        },
+        {
+          "id": 269,
+          "name": "Janitorial Services and Carpet Cleaning"
+        },
+        {
+          "id": 44,
+          "name": "Landscaping Services"
+        },
+        {
+          "id": 68,
+          "name": "Legal Services"
+        },
+        {
+          "id": 272,
+          "name": "Linen and Uniform Supply Services"
+        },
+        {
+          "id": 5273,
+          "name": "Management Consulting"
+        },
+        {
+          "id": 273,
+          "name": "Market Research Services"
+        },
+        {
+          "id": 364,
+          "name": "Material Handling Equipment Distribution"
+        },
+        {
+          "id": 336,
+          "name": "Moving and Storage"
+        },
+        {
+          "id": 181,
+          "name": "Natural Gas Production and Distribution"
+        },
+        {
+          "id": 21,
+          "name": "Nurseries"
+        },
+        {
+          "id": 47,
+          "name": "Painting and Wall Covering Contractors"
+        },
+        {
+          "id": 5338,
+          "name": "Pawnbrokers"
+        },
+        {
+          "id": 274,
+          "name": "Personnel Staffing Agencies"
+        },
+        {
+          "id": 22,
+          "name": "Pest Control Services"
+        },
+        {
+          "id": 276,
+          "name": "Photo Studios and Commercial Photography"
+        },
+        {
+          "id": 277,
+          "name": "Professional Services"
+        },
+        {
+          "id": 306,
+          "name": "Public Relations"
+        },
+        {
+          "id": 48,
+          "name": "Real Estate Brokerage and Management"
+        },
+        {
+          "id": 308,
+          "name": "Sales Promotion Services"
+        },
+        {
+          "id": 280,
+          "name": "Taxi and Limousine Services"
+        },
+        {
+          "id": 281,
+          "name": "Telecommunication Services"
+        },
+        {
+          "id": 282,
+          "name": "Telemarketing Services"
+        },
+        {
+          "id": 283,
+          "name": "Testing Laboratories"
+        },
+        {
+          "id": 190,
+          "name": "Travel Agencies and Services"
+        },
+        {
+          "id": 347,
+          "name": "Trucking"
+        },
+        {
+          "id": 348,
+          "name": "Warehousing and Storage"
+        },
+        {
+          "id": 191,
+          "name": "Waste Management"
+        },
+        {
+          "id": 315,
+          "name": "Wireless Telecommunications Services"
+        }
+      ]
+    },
+    {
+      "id": 430,
+      "name": "Commercial Printing",
+      "children": [
+        {
+          "id": 107,
+          "name": "Commercial Printing"
+        }
+      ]
+    },
+    {
+      "id": 431,
+      "name": "Computing",
+      "children": [
+        {
+          "id": 293,
+          "name": "Computer Software Development"
+        },
+        {
+          "id": 291,
+          "name": "Computer and Office Equipment Distributors"
+        },
+        {
+          "id": 204,
+          "name": "Computer and Software Stores"
+        },
+        {
+          "id": 38,
+          "name": "Engineering Services"
+        },
+        {
+          "id": 299,
+          "name": "Information Technology"
+        },
+        {
+          "id": 310,
+          "name": "Technology Sector"
+        }
+      ]
+    },
+    {
+      "id": 409,
+      "name": "Computing Product",
+      "children": [
+        {
+          "id": 108,
+          "name": "Computer Manufacture"
+        },
+        {
+          "id": 293,
+          "name": "Computer Software Development"
+        },
+        {
+          "id": 204,
+          "name": "Computer and Software Stores"
+        },
+        {
+          "id": 111,
+          "name": "Electronic Components & Semiconductor Manufacture"
+        },
+        {
+          "id": 357,
+          "name": "Electronic Components & Semiconductor Wholesalers"
+        },
+        {
+          "id": 112,
+          "name": "Electronic Gaming Products"
+        },
+        {
+          "id": 296,
+          "name": "Entertainment and Games Software"
+        },
+        {
+          "id": 299,
+          "name": "Information Technology"
+        },
+        {
+          "id": 9157,
+          "name": "Software Applications"
+        },
+        {
+          "id": 310,
+          "name": "Technology Sector"
+        },
+        {
+          "id": 9294,
+          "name": "Virtual and Augmented Reality Devices"
+        }
+      ]
+    },
+    {
+      "id": 411,
+      "name": "Cosmetics/Toiletries",
+      "children": [
+        {
+          "id": 9329,
+          "name": "Beauty Salon"
+        },
+        {
+          "id": 207,
+          "name": "Cosmetics, Beauty Supply, and Perfume Stores"
+        },
+        {
+          "id": 383,
+          "name": "Feminine Hygiene Products"
+        },
+        {
+          "id": 265,
+          "name": "Hair Care Services"
+        },
+        {
+          "id": 151,
+          "name": "Soap and Detergent Manufacture"
+        },
+        {
+          "id": 5384,
+          "name": "Toiletries"
+        }
+      ]
+    },
+    {
+      "id": 433,
+      "name": "Drug Stores",
+      "children": [
+        {
+          "id": 76,
+          "name": "Drugstores"
+        }
+      ]
+    },
+    {
+      "id": 405,
+      "name": "Educational Services",
+      "children": [
+        {
+          "id": 165,
+          "name": "Child-care Facilities"
+        },
+        {
+          "id": 167,
+          "name": "Colleges and Universities"
+        },
+        {
+          "id": 168,
+          "name": "Community Colleges"
+        },
+        {
+          "id": 169,
+          "name": "Education and Training Services"
+        },
+        {
+          "id": 183,
+          "name": "Private Schools K-12"
+        },
+        {
+          "id": 185,
+          "name": "Public Schools K-12"
+        }
+      ]
+    },
+    {
+      "id": 392,
+      "name": "Entertainment",
+      "children": [
+        {
+          "id": 161,
+          "name": "Amusement Parks & Arcades"
+        },
+        {
+          "id": 197,
+          "name": "Bars and Nightclubs"
+        },
+        {
+          "id": 290,
+          "name": "Book Publishers"
+        },
+        {
+          "id": 164,
+          "name": "Bowling Centers"
+        },
+        {
+          "id": 296,
+          "name": "Entertainment and Games Software"
+        },
+        {
+          "id": 385,
+          "name": "Entertainment and Performance Arts"
+        },
+        {
+          "id": 174,
+          "name": "Golf Courses"
+        },
+        {
+          "id": 301,
+          "name": "Magazine Publishers"
+        },
+        {
+          "id": 178,
+          "name": "Movie Theatres"
+        },
+        {
+          "id": 303,
+          "name": "Movies & TV Production and Distribution"
+        },
+        {
+          "id": 180,
+          "name": "Museums, Zoos, and Parks"
+        },
+        {
+          "id": 304,
+          "name": "Music Production and Distribution"
+        },
+        {
+          "id": 224,
+          "name": "Music Stores"
+        },
+        {
+          "id": 135,
+          "name": "Musical Instrument Manufacture"
+        },
+        {
+          "id": 225,
+          "name": "Musical Instrument Stores"
+        },
+        {
+          "id": 305,
+          "name": "Newspapers and News Organizations"
+        },
+        {
+          "id": 184,
+          "name": "Professional Sports Teams and Organizations"
+        },
+        {
+          "id": 307,
+          "name": "Radio Broadcasting and Programming"
+        }
+      ]
+    },
+    {
+      "id": 422,
+      "name": "Eye Care/Optical",
+      "children": [
+        {
+          "id": 87,
+          "name": "Optometrists and Opticians"
+        }
+      ]
+    },
+    {
+      "id": 419,
+      "name": "Filmed Entertainment",
+      "children": [
+        {
+          "id": 178,
+          "name": "Movie Theatres"
+        },
+        {
+          "id": 303,
+          "name": "Movies & TV Production and Distribution"
+        }
+      ]
+    },
+    {
+      "id": 391,
+      "name": "Financial Services",
+      "children": [
+        {
+          "id": 57,
+          "name": "Accounting Services"
+        },
+        {
+          "id": 58,
+          "name": "Banks and Credit Unions"
+        },
+        {
+          "id": 60,
+          "name": "Consumer Finance"
+        },
+        {
+          "id": 61,
+          "name": "Credit Card Processing"
+        },
+        {
+          "id": 62,
+          "name": "Credit Collections and Services"
+        },
+        {
+          "id": 9172,
+          "name": "Currency & Digital Currency"
+        },
+        {
+          "id": 63,
+          "name": "Financial Planners and Investment Advisors"
+        },
+        {
+          "id": 386,
+          "name": "Financial Services"
+        },
+        {
+          "id": 5159,
+          "name": "Futures and Commodities"
+        },
+        {
+          "id": 64,
+          "name": "Hedge Fund Management"
+        },
+        {
+          "id": 65,
+          "name": "Insurance Agencies"
+        },
+        {
+          "id": 66,
+          "name": "Insurance Carriers"
+        },
+        {
+          "id": 67,
+          "name": "Investment Banking"
+        },
+        {
+          "id": 69,
+          "name": "Mortgage Banking"
+        },
+        {
+          "id": 49,
+          "name": "Real Estate Investment Trusts (REITs)"
+        },
+        {
+          "id": 71,
+          "name": "Securities Brokers"
+        },
+        {
+          "id": 55,
+          "name": "Title Insurance Services"
+        },
+        {
+          "id": 73,
+          "name": "Venture Capital"
+        }
+      ]
+    },
+    {
+      "id": 394,
+      "name": "Food",
+      "children": [
+        {
+          "id": 1,
+          "name": "Agriculture Crop Production"
+        },
+        {
+          "id": 2,
+          "name": "Agriculture Livestock Production"
+        },
+        {
+          "id": 3,
+          "name": "Bakeries"
+        },
+        {
+          "id": 4,
+          "name": "Beef Cattle Ranching"
+        },
+        {
+          "id": 249,
+          "name": "Catering Services"
+        },
+        {
+          "id": 11,
+          "name": "Commercial Fishing and Seafood Distribution"
+        },
+        {
+          "id": 12,
+          "name": "Dairy Products Manufacture"
+        },
+        {
+          "id": 387,
+          "name": "Food - Candy"
+        },
+        {
+          "id": 5152,
+          "name": "Food - Cooking Oils"
+        },
+        {
+          "id": 5124,
+          "name": "Food - Dessert"
+        },
+        {
+          "id": 388,
+          "name": "Food - Packaged"
+        },
+        {
+          "id": 5145,
+          "name": "Food - Vegetables, Meat, Fish"
+        },
+        {
+          "id": 16,
+          "name": "Food Distributors"
+        },
+        {
+          "id": 17,
+          "name": "Food Service Contractors"
+        },
+        {
+          "id": 18,
+          "name": "Fruit and Vegetable Processing"
+        },
+        {
+          "id": 19,
+          "name": "Grocery Stores and Supermarkets"
+        },
+        {
+          "id": 20,
+          "name": "Meat Products Manufacture"
+        },
+        {
+          "id": 23,
+          "name": "Poultry Processing"
+        },
+        {
+          "id": 24,
+          "name": "Restaurants"
+        },
+        {
+          "id": 233,
+          "name": "Specialty Food Stores"
+        },
+        {
+          "id": 25,
+          "name": "Sugar Manufacturing"
+        }
+      ]
+    },
+    {
+      "id": 414,
+      "name": "Gambling",
+      "children": [
+        {
+          "id": 173,
+          "name": "Gambling Operations"
+        },
+        {
+          "id": 5417,
+          "name": "Sports Betting"
+        }
+      ]
+    },
+    {
+      "id": 413,
+      "name": "Gaming",
+      "children": [
+        {
+          "id": 112,
+          "name": "Electronic Gaming Products"
+        },
+        {
+          "id": 296,
+          "name": "Entertainment and Games Software"
+        }
+      ]
+    },
+    {
+      "id": 398,
+      "name": "Government/Municipal",
+      "children": [
+        {
+          "id": 161,
+          "name": "Amusement Parks & Arcades"
+        },
+        {
+          "id": 380,
+          "name": "Armed Forces"
+        },
+        {
+          "id": 166,
+          "name": "Churches & Religious Groups"
+        },
+        {
+          "id": 174,
+          "name": "Golf Courses"
+        },
+        {
+          "id": 41,
+          "name": "Government Contractors"
+        },
+        {
+          "id": 42,
+          "name": "Highway and Street Construction"
+        },
+        {
+          "id": 176,
+          "name": "Local Bus Transportation"
+        },
+        {
+          "id": 177,
+          "name": "Marinas"
+        },
+        {
+          "id": 179,
+          "name": "Municipal Governments"
+        },
+        {
+          "id": 180,
+          "name": "Museums, Zoos, and Parks"
+        },
+        {
+          "id": 378,
+          "name": "Politicians"
+        },
+        {
+          "id": 183,
+          "name": "Private Schools K-12"
+        },
+        {
+          "id": 185,
+          "name": "Public Schools K-12"
+        },
+        {
+          "id": 343,
+          "name": "Railroads"
+        },
+        {
+          "id": 186,
+          "name": "Recreational Vehicle Parks"
+        },
+        {
+          "id": 9330,
+          "name": "Recycling"
+        },
+        {
+          "id": 379,
+          "name": "State and Federal Government"
+        },
+        {
+          "id": 191,
+          "name": "Waste Management"
+        },
+        {
+          "id": 192,
+          "name": "Water & Sewer Utilities"
+        }
+      ]
+    },
+    {
+      "id": 406,
+      "name": "Health Care Services",
+      "children": [
+        {
+          "id": 74,
+          "name": "Chiropractor Offices"
+        },
+        {
+          "id": 75,
+          "name": "Dentists Offices & Clinics"
+        },
+        {
+          "id": 171,
+          "name": "Fitness Centers"
+        },
+        {
+          "id": 77,
+          "name": "Health Fundraising Organizations"
+        },
+        {
+          "id": 78,
+          "name": "Healthcare"
+        },
+        {
+          "id": 79,
+          "name": "Home Healthcare Services"
+        },
+        {
+          "id": 80,
+          "name": "Hospitals"
+        },
+        {
+          "id": 81,
+          "name": "Kidney Dialysis Centers"
+        },
+        {
+          "id": 82,
+          "name": "Managed Healthcare"
+        },
+        {
+          "id": 83,
+          "name": "Medical & Imaging Laboratories"
+        },
+        {
+          "id": 84,
+          "name": "Medical Equipment Distributors"
+        },
+        {
+          "id": 85,
+          "name": "Medical Supplies and Devices"
+        },
+        {
+          "id": 86,
+          "name": "Nursing Homes and Assisted Living"
+        },
+        {
+          "id": 87,
+          "name": "Optometrists and Opticians"
+        },
+        {
+          "id": 88,
+          "name": "Outpatient Surgical Centers"
+        },
+        {
+          "id": 90,
+          "name": "Physician Offices"
+        },
+        {
+          "id": 91,
+          "name": "Rehabilitation Therapy Practices"
+        },
+        {
+          "id": 188,
+          "name": "Spa Services"
+        },
+        {
+          "id": 28,
+          "name": "Veterinary Services"
+        }
+      ]
+    },
+    {
+      "id": 434,
+      "name": "Home Furnishings",
+      "children": [
+        {
+          "id": 116,
+          "name": "Floor Coverings"
+        },
+        {
+          "id": 119,
+          "name": "Furniture Manufacturing"
+        },
+        {
+          "id": 215,
+          "name": "Furniture Stores"
+        },
+        {
+          "id": 218,
+          "name": "Home Centers and Hardware Stores"
+        },
+        {
+          "id": 219,
+          "name": "Home Furnishings Stores"
+        },
+        {
+          "id": 9342,
+          "name": "Home Products"
+        }
+      ]
+    },
+    {
+      "id": 412,
+      "name": "Household Products",
+      "children": [
+        {
+          "id": 9268,
+          "name": "Carpeting and Flooring Services"
+        },
+        {
+          "id": 356,
+          "name": "Electrical, Plumbing, and Hardware Distributors"
+        },
+        {
+          "id": 218,
+          "name": "Home Centers and Hardware Stores"
+        },
+        {
+          "id": 5223,
+          "name": "Household Tools"
+        },
+        {
+          "id": 5228,
+          "name": "Housekeeping"
+        }
+      ]
+    },
+    {
+      "id": 436,
+      "name": "Insurance",
+      "children": [
+        {
+          "id": 65,
+          "name": "Insurance Agencies"
+        },
+        {
+          "id": 66,
+          "name": "Insurance Carriers"
+        },
+        {
+          "id": 55,
+          "name": "Title Insurance Services"
+        }
+      ]
+    },
+    {
+      "id": 418,
+      "name": "Jewelry",
+      "children": [
+        {
+          "id": 222,
+          "name": "Jewelry Retail"
+        }
+      ]
+    },
+    {
+      "id": 437,
+      "name": "Mail Order/Catalogue",
+      "children": [
+        {
+          "id": 221,
+          "name": "Internet and Catalog Retailers"
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "name": "Manufacturing",
+      "children": [
+        {
+          "id": 92,
+          "name": "Abrasives Manufacture"
+        },
+        {
+          "id": 93,
+          "name": "Aerospace Products and Parts Manufacture"
+        },
+        {
+          "id": 94,
+          "name": "Aircraft Parts Manufacture"
+        },
+        {
+          "id": 95,
+          "name": "Apparel Manufacture"
+        },
+        {
+          "id": 96,
+          "name": "Automobile Manufacture"
+        },
+        {
+          "id": 97,
+          "name": "Automobile Parts and Accessories Manufacture"
+        },
+        {
+          "id": 98,
+          "name": "Battery Manufacture"
+        },
+        {
+          "id": 6,
+          "name": "Beverage Manufacture and Bottling"
+        },
+        {
+          "id": 324,
+          "name": "Biofuels Production"
+        },
+        {
+          "id": 100,
+          "name": "Boat Building"
+        },
+        {
+          "id": 32,
+          "name": "Cement, Concrete and Construction Material"
+        },
+        {
+          "id": 9,
+          "name": "Chemical Manufacturing - Agricultural"
+        },
+        {
+          "id": 104,
+          "name": "Chemical Manufacturing - Industrial"
+        },
+        {
+          "id": 105,
+          "name": "Chemicals"
+        },
+        {
+          "id": 352,
+          "name": "Chemicals Distributors"
+        },
+        {
+          "id": 325,
+          "name": "Coal Mining"
+        },
+        {
+          "id": 10,
+          "name": "Coffee and Tea Manufacture"
+        },
+        {
+          "id": 108,
+          "name": "Computer Manufacture"
+        },
+        {
+          "id": 35,
+          "name": "Construction Machinery Manufacturing"
+        },
+        {
+          "id": 12,
+          "name": "Dairy Products Manufacture"
+        },
+        {
+          "id": 170,
+          "name": "Electric Energy Distribution"
+        },
+        {
+          "id": 329,
+          "name": "Electric Power Generation"
+        },
+        {
+          "id": 111,
+          "name": "Electronic Components & Semiconductor Manufacture"
+        },
+        {
+          "id": 113,
+          "name": "Fabricated Metal Parts Manufacturing"
+        },
+        {
+          "id": 14,
+          "name": "Farm Equipment Manufacture and Distribution"
+        },
+        {
+          "id": 115,
+          "name": "Fitness Equipment"
+        },
+        {
+          "id": 116,
+          "name": "Floor Coverings"
+        },
+        {
+          "id": 117,
+          "name": "Footwear Manufacture, Wholesale, and Retail"
+        },
+        {
+          "id": 214,
+          "name": "Fuel Oil and LP Gas Dealers"
+        },
+        {
+          "id": 119,
+          "name": "Furniture Manufacturing"
+        },
+        {
+          "id": 120,
+          "name": "Glass and Fiber Optic Manufacturing"
+        },
+        {
+          "id": 121,
+          "name": "Gun Manufacturing"
+        },
+        {
+          "id": 122,
+          "name": "Handtool and Cutlery Manufacture"
+        },
+        {
+          "id": 123,
+          "name": "Household Appliance Manufacture"
+        },
+        {
+          "id": 124,
+          "name": "Industrial Machinery Manufacturing"
+        },
+        {
+          "id": 361,
+          "name": "Industrial Machinery Wholesalers"
+        },
+        {
+          "id": 362,
+          "name": "Industrial Supply Wholesalers"
+        },
+        {
+          "id": 375,
+          "name": "Inland Barge Transport"
+        },
+        {
+          "id": 125,
+          "name": "Lighting Equipment Manufacture"
+        },
+        {
+          "id": 126,
+          "name": "Machine Shops"
+        },
+        {
+          "id": 127,
+          "name": "Machine Tool Manufacture"
+        },
+        {
+          "id": 46,
+          "name": "Manufactured Housing"
+        },
+        {
+          "id": 376,
+          "name": "Manufacturing Sector"
+        },
+        {
+          "id": 364,
+          "name": "Material Handling Equipment Distribution"
+        },
+        {
+          "id": 20,
+          "name": "Meat Products Manufacture"
+        },
+        {
+          "id": 130,
+          "name": "Metal Coating, Engraving, & Heat Treating"
+        },
+        {
+          "id": 131,
+          "name": "Metal Ore Mining"
+        },
+        {
+          "id": 132,
+          "name": "Metal Valve Manufacture"
+        },
+        {
+          "id": 133,
+          "name": "Motor, Generator, Pump, and Compressor Mfg"
+        },
+        {
+          "id": 134,
+          "name": "Motorcycle Manufacturing"
+        },
+        {
+          "id": 135,
+          "name": "Musical Instrument Manufacture"
+        },
+        {
+          "id": 181,
+          "name": "Natural Gas Production and Distribution"
+        },
+        {
+          "id": 338,
+          "name": "Nonmetallic Mineral Mining and Quarrying"
+        },
+        {
+          "id": 339,
+          "name": "Oil and Gas Exploration and Production"
+        },
+        {
+          "id": 136,
+          "name": "Oil and Gas Field Services"
+        },
+        {
+          "id": 137,
+          "name": "Paint and Coating Manufacturing"
+        },
+        {
+          "id": 138,
+          "name": "Paper Products Manufacture"
+        },
+        {
+          "id": 139,
+          "name": "Pet Food Manufacture"
+        },
+        {
+          "id": 140,
+          "name": "Petroleum Refining"
+        },
+        {
+          "id": 342,
+          "name": "Petroleum Wholesale Distribution"
+        },
+        {
+          "id": 373,
+          "name": "Pharmaceutical Manufacture and Sale - over the counter"
+        },
+        {
+          "id": 89,
+          "name": "Pharmaceutical Manufacture and Sale - prescription"
+        },
+        {
+          "id": 143,
+          "name": "Plastic Resins & Synthetic Fibers"
+        },
+        {
+          "id": 142,
+          "name": "Plastic and Rubber Products Manufacturing"
+        },
+        {
+          "id": 144,
+          "name": "Primary Metals Manufacturing"
+        },
+        {
+          "id": 145,
+          "name": "Pulp and Paper Mills"
+        },
+        {
+          "id": 146,
+          "name": "Railroad Equipment Manufacturing"
+        },
+        {
+          "id": 147,
+          "name": "Recreational Vehicle Manufacture"
+        },
+        {
+          "id": 148,
+          "name": "Sawmills and Plywood Mills"
+        },
+        {
+          "id": 149,
+          "name": "Scrap Metals-Recycling"
+        },
+        {
+          "id": 150,
+          "name": "Search, Detection, and Navigation Equipment Manufacture"
+        },
+        {
+          "id": 151,
+          "name": "Soap and Detergent Manufacture"
+        },
+        {
+          "id": 371,
+          "name": "Steel Distribution"
+        },
+        {
+          "id": 54,
+          "name": "Structural Metals Manufacture"
+        },
+        {
+          "id": 25,
+          "name": "Sugar Manufacturing"
+        },
+        {
+          "id": 154,
+          "name": "Telecommunications Equipment Manufacturers"
+        },
+        {
+          "id": 283,
+          "name": "Testing Laboratories"
+        },
+        {
+          "id": 155,
+          "name": "Textile Manufacturing"
+        },
+        {
+          "id": 26,
+          "name": "Timber Operations"
+        },
+        {
+          "id": 156,
+          "name": "Tire Manufacturers"
+        },
+        {
+          "id": 158,
+          "name": "Toy Manufacture"
+        },
+        {
+          "id": 159,
+          "name": "Truck and Bus Manufacturing"
+        },
+        {
+          "id": 56,
+          "name": "Wood Flooring Manufacture"
+        }
+      ]
+    },
+    {
+      "id": 420,
+      "name": "Media",
+      "children": [
+        {
+          "id": 305,
+          "name": "Newspapers and News Organizations"
+        },
+        {
+          "id": 307,
+          "name": "Radio Broadcasting and Programming"
+        },
+        {
+          "id": 312,
+          "name": "TV Cable, Pay & Broadcast Networks"
+        }
+      ]
+    },
+    {
+      "id": 429,
+      "name": "Military",
+      "children": [
+        {
+          "id": 380,
+          "name": "Armed Forces"
+        }
+      ]
+    },
+    {
+      "id": 439,
+      "name": "New Media",
+      "children": [
+        {
+          "id": 5258,
+          "name": "Internet"
+        },
+        {
+          "id": 312,
+          "name": "TV Cable, Pay & Broadcast Networks"
+        }
+      ]
+    },
+    {
+      "id": 438,
+      "name": "News",
+      "children": [
+        {
+          "id": 305,
+          "name": "Newspapers and News Organizations"
+        }
+      ]
+    },
+    {
+      "id": 408,
+      "name": "Office Equipment/Supplies",
+      "children": [
+        {
+          "id": 291,
+          "name": "Computer and Office Equipment Distributors"
+        },
+        {
+          "id": 367,
+          "name": "Office Supply and Paper Distribution"
+        }
+      ]
+    },
+    {
+      "id": 423,
+      "name": "Pet Food/Supplies",
+      "children": [
+        {
+          "id": 9190,
+          "name": "Pet Care and Services"
+        },
+        {
+          "id": 139,
+          "name": "Pet Food Manufacture"
+        },
+        {
+          "id": 228,
+          "name": "Pet Stores"
+        },
+        {
+          "id": 28,
+          "name": "Veterinary Services"
+        }
+      ]
+    },
+    {
+      "id": 402,
+      "name": "Pharmaceuticals",
+      "children": [
+        {
+          "id": 7,
+          "name": "Biotechnology Sector"
+        },
+        {
+          "id": 384,
+          "name": "Birth Control Products"
+        },
+        {
+          "id": 373,
+          "name": "Pharmaceutical Manufacture and Sale - over the counter"
+        },
+        {
+          "id": 89,
+          "name": "Pharmaceutical Manufacture and Sale - prescription"
+        }
+      ]
+    },
+    {
+      "id": 424,
+      "name": "Photographic Equipment",
+      "children": [
+        {
+          "id": 276,
+          "name": "Photo Studios and Commercial Photography"
+        },
+        {
+          "id": 229,
+          "name": "Photofinishing and Camera Stores"
+        }
+      ]
+    },
+    {
+      "id": 410,
+      "name": "Product",
+      "children": [
+        {
+          "id": 93,
+          "name": "Aerospace Products and Parts Manufacture"
+        },
+        {
+          "id": 9174,
+          "name": "Baby and Toddler Products"
+        },
+        {
+          "id": 384,
+          "name": "Birth Control Products"
+        },
+        {
+          "id": 374,
+          "name": "Consumer Product Rental"
+        },
+        {
+          "id": 12,
+          "name": "Dairy Products Manufacture"
+        },
+        {
+          "id": 9697,
+          "name": "Digital Goods"
+        },
+        {
+          "id": 383,
+          "name": "Feminine Hygiene Products"
+        },
+        {
+          "id": 9359,
+          "name": "Gift and Holiday Products"
+        },
+        {
+          "id": 138,
+          "name": "Paper Products Manufacture"
+        }
+      ]
+    },
+    {
+      "id": 425,
+      "name": "Professional Sports",
+      "children": [
+        {
+          "id": 184,
+          "name": "Professional Sports Teams and Organizations"
+        }
+      ]
+    },
+    {
+      "id": 404,
+      "name": "Publishing",
+      "children": [
+        {
+          "id": 290,
+          "name": "Book Publishers"
+        },
+        {
+          "id": 200,
+          "name": "Bookstores"
+        },
+        {
+          "id": 107,
+          "name": "Commercial Printing"
+        },
+        {
+          "id": 221,
+          "name": "Internet and Catalog Retailers"
+        },
+        {
+          "id": 301,
+          "name": "Magazine Publishers"
+        }
+      ]
+    },
+    {
+      "id": 416,
+      "name": "Real Estate",
+      "children": [
+        {
+          "id": 30,
+          "name": "Architects Offices"
+        },
+        {
+          "id": 31,
+          "name": "Building Material Supply"
+        },
+        {
+          "id": 32,
+          "name": "Cement, Concrete and Construction Material"
+        },
+        {
+          "id": 33,
+          "name": "Commercial Construction Contractors"
+        },
+        {
+          "id": 34,
+          "name": "Concrete and Masonry Contractors"
+        },
+        {
+          "id": 35,
+          "name": "Construction Machinery Manufacturing"
+        },
+        {
+          "id": 36,
+          "name": "Drywall, Plaster, Acoustic & Insulation Contractors"
+        },
+        {
+          "id": 39,
+          "name": "Erosion Control"
+        },
+        {
+          "id": 40,
+          "name": "Framing Contractors"
+        },
+        {
+          "id": 43,
+          "name": "HVAC and Plumbing Contractors"
+        },
+        {
+          "id": 267,
+          "name": "Interior Design Services"
+        },
+        {
+          "id": 44,
+          "name": "Landscaping Services"
+        },
+        {
+          "id": 45,
+          "name": "Lumber Wholesalers"
+        },
+        {
+          "id": 46,
+          "name": "Manufactured Housing"
+        },
+        {
+          "id": 47,
+          "name": "Painting and Wall Covering Contractors"
+        },
+        {
+          "id": 9261,
+          "name": "Pool and Spa Installation and Maintenance"
+        },
+        {
+          "id": 48,
+          "name": "Real Estate Brokerage and Management"
+        },
+        {
+          "id": 49,
+          "name": "Real Estate Investment Trusts (REITs)"
+        },
+        {
+          "id": 50,
+          "name": "Residential Real Estate Construction"
+        },
+        {
+          "id": 51,
+          "name": "Roofing, Siding, and Sheet Metal Contractors"
+        },
+        {
+          "id": 52,
+          "name": "Security System Services"
+        },
+        {
+          "id": 53,
+          "name": "Site Preparation Contractors"
+        },
+        {
+          "id": 56,
+          "name": "Wood Flooring Manufacture"
+        }
+      ]
+    },
+    {
+      "id": 407,
+      "name": "Restaurant/Fast Food",
+      "children": [
+        {
+          "id": 3,
+          "name": "Bakeries"
+        },
+        {
+          "id": 203,
+          "name": "Coffee Shops"
+        },
+        {
+          "id": 15,
+          "name": "Fast Food and Quickservice Restaurants"
+        },
+        {
+          "id": 24,
+          "name": "Restaurants"
+        },
+        {
+          "id": 233,
+          "name": "Specialty Food Stores"
+        }
+      ]
+    },
+    {
+      "id": 403,
+      "name": "Retail Stores/Chains",
+      "children": [
+        {
+          "id": 195,
+          "name": "Automobile Parts Wholesale-Retail"
+        },
+        {
+          "id": 163,
+          "name": "Boat Dealers"
+        },
+        {
+          "id": 200,
+          "name": "Bookstores"
+        },
+        {
+          "id": 31,
+          "name": "Building Material Supply"
+        },
+        {
+          "id": 202,
+          "name": "Clothing Stores"
+        },
+        {
+          "id": 204,
+          "name": "Computer and Software Stores"
+        },
+        {
+          "id": 205,
+          "name": "Consumer Electronics Stores"
+        },
+        {
+          "id": 206,
+          "name": "Convenience Stores and Gas Stations"
+        },
+        {
+          "id": 208,
+          "name": "Department Stores & Discount Stores"
+        },
+        {
+          "id": 76,
+          "name": "Drugstores"
+        },
+        {
+          "id": 212,
+          "name": "Florists"
+        },
+        {
+          "id": 214,
+          "name": "Fuel Oil and LP Gas Dealers"
+        },
+        {
+          "id": 215,
+          "name": "Furniture Stores"
+        },
+        {
+          "id": 216,
+          "name": "Gift and Souvenir Stores"
+        },
+        {
+          "id": 218,
+          "name": "Home Centers and Hardware Stores"
+        },
+        {
+          "id": 219,
+          "name": "Home Furnishings Stores"
+        },
+        {
+          "id": 9224,
+          "name": "Home Goods Store"
+        },
+        {
+          "id": 224,
+          "name": "Music Stores"
+        },
+        {
+          "id": 225,
+          "name": "Musical Instrument Stores"
+        },
+        {
+          "id": 228,
+          "name": "Pet Stores"
+        },
+        {
+          "id": 229,
+          "name": "Photofinishing and Camera Stores"
+        },
+        {
+          "id": 9345,
+          "name": "Retail Subscription Services"
+        },
+        {
+          "id": 389,
+          "name": "Retail and General Merchandise"
+        },
+        {
+          "id": 232,
+          "name": "Shoe Stores"
+        },
+        {
+          "id": 234,
+          "name": "Specialty Retail"
+        },
+        {
+          "id": 189,
+          "name": "Sporting Goods Retailers"
+        },
+        {
+          "id": 236,
+          "name": "Tire Dealers"
+        },
+        {
+          "id": 237,
+          "name": "Toy and Hobby Stores"
+        },
+        {
+          "id": 238,
+          "name": "Used Merchandise Stores"
+        },
+        {
+          "id": 239,
+          "name": "Warehouse Clubs and Superstores"
+        }
+      ]
+    },
+    {
+      "id": 417,
+      "name": "Telecommunications",
+      "children": [
+        {
+          "id": 120,
+          "name": "Glass and Fiber Optic Manufacturing"
+        },
+        {
+          "id": 268,
+          "name": "Internet Service Providers"
+        },
+        {
+          "id": 312,
+          "name": "TV Cable, Pay & Broadcast Networks"
+        },
+        {
+          "id": 281,
+          "name": "Telecommunication Services"
+        },
+        {
+          "id": 154,
+          "name": "Telecommunications Equipment Manufacturers"
+        },
+        {
+          "id": 314,
+          "name": "Wired Telecommunications Carriers"
+        },
+        {
+          "id": 315,
+          "name": "Wireless Telecommunications Services"
+        }
+      ]
+    },
+    {
+      "id": 426,
+      "name": "Tobacco",
+      "children": [
+        {
+          "id": 381,
+          "name": "Tobacco & Smoking Paraphernalia"
+        },
+        {
+          "id": 27,
+          "name": "Tobacco Manufacture"
+        }
+      ]
+    },
+    {
+      "id": 427,
+      "name": "Toys/Games",
+      "children": [
+        {
+          "id": 9188,
+          "name": "Recreational Sports Equipment"
+        },
+        {
+          "id": 158,
+          "name": "Toy Manufacture"
+        },
+        {
+          "id": 237,
+          "name": "Toy and Hobby Stores"
+        }
+      ]
+    },
+    {
+      "id": 395,
+      "name": "Travel/Hotels/Airlines",
+      "children": [
+        {
+          "id": 242,
+          "name": "Air Charter Services"
+        },
+        {
+          "id": 319,
+          "name": "Airlines"
+        },
+        {
+          "id": 246,
+          "name": "Aviation Services"
+        },
+        {
+          "id": 162,
+          "name": "Bed and Breakfast Inns"
+        },
+        {
+          "id": 5065,
+          "name": "Cruises"
+        },
+        {
+          "id": 266,
+          "name": "Hotel and Motel - Lodging"
+        },
+        {
+          "id": 343,
+          "name": "Railroads"
+        },
+        {
+          "id": 280,
+          "name": "Taxi and Limousine Services"
+        },
+        {
+          "id": 9206,
+          "name": "Travel"
+        },
+        {
+          "id": 190,
+          "name": "Travel Agencies and Services"
+        },
+        {
+          "id": 347,
+          "name": "Trucking"
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": 92,
+      "name": "Abrasives Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 57,
+      "name": "Accounting Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 382,
+      "name": "Adult Entertainment and Paraphernalia",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4951,
+      "name": "Adults only or Sexual Content",
+      "level": 1,
+      "parent_id": 382
+    },
+    {
+      "id": 4952,
+      "name": "Adult Entertainment and Paraphernalia - All else",
+      "level": 1,
+      "parent_id": 382
+    },
+    {
+      "id": 241,
+      "name": "Advertising and Marketing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4953,
+      "name": "Marketing Agency",
+      "level": 1,
+      "parent_id": 241
+    },
+    {
+      "id": 9295,
+      "name": "Online Advertising Services",
+      "level": 1,
+      "parent_id": 241
+    },
+    {
+      "id": 4954,
+      "name": "Advertising and Marketing - All else",
+      "level": 1,
+      "parent_id": 241
+    },
+    {
+      "id": 93,
+      "name": "Aerospace Products and Parts Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 1,
+      "name": "Agriculture Crop Production",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4955,
+      "name": "Agriculture equipment",
+      "level": 1,
+      "parent_id": 1
+    },
+    {
+      "id": 4956,
+      "name": "Farm Fertilizers",
+      "level": 1,
+      "parent_id": 1
+    },
+    {
+      "id": 4957,
+      "name": "Agriculture Crop Production - All else",
+      "level": 1,
+      "parent_id": 1
+    },
+    {
+      "id": 2,
+      "name": "Agriculture Livestock Production",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4958,
+      "name": "Animal nutrition",
+      "level": 1,
+      "parent_id": 2
+    },
+    {
+      "id": 4959,
+      "name": "Agriculture Livestock Production - All else",
+      "level": 1,
+      "parent_id": 2
+    },
+    {
+      "id": 242,
+      "name": "Air Charter Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 94,
+      "name": "Aircraft Parts Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 319,
+      "name": "Airlines",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4960,
+      "name": "Domestic Airlines",
+      "level": 1,
+      "parent_id": 319
+    },
+    {
+      "id": 4961,
+      "name": "International Airlines",
+      "level": 1,
+      "parent_id": 319
+    },
+    {
+      "id": 4962,
+      "name": "Airlines - All else",
+      "level": 1,
+      "parent_id": 319
+    },
+    {
+      "id": 4963,
+      "name": "Alcoholic beverages",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9138,
+      "name": "Alcopop",
+      "level": 1,
+      "parent_id": 4963
+    },
+    {
+      "id": 4964,
+      "name": "Beer/Cider/Lager Beverages ",
+      "level": 1,
+      "parent_id": 4963
+    },
+    {
+      "id": 9140,
+      "name": "Liqueur",
+      "level": 1,
+      "parent_id": 4963
+    },
+    {
+      "id": 4966,
+      "name": "Spirits Beverages",
+      "level": 1,
+      "parent_id": 4963
+    },
+    {
+      "id": 4965,
+      "name": "Wine Beverages",
+      "level": 1,
+      "parent_id": 4963
+    },
+    {
+      "id": 4967,
+      "name": "Alcoholic beverages - All else",
+      "level": 1,
+      "parent_id": 4963
+    },
+    {
+      "id": 161,
+      "name": "Amusement Parks & Arcades",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4968,
+      "name": "Leisure Park",
+      "level": 1,
+      "parent_id": 161
+    },
+    {
+      "id": 9189,
+      "name": "Theme Park",
+      "level": 1,
+      "parent_id": 161
+    },
+    {
+      "id": 4969,
+      "name": "Amusement Parks & Arcades - All else",
+      "level": 1,
+      "parent_id": 161
+    },
+    {
+      "id": 95,
+      "name": "Apparel Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4970,
+      "name": "Bag/Wallet Manufacturer",
+      "level": 1,
+      "parent_id": 95
+    },
+    {
+      "id": 4971,
+      "name": "Sunglasses Manufacturer",
+      "level": 1,
+      "parent_id": 95
+    },
+    {
+      "id": 4972,
+      "name": "Watch/Jewelry Manufacturer",
+      "level": 1,
+      "parent_id": 95
+    },
+    {
+      "id": 4973,
+      "name": "Apparel Manufacture - All else",
+      "level": 1,
+      "parent_id": 95
+    },
+    {
+      "id": 30,
+      "name": "Architects Offices",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 380,
+      "name": "Armed Forces",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 193,
+      "name": "Automobile Dealers - Luxury",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 194,
+      "name": "Automobile Dealerships",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 96,
+      "name": "Automobile Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4976,
+      "name": "Auto Warranties",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 4975,
+      "name": "Bike/Scooter",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 9314,
+      "name": "Budget Cars",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 4974,
+      "name": "Car/Van",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 9317,
+      "name": "City Cars",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 9315,
+      "name": "Crossover",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 9316,
+      "name": "Luxury Cars",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 9318,
+      "name": "Micro Cars",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 4977,
+      "name": "Automobile Manufacture - All else",
+      "level": 1,
+      "parent_id": 96
+    },
+    {
+      "id": 195,
+      "name": "Automobile Parts Wholesale-Retail",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4982,
+      "name": "Motor Accessory Retailer ",
+      "level": 1,
+      "parent_id": 195
+    },
+    {
+      "id": 4981,
+      "name": "Petrol/Oil/Lubricant Retailer",
+      "level": 1,
+      "parent_id": 195
+    },
+    {
+      "id": 4983,
+      "name": "Automobile Parts Wholesale-Retail - All else",
+      "level": 1,
+      "parent_id": 195
+    },
+    {
+      "id": 97,
+      "name": "Automobile Parts and Accessories Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4979,
+      "name": "Motor Accessory Manufacture",
+      "level": 1,
+      "parent_id": 97
+    },
+    {
+      "id": 4978,
+      "name": "Petrol/Oil/Lubricant Manufacture",
+      "level": 1,
+      "parent_id": 97
+    },
+    {
+      "id": 4980,
+      "name": "Automobile Parts and Accessories Manufacture - All else",
+      "level": 1,
+      "parent_id": 97
+    },
+    {
+      "id": 244,
+      "name": "Automobile Rental and Leasing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4984,
+      "name": "Commercial Car Rental",
+      "level": 1,
+      "parent_id": 244
+    },
+    {
+      "id": 4985,
+      "name": "Automobile Rental and Leasing - All else",
+      "level": 1,
+      "parent_id": 244
+    },
+    {
+      "id": 245,
+      "name": "Automotive Repair Shops",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9143,
+      "name": "Automotive Roadside Assistance",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 246,
+      "name": "Aviation Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9174,
+      "name": "Baby and Toddler Products",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9183,
+      "name": "Baby Bath Products",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9179,
+      "name": "Baby Bouncers and Rockers",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9180,
+      "name": "Baby Carriers",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9175,
+      "name": "Baby Gift Sets",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9177,
+      "name": "Baby Safety Products",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9176,
+      "name": "Diapers",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9181,
+      "name": "High Chairs and Boosters",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9178,
+      "name": "Nursing and Feeding Products",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9182,
+      "name": "Strollers and Joggers",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9368,
+      "name": "Toilet Training Products",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 9367,
+      "name": "Baby and Toddler Products - All else",
+      "level": 1,
+      "parent_id": 9174
+    },
+    {
+      "id": 3,
+      "name": "Bakeries",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 58,
+      "name": "Banks and Credit Unions",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 197,
+      "name": "Bars and Nightclubs",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 98,
+      "name": "Battery Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4986,
+      "name": "Household Batteries",
+      "level": 1,
+      "parent_id": 98
+    },
+    {
+      "id": 4987,
+      "name": "Battery Manufacture - All else",
+      "level": 1,
+      "parent_id": 98
+    },
+    {
+      "id": 9329,
+      "name": "Beauty Salon",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 162,
+      "name": "Bed and Breakfast Inns",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4,
+      "name": "Beef Cattle Ranching",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 198,
+      "name": "Beer, Wine, and Liquor Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4988,
+      "name": "Beer/Cider/Lager Store",
+      "level": 1,
+      "parent_id": 198
+    },
+    {
+      "id": 4990,
+      "name": "Spirits Store",
+      "level": 1,
+      "parent_id": 198
+    },
+    {
+      "id": 4989,
+      "name": "Wine Store",
+      "level": 1,
+      "parent_id": 198
+    },
+    {
+      "id": 4991,
+      "name": "Beer, Wine, and Liquor Stores - All else",
+      "level": 1,
+      "parent_id": 198
+    },
+    {
+      "id": 6,
+      "name": "Beverage Manufacture and Bottling",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 324,
+      "name": "Biofuels Production",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 7,
+      "name": "Biotechnology Sector",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 384,
+      "name": "Birth Control Products",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4992,
+      "name": "Condom Product ",
+      "level": 1,
+      "parent_id": 384
+    },
+    {
+      "id": 4993,
+      "name": "Pregnancy Kit Product",
+      "level": 1,
+      "parent_id": 384
+    },
+    {
+      "id": 4994,
+      "name": "Birth Control Products - All else",
+      "level": 1,
+      "parent_id": 384
+    },
+    {
+      "id": 100,
+      "name": "Boat Building",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 163,
+      "name": "Boat Dealers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9588,
+      "name": "Body Art",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9590,
+      "name": "Piercings",
+      "level": 1,
+      "parent_id": 9588
+    },
+    {
+      "id": 9589,
+      "name": "Tattoo",
+      "level": 1,
+      "parent_id": 9588
+    },
+    {
+      "id": 290,
+      "name": "Book Publishers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 200,
+      "name": "Bookstores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 164,
+      "name": "Bowling Centers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 8,
+      "name": "Breweries",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 4995,
+      "name": "Beer/Cider/Lager",
+      "level": 1,
+      "parent_id": 8
+    },
+    {
+      "id": 4997,
+      "name": "Spirits",
+      "level": 1,
+      "parent_id": 8
+    },
+    {
+      "id": 4996,
+      "name": "Wine",
+      "level": 1,
+      "parent_id": 8
+    },
+    {
+      "id": 4998,
+      "name": "Breweries - All else",
+      "level": 1,
+      "parent_id": 8
+    },
+    {
+      "id": 31,
+      "name": "Building Material Supply",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9603,
+      "name": "Cannabidiol (CBD)",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 248,
+      "name": "Car Washes",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9268,
+      "name": "Carpeting and Flooring Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 249,
+      "name": "Catering Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 32,
+      "name": "Cement, Concrete and Construction Material",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9,
+      "name": "Chemical Manufacturing - Agricultural",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 104,
+      "name": "Chemical Manufacturing - Industrial",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 105,
+      "name": "Chemicals",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 352,
+      "name": "Chemicals Distributors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 165,
+      "name": "Child-care Facilities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 74,
+      "name": "Chiropractor Offices",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 166,
+      "name": "Churches & Religious Groups",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 202,
+      "name": "Clothing Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5002,
+      "name": "Children's clothing",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 9185,
+      "name": "Clothing General",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 9276,
+      "name": "Hosiery",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 5004,
+      "name": "Lingerie",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 4999,
+      "name": "Men's and Women's clothing",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 5000,
+      "name": "Men's clothing",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 5003,
+      "name": "Shoes",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 5006,
+      "name": "Sportswear/fitness",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 5005,
+      "name": "Swimwear",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 5001,
+      "name": "Women's clothing",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 5007,
+      "name": "Clothing Stores - All else",
+      "level": 1,
+      "parent_id": 202
+    },
+    {
+      "id": 325,
+      "name": "Coal Mining",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 203,
+      "name": "Coffee Shops",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 10,
+      "name": "Coffee and Tea Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 167,
+      "name": "Colleges and Universities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 33,
+      "name": "Commercial Construction Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5008,
+      "name": "Industrial Builder/Housing",
+      "level": 1,
+      "parent_id": 33
+    },
+    {
+      "id": 5009,
+      "name": "Commercial Construction Contractors - All else",
+      "level": 1,
+      "parent_id": 33
+    },
+    {
+      "id": 11,
+      "name": "Commercial Fishing and Seafood Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 107,
+      "name": "Commercial Printing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 251,
+      "name": "Commercial and Industrial Equipment Rental",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 168,
+      "name": "Community Colleges",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 108,
+      "name": "Computer Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5018,
+      "name": "Home/Office Computer",
+      "level": 1,
+      "parent_id": 108
+    },
+    {
+      "id": 9282,
+      "name": "Home/Office Networking",
+      "level": 1,
+      "parent_id": 108
+    },
+    {
+      "id": 5019,
+      "name": "Home/Office Printer",
+      "level": 1,
+      "parent_id": 108
+    },
+    {
+      "id": 5020,
+      "name": "Home/Office Tablet",
+      "level": 1,
+      "parent_id": 108
+    },
+    {
+      "id": 5021,
+      "name": "Computer Manufacture - All else",
+      "level": 1,
+      "parent_id": 108
+    },
+    {
+      "id": 293,
+      "name": "Computer Software Development",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 291,
+      "name": "Computer and Office Equipment Distributors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5012,
+      "name": "computers distributor",
+      "level": 1,
+      "parent_id": 291
+    },
+    {
+      "id": 5010,
+      "name": "copiers distributor",
+      "level": 1,
+      "parent_id": 291
+    },
+    {
+      "id": 5013,
+      "name": "faxes distributor",
+      "level": 1,
+      "parent_id": 291
+    },
+    {
+      "id": 5011,
+      "name": "printers distributor",
+      "level": 1,
+      "parent_id": 291
+    },
+    {
+      "id": 5014,
+      "name": "Computer and Office Equipment Distributors - All else",
+      "level": 1,
+      "parent_id": 291
+    },
+    {
+      "id": 204,
+      "name": "Computer and Software Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5015,
+      "name": "Computer Game Store",
+      "level": 1,
+      "parent_id": 204
+    },
+    {
+      "id": 5016,
+      "name": "Computer Software",
+      "level": 1,
+      "parent_id": 204
+    },
+    {
+      "id": 5017,
+      "name": "Computer and Software Stores - All else",
+      "level": 1,
+      "parent_id": 204
+    },
+    {
+      "id": 34,
+      "name": "Concrete and Masonry Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 35,
+      "name": "Construction Machinery Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 59,
+      "name": "Consulting Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 205,
+      "name": "Consumer Electronics Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 60,
+      "name": "Consumer Finance",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5028,
+      "name": "Credit Card",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5029,
+      "name": "Credit Check",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5030,
+      "name": "Endowment",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5031,
+      "name": "Life/Assurance",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5022,
+      "name": "Loan",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5023,
+      "name": "Car Loan",
+      "level": 2,
+      "parent_id": 5022
+    },
+    {
+      "id": 5024,
+      "name": "Debt consolidation loan",
+      "level": 2,
+      "parent_id": 5022
+    },
+    {
+      "id": 5025,
+      "name": "Equity Release Loan",
+      "level": 2,
+      "parent_id": 5022
+    },
+    {
+      "id": 5026,
+      "name": "Personal/other Loan",
+      "level": 2,
+      "parent_id": 5022
+    },
+    {
+      "id": 5027,
+      "name": "Loan - all else",
+      "level": 2,
+      "parent_id": 5022
+    },
+    {
+      "id": 5032,
+      "name": "Money Transfer",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5033,
+      "name": "Mortgage",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5034,
+      "name": "Pension/Investment",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5035,
+      "name": "Share Trading",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5036,
+      "name": "Travelers Check",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 5037,
+      "name": "Consumer Finance - All else",
+      "level": 1,
+      "parent_id": 60
+    },
+    {
+      "id": 374,
+      "name": "Consumer Product Rental",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 206,
+      "name": "Convenience Stores and Gas Stations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 207,
+      "name": "Cosmetics, Beauty Supply, and Perfume Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5043,
+      "name": "Cleansers",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 9280,
+      "name": "Eye Cream",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5044,
+      "name": "Facial beauty product",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5062,
+      "name": "Foot care product",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5053,
+      "name": "Haircare products",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5054,
+      "name": "Hair color",
+      "level": 2,
+      "parent_id": 5053
+    },
+    {
+      "id": 5056,
+      "name": "Hair lice product",
+      "level": 2,
+      "parent_id": 5053
+    },
+    {
+      "id": 5055,
+      "name": "Hair loss product",
+      "level": 2,
+      "parent_id": 5053
+    },
+    {
+      "id": 5057,
+      "name": "Hair removal product",
+      "level": 2,
+      "parent_id": 5053
+    },
+    {
+      "id": 5058,
+      "name": "Shampoo/Conditioner",
+      "level": 2,
+      "parent_id": 5053
+    },
+    {
+      "id": 5059,
+      "name": "Spray/gel/Mousse",
+      "level": 2,
+      "parent_id": 5053
+    },
+    {
+      "id": 5060,
+      "name": "Haircare products - All else",
+      "level": 2,
+      "parent_id": 5053
+    },
+    {
+      "id": 5045,
+      "name": "Hand care product",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5061,
+      "name": "Lip care product",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5046,
+      "name": "Makeup",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5051,
+      "name": "Blush/Bronzer",
+      "level": 2,
+      "parent_id": 5046
+    },
+    {
+      "id": 9279,
+      "name": "Cosmetics - Nail",
+      "level": 2,
+      "parent_id": 5046
+    },
+    {
+      "id": 5047,
+      "name": "Eyeliner",
+      "level": 2,
+      "parent_id": 5046
+    },
+    {
+      "id": 5048,
+      "name": "Foundation",
+      "level": 2,
+      "parent_id": 5046
+    },
+    {
+      "id": 5049,
+      "name": "Lipstick",
+      "level": 2,
+      "parent_id": 5046
+    },
+    {
+      "id": 5050,
+      "name": "Mascara",
+      "level": 2,
+      "parent_id": 5046
+    },
+    {
+      "id": 5052,
+      "name": "Makeup - All else",
+      "level": 2,
+      "parent_id": 5046
+    },
+    {
+      "id": 5038,
+      "name": "Perfume",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5041,
+      "name": "Children's perfume",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 9320,
+      "name": "Men's Perfume - Luxury",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 5039,
+      "name": "Men's perfume",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 9321,
+      "name": "Unisex Perfume",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 9322,
+      "name": "Unisex Perfume - Luxury",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 9319,
+      "name": "Women's Perfume - Luxury",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 5040,
+      "name": "Women's perfume",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 5042,
+      "name": "Perfume - All else",
+      "level": 2,
+      "parent_id": 5038
+    },
+    {
+      "id": 5063,
+      "name": "Skin lotion/sun screen/self-tanner",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 5064,
+      "name": "Cosmetics, Beauty Supply, and Perfume Stores - All else",
+      "level": 1,
+      "parent_id": 207
+    },
+    {
+      "id": 61,
+      "name": "Credit Card Processing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 62,
+      "name": "Credit Collections and Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5065,
+      "name": "Cruises",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9172,
+      "name": "Currency & Digital Currency",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5072,
+      "name": "DIY",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5073,
+      "name": "DIY Materials",
+      "level": 1,
+      "parent_id": 5072
+    },
+    {
+      "id": 9222,
+      "name": "DIY Store",
+      "level": 1,
+      "parent_id": 5072
+    },
+    {
+      "id": 5074,
+      "name": "DIY Tools",
+      "level": 1,
+      "parent_id": 5072
+    },
+    {
+      "id": 5075,
+      "name": "DIY - All else",
+      "level": 1,
+      "parent_id": 5072
+    },
+    {
+      "id": 12,
+      "name": "Dairy Products Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5066,
+      "name": "Butter/Margarine/Spread",
+      "level": 1,
+      "parent_id": 12
+    },
+    {
+      "id": 5067,
+      "name": "Cheese/Eggs",
+      "level": 1,
+      "parent_id": 12
+    },
+    {
+      "id": 5068,
+      "name": "Milk/Milk Substitute",
+      "level": 1,
+      "parent_id": 12
+    },
+    {
+      "id": 9305,
+      "name": "Non-Dairy Milk Substitute",
+      "level": 2,
+      "parent_id": 5068
+    },
+    {
+      "id": 5069,
+      "name": "Yogurt",
+      "level": 1,
+      "parent_id": 12
+    },
+    {
+      "id": 9242,
+      "name": "Yogurt Drinks, Flavored, and Low Fat",
+      "level": 1,
+      "parent_id": 12
+    },
+    {
+      "id": 5070,
+      "name": "Dairy Products Manufacture - All else",
+      "level": 1,
+      "parent_id": 12
+    },
+    {
+      "id": 327,
+      "name": "Deep Sea Shipping",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 75,
+      "name": "Dentists Offices & Clinics",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 208,
+      "name": "Department Stores & Discount Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9325,
+      "name": "Department Stores",
+      "level": 1,
+      "parent_id": 208
+    },
+    {
+      "id": 9327,
+      "name": "Discount and Warehouse Sales",
+      "level": 1,
+      "parent_id": 208
+    },
+    {
+      "id": 5071,
+      "name": "Luggage",
+      "level": 1,
+      "parent_id": 208
+    },
+    {
+      "id": 9357,
+      "name": "Department Stores & Discount Stores - All else",
+      "level": 1,
+      "parent_id": 208
+    },
+    {
+      "id": 9697,
+      "name": "Digital Goods",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 255,
+      "name": "Direct Marketing Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 76,
+      "name": "Drugstores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5077,
+      "name": "Energy/Stimulant Products",
+      "level": 1,
+      "parent_id": 76
+    },
+    {
+      "id": 5076,
+      "name": "Pharmacy/Chemist",
+      "level": 1,
+      "parent_id": 76
+    },
+    {
+      "id": 5078,
+      "name": "Drugstores - All else",
+      "level": 1,
+      "parent_id": 76
+    },
+    {
+      "id": 256,
+      "name": "Dry Cleaning and Laundry Facilities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 36,
+      "name": "Drywall, Plaster, Acoustic & Insulation Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 169,
+      "name": "Education and Training Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5080,
+      "name": "Driving Lessons",
+      "level": 1,
+      "parent_id": 169
+    },
+    {
+      "id": 5079,
+      "name": "Education Courses",
+      "level": 1,
+      "parent_id": 169
+    },
+    {
+      "id": 9271,
+      "name": "Exchange Programs",
+      "level": 1,
+      "parent_id": 169
+    },
+    {
+      "id": 9269,
+      "name": "Language Learning",
+      "level": 1,
+      "parent_id": 169
+    },
+    {
+      "id": 9270,
+      "name": "Professional Schools",
+      "level": 1,
+      "parent_id": 169
+    },
+    {
+      "id": 9272,
+      "name": "Tutoring Services",
+      "level": 1,
+      "parent_id": 169
+    },
+    {
+      "id": 5081,
+      "name": "Education and Training Services - All else",
+      "level": 1,
+      "parent_id": 169
+    },
+    {
+      "id": 170,
+      "name": "Electric Energy Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 329,
+      "name": "Electric Power Generation",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 37,
+      "name": "Electrical Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 356,
+      "name": "Electrical, Plumbing, and Hardware Distributors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 111,
+      "name": "Electronic Components & Semiconductor Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 357,
+      "name": "Electronic Components & Semiconductor Wholesalers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 112,
+      "name": "Electronic Gaming Products",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 38,
+      "name": "Engineering Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 296,
+      "name": "Entertainment and Games Software",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5089,
+      "name": "Game Genre",
+      "level": 1,
+      "parent_id": 296
+    },
+    {
+      "id": 5090,
+      "name": "Family Entertainment",
+      "level": 2,
+      "parent_id": 5089
+    },
+    {
+      "id": 5091,
+      "name": "Fighting/Shooting",
+      "level": 2,
+      "parent_id": 5089
+    },
+    {
+      "id": 5092,
+      "name": "Motorsport",
+      "level": 2,
+      "parent_id": 5089
+    },
+    {
+      "id": 5093,
+      "name": "Role Play/Fantasy",
+      "level": 2,
+      "parent_id": 5089
+    },
+    {
+      "id": 5094,
+      "name": "Sports",
+      "level": 2,
+      "parent_id": 5089
+    },
+    {
+      "id": 5095,
+      "name": "Game genre - All else",
+      "level": 2,
+      "parent_id": 5089
+    },
+    {
+      "id": 9308,
+      "name": "Games by Platform",
+      "level": 1,
+      "parent_id": 296
+    },
+    {
+      "id": 9309,
+      "name": "Computer Games",
+      "level": 2,
+      "parent_id": 9308
+    },
+    {
+      "id": 9310,
+      "name": "Console Games",
+      "level": 2,
+      "parent_id": 9308
+    },
+    {
+      "id": 9311,
+      "name": "Handheld Console Games",
+      "level": 2,
+      "parent_id": 9308
+    },
+    {
+      "id": 9307,
+      "name": "Mobile Games",
+      "level": 2,
+      "parent_id": 9308
+    },
+    {
+      "id": 9312,
+      "name": "Virtual Reality Games",
+      "level": 2,
+      "parent_id": 9308
+    },
+    {
+      "id": 9313,
+      "name": "Games by Platform - All else",
+      "level": 2,
+      "parent_id": 9308
+    },
+    {
+      "id": 5082,
+      "name": "Video Game Ratings",
+      "level": 1,
+      "parent_id": 296
+    },
+    {
+      "id": 5087,
+      "name": "Rating: A 18+",
+      "level": 2,
+      "parent_id": 5082
+    },
+    {
+      "id": 5083,
+      "name": "Rating: E",
+      "level": 2,
+      "parent_id": 5082
+    },
+    {
+      "id": 5084,
+      "name": "Rating: E 10+",
+      "level": 2,
+      "parent_id": 5082
+    },
+    {
+      "id": 5086,
+      "name": "Rating: M",
+      "level": 2,
+      "parent_id": 5082
+    },
+    {
+      "id": 5085,
+      "name": "Rating: T",
+      "level": 2,
+      "parent_id": 5082
+    },
+    {
+      "id": 5088,
+      "name": "Video Game Ratings - All else",
+      "level": 2,
+      "parent_id": 5082
+    },
+    {
+      "id": 5096,
+      "name": "Entertainment and Games Software - All else",
+      "level": 1,
+      "parent_id": 296
+    },
+    {
+      "id": 385,
+      "name": "Entertainment and Performance Arts",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5097,
+      "name": "Event",
+      "level": 1,
+      "parent_id": 385
+    },
+    {
+      "id": 5098,
+      "name": "Concert event",
+      "level": 2,
+      "parent_id": 5097
+    },
+    {
+      "id": 5099,
+      "name": "Exhibition",
+      "level": 2,
+      "parent_id": 5097
+    },
+    {
+      "id": 5100,
+      "name": "Sporting event",
+      "level": 2,
+      "parent_id": 5097
+    },
+    {
+      "id": 5101,
+      "name": "Theater",
+      "level": 2,
+      "parent_id": 5097
+    },
+    {
+      "id": 5102,
+      "name": "Ticket Agent",
+      "level": 2,
+      "parent_id": 5097
+    },
+    {
+      "id": 5103,
+      "name": "Trade Shows/Fairs",
+      "level": 2,
+      "parent_id": 5097
+    },
+    {
+      "id": 5104,
+      "name": "Event - All else",
+      "level": 2,
+      "parent_id": 5097
+    },
+    {
+      "id": 5105,
+      "name": "Psychics/Fortune Telling",
+      "level": 1,
+      "parent_id": 385
+    },
+    {
+      "id": 5106,
+      "name": "Quiz",
+      "level": 1,
+      "parent_id": 385
+    },
+    {
+      "id": 5107,
+      "name": "Entertainment and Performance Arts - All else",
+      "level": 1,
+      "parent_id": 385
+    },
+    {
+      "id": 5108,
+      "name": "Environment",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 39,
+      "name": "Erosion Control",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 113,
+      "name": "Fabricated Metal Parts Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 14,
+      "name": "Farm Equipment Manufacture and Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5109,
+      "name": "Fashion accessories",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5110,
+      "name": "Eye glasses",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 5115,
+      "name": "Jewelry",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 5116,
+      "name": "Leather goods",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 5113,
+      "name": "Purse/bag",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 5111,
+      "name": "Sunglasses",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 5114,
+      "name": "Wallet",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 5112,
+      "name": "Watches",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 5117,
+      "name": "Fashion accessories - All else",
+      "level": 1,
+      "parent_id": 5109
+    },
+    {
+      "id": 15,
+      "name": "Fast Food and Quickservice Restaurants",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 259,
+      "name": "Fast Lube / Auto Oil Change Service",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 383,
+      "name": "Feminine Hygiene Products",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 63,
+      "name": "Financial Planners and Investment Advisors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5118,
+      "name": "Financial Consultant",
+      "level": 1,
+      "parent_id": 63
+    },
+    {
+      "id": 5119,
+      "name": "Financial Planners and Investment Advisors - All else",
+      "level": 1,
+      "parent_id": 63
+    },
+    {
+      "id": 386,
+      "name": "Financial Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9810,
+      "name": "Fireworks",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 171,
+      "name": "Fitness Centers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 115,
+      "name": "Fitness Equipment",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 116,
+      "name": "Floor Coverings",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 212,
+      "name": "Florists",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 387,
+      "name": "Food - Candy",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9235,
+      "name": "Chocolate Spread",
+      "level": 1,
+      "parent_id": 387
+    },
+    {
+      "id": 9236,
+      "name": "Nougat",
+      "level": 1,
+      "parent_id": 387
+    },
+    {
+      "id": 5121,
+      "name": "chewing gum",
+      "level": 1,
+      "parent_id": 387
+    },
+    {
+      "id": 5122,
+      "name": "chocolate",
+      "level": 1,
+      "parent_id": 387
+    },
+    {
+      "id": 5120,
+      "name": "confectionery ",
+      "level": 1,
+      "parent_id": 387
+    },
+    {
+      "id": 5123,
+      "name": "Food -Candy - All else",
+      "level": 1,
+      "parent_id": 387
+    },
+    {
+      "id": 5152,
+      "name": "Food - Cooking Oils",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5156,
+      "name": "Coconut Oil",
+      "level": 1,
+      "parent_id": 5152
+    },
+    {
+      "id": 5154,
+      "name": "Margarines",
+      "level": 1,
+      "parent_id": 5152
+    },
+    {
+      "id": 5153,
+      "name": "Olive Oil",
+      "level": 1,
+      "parent_id": 5152
+    },
+    {
+      "id": 5155,
+      "name": "Vegetable oil",
+      "level": 1,
+      "parent_id": 5152
+    },
+    {
+      "id": 5157,
+      "name": "Food - Cooking Oils - All else",
+      "level": 1,
+      "parent_id": 5152
+    },
+    {
+      "id": 5124,
+      "name": "Food - Dessert",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5126,
+      "name": "Cake",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 9237,
+      "name": "Compotes",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 5128,
+      "name": "Cookie",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 9238,
+      "name": "Entremets",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 5130,
+      "name": "Ice Cream",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 5125,
+      "name": "Pastry",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 5127,
+      "name": "Pie",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 5129,
+      "name": "Ready-to-eat desserts",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 5131,
+      "name": "Food - Dessert - All else",
+      "level": 1,
+      "parent_id": 5124
+    },
+    {
+      "id": 388,
+      "name": "Food - Packaged",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5138,
+      "name": "Baby Food",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5136,
+      "name": "Butter/Margarine",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5132,
+      "name": "Cereals",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5135,
+      "name": "Chips",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5133,
+      "name": "Condiments",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 9227,
+      "name": "Appetizers and Dips",
+      "level": 2,
+      "parent_id": 5133
+    },
+    {
+      "id": 9225,
+      "name": "Ketchup",
+      "level": 2,
+      "parent_id": 5133
+    },
+    {
+      "id": 9226,
+      "name": "Mayonnaise, Cold Sauces",
+      "level": 2,
+      "parent_id": 5133
+    },
+    {
+      "id": 9231,
+      "name": "Mustard",
+      "level": 2,
+      "parent_id": 5133
+    },
+    {
+      "id": 9229,
+      "name": "Pickles, Relish, Olives",
+      "level": 2,
+      "parent_id": 5133
+    },
+    {
+      "id": 9228,
+      "name": "Salad Dressing",
+      "level": 2,
+      "parent_id": 5133
+    },
+    {
+      "id": 9233,
+      "name": "Vinegar",
+      "level": 2,
+      "parent_id": 5133
+    },
+    {
+      "id": 5142,
+      "name": "Frozen Foods",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5143,
+      "name": "Health and Dietary Foods",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 9230,
+      "name": "Herbs and Spices",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5140,
+      "name": "Jam/preserves/honey",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5134,
+      "name": "Pasta, rice, bread",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 9137,
+      "name": "Bread",
+      "level": 2,
+      "parent_id": 5134
+    },
+    {
+      "id": 9343,
+      "name": "Pasta",
+      "level": 2,
+      "parent_id": 5134
+    },
+    {
+      "id": 9344,
+      "name": "Rice",
+      "level": 2,
+      "parent_id": 5134
+    },
+    {
+      "id": 5141,
+      "name": "Pre-made dinners",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 9240,
+      "name": "Meat and Poultry Meals",
+      "level": 2,
+      "parent_id": 5141
+    },
+    {
+      "id": 9241,
+      "name": "Prepared Salads",
+      "level": 2,
+      "parent_id": 5141
+    },
+    {
+      "id": 9239,
+      "name": "Vegetarian Meals",
+      "level": 2,
+      "parent_id": 5141
+    },
+    {
+      "id": 9232,
+      "name": "Salts",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5139,
+      "name": "Sauces/Stocks/Powders",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 9299,
+      "name": "Snack Bars, Granola Bars",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 9139,
+      "name": "Snacks",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5137,
+      "name": "Soups",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 9145,
+      "name": "Sugars and Sweeteners",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5144,
+      "name": "Food - Packaged - All else",
+      "level": 1,
+      "parent_id": 388
+    },
+    {
+      "id": 5145,
+      "name": "Food - Vegetables, Meat, Fish",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5149,
+      "name": "Beef",
+      "level": 1,
+      "parent_id": 5145
+    },
+    {
+      "id": 5147,
+      "name": "Dried Fruits and Vegetables",
+      "level": 1,
+      "parent_id": 5145
+    },
+    {
+      "id": 5148,
+      "name": "Fish",
+      "level": 1,
+      "parent_id": 5145
+    },
+    {
+      "id": 5146,
+      "name": "Fresh Fruits and Vegetables",
+      "level": 1,
+      "parent_id": 5145
+    },
+    {
+      "id": 9304,
+      "name": "Fresh Fruit",
+      "level": 2,
+      "parent_id": 5146
+    },
+    {
+      "id": 9186,
+      "name": "Fresh Vegetables",
+      "level": 2,
+      "parent_id": 5146
+    },
+    {
+      "id": 9303,
+      "name": "Oysters and Shellfish",
+      "level": 1,
+      "parent_id": 5145
+    },
+    {
+      "id": 5150,
+      "name": "Poultry",
+      "level": 1,
+      "parent_id": 5145
+    },
+    {
+      "id": 5151,
+      "name": "Food - Vegetables, Meat, Fish - All else",
+      "level": 1,
+      "parent_id": 5145
+    },
+    {
+      "id": 16,
+      "name": "Food Distributors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 17,
+      "name": "Food Service Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 117,
+      "name": "Footwear Manufacture, Wholesale, and Retail",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9335,
+      "name": "Boots",
+      "level": 1,
+      "parent_id": 117
+    },
+    {
+      "id": 9336,
+      "name": "Dress Shoes",
+      "level": 1,
+      "parent_id": 117
+    },
+    {
+      "id": 9215,
+      "name": "Sport Footwear",
+      "level": 1,
+      "parent_id": 117
+    },
+    {
+      "id": 9214,
+      "name": "Footwear Manufacture, Wholesale, and Retail - All else",
+      "level": 1,
+      "parent_id": 117
+    },
+    {
+      "id": 40,
+      "name": "Framing Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5158,
+      "name": "Franchises and Business Opportunities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 263,
+      "name": "Freight Shipping Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 18,
+      "name": "Fruit and Vegetable Processing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 214,
+      "name": "Fuel Oil and LP Gas Dealers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 264,
+      "name": "Funeral Operations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 119,
+      "name": "Furniture Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 215,
+      "name": "Furniture Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5159,
+      "name": "Futures and Commodities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 173,
+      "name": "Gambling Operations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5168,
+      "name": "Bingo Hall",
+      "level": 1,
+      "parent_id": 173
+    },
+    {
+      "id": 5169,
+      "name": "Lottery",
+      "level": 1,
+      "parent_id": 173
+    },
+    {
+      "id": 5171,
+      "name": "Online Gambling",
+      "level": 1,
+      "parent_id": 173
+    },
+    {
+      "id": 5167,
+      "name": "Poker/Casino",
+      "level": 1,
+      "parent_id": 173
+    },
+    {
+      "id": 5170,
+      "name": "Reward Schemes",
+      "level": 1,
+      "parent_id": 173
+    },
+    {
+      "id": 5172,
+      "name": "Gambling Operations - All else",
+      "level": 1,
+      "parent_id": 173
+    },
+    {
+      "id": 5160,
+      "name": "Gardening",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5165,
+      "name": "Fertilizers and garden treatments",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 5162,
+      "name": "Gardening tools",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 5163,
+      "name": "Gardening tools - electrical",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 9216,
+      "name": "Lawnmower",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 5164,
+      "name": "Plant containers, mini-greenhouses",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 5161,
+      "name": "Plants and seeds",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 9217,
+      "name": "Strimmer",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 5166,
+      "name": "Gardening - All else",
+      "level": 1,
+      "parent_id": 5160
+    },
+    {
+      "id": 9359,
+      "name": "Gift and Holiday Products",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9360,
+      "name": "Gift Baskets",
+      "level": 1,
+      "parent_id": 9359
+    },
+    {
+      "id": 9361,
+      "name": "Gift Cards and Coupons",
+      "level": 1,
+      "parent_id": 9359
+    },
+    {
+      "id": 9362,
+      "name": "Gift Certificates",
+      "level": 1,
+      "parent_id": 9359
+    },
+    {
+      "id": 9333,
+      "name": "Gift Services",
+      "level": 1,
+      "parent_id": 9359
+    },
+    {
+      "id": 9363,
+      "name": "Greeting Cards",
+      "level": 1,
+      "parent_id": 9359
+    },
+    {
+      "id": 9364,
+      "name": "Holiday and Ethnic Items",
+      "level": 1,
+      "parent_id": 9359
+    },
+    {
+      "id": 9365,
+      "name": "Party Goods",
+      "level": 1,
+      "parent_id": 9359
+    },
+    {
+      "id": 216,
+      "name": "Gift and Souvenir Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 120,
+      "name": "Glass and Fiber Optic Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 174,
+      "name": "Golf Courses",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 41,
+      "name": "Government Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 298,
+      "name": "Graphic Design Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 19,
+      "name": "Grocery Stores and Supermarkets",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9355,
+      "name": "Grocery Stores",
+      "level": 1,
+      "parent_id": 19
+    },
+    {
+      "id": 9323,
+      "name": "Supermarkets",
+      "level": 1,
+      "parent_id": 19
+    },
+    {
+      "id": 121,
+      "name": "Gun Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5173,
+      "name": "Firearms",
+      "level": 1,
+      "parent_id": 121
+    },
+    {
+      "id": 5174,
+      "name": "Gun Manufacturing - All else",
+      "level": 1,
+      "parent_id": 121
+    },
+    {
+      "id": 43,
+      "name": "HVAC and Plumbing Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 265,
+      "name": "Hair Care Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5175,
+      "name": "Hair colorist",
+      "level": 1,
+      "parent_id": 265
+    },
+    {
+      "id": 5176,
+      "name": "Haircare appliance",
+      "level": 1,
+      "parent_id": 265
+    },
+    {
+      "id": 5177,
+      "name": "Hairdresser",
+      "level": 1,
+      "parent_id": 265
+    },
+    {
+      "id": 5178,
+      "name": "Hair Care Services - All else",
+      "level": 1,
+      "parent_id": 265
+    },
+    {
+      "id": 122,
+      "name": "Handtool and Cutlery Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 77,
+      "name": "Health Fundraising Organizations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 78,
+      "name": "Healthcare",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5181,
+      "name": "Alternative Medicine Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 9058,
+      "name": "Cancer Treatment Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5184,
+      "name": "Cholesterol Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5183,
+      "name": "Diabetes Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5185,
+      "name": "Gender Specific Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5179,
+      "name": "Health Services Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5186,
+      "name": "Lactose Intolerance Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5187,
+      "name": "Mental Healthcare ",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5188,
+      "name": "Obesity intervention Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5180,
+      "name": "Preventative Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5189,
+      "name": "Respiratory and Cardiovascular Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5190,
+      "name": "Skin Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5182,
+      "name": "Weight loss Healthcare",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 5191,
+      "name": "Healthcare - All else",
+      "level": 1,
+      "parent_id": 78
+    },
+    {
+      "id": 64,
+      "name": "Hedge Fund Management",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 42,
+      "name": "Highway and Street Construction",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 218,
+      "name": "Home Centers and Hardware Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9358,
+      "name": "Appliance Repair",
+      "level": 1,
+      "parent_id": 218
+    },
+    {
+      "id": 5192,
+      "name": "Home Improvement",
+      "level": 1,
+      "parent_id": 218
+    },
+    {
+      "id": 9332,
+      "name": "Home Repair",
+      "level": 1,
+      "parent_id": 218
+    },
+    {
+      "id": 9302,
+      "name": "Paint and Paint Accessories",
+      "level": 1,
+      "parent_id": 218
+    },
+    {
+      "id": 9144,
+      "name": "Window Installation and Treatments",
+      "level": 1,
+      "parent_id": 218
+    },
+    {
+      "id": 9306,
+      "name": "Home Centers and Hardware Stores - All else",
+      "level": 1,
+      "parent_id": 218
+    },
+    {
+      "id": 219,
+      "name": "Home Furnishings Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5194,
+      "name": "Bathroom Store",
+      "level": 1,
+      "parent_id": 219
+    },
+    {
+      "id": 5196,
+      "name": "Bedroom  Store",
+      "level": 1,
+      "parent_id": 219
+    },
+    {
+      "id": 5198,
+      "name": "Decoration  Store",
+      "level": 1,
+      "parent_id": 219
+    },
+    {
+      "id": 5193,
+      "name": "Kitchen Store",
+      "level": 1,
+      "parent_id": 219
+    },
+    {
+      "id": 5197,
+      "name": "Living Room  Store",
+      "level": 1,
+      "parent_id": 219
+    },
+    {
+      "id": 5195,
+      "name": "Outdoor  Store",
+      "level": 1,
+      "parent_id": 219
+    },
+    {
+      "id": 5199,
+      "name": "Home Furnishing Stores - All else",
+      "level": 1,
+      "parent_id": 219
+    },
+    {
+      "id": 9224,
+      "name": "Home Goods Store",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 79,
+      "name": "Home Healthcare Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9342,
+      "name": "Home Products",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9339,
+      "name": "Bathroom Accessories",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9247,
+      "name": "Carpets and Rugs",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9243,
+      "name": "Fireplaces",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9248,
+      "name": "Furniture",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9250,
+      "name": "BBQ, Grills, Outdoor Dining",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9249,
+      "name": "Baby and Toddler Furniture",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9251,
+      "name": "Beds and Accessories",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9252,
+      "name": "Benches",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9253,
+      "name": "Cabinets and Storage",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9254,
+      "name": "Chairs",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9255,
+      "name": "Entertainment Centers and TV Stands",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9256,
+      "name": "Furniture Sets",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9257,
+      "name": "Outdoor Furniture",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9258,
+      "name": "Shelving",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9259,
+      "name": "Sofas",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9260,
+      "name": "Tables",
+      "level": 2,
+      "parent_id": 9248
+    },
+    {
+      "id": 9340,
+      "name": "Home Decor",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9246,
+      "name": "Housewares",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9341,
+      "name": "Kitchen and Dining Products",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9244,
+      "name": "Lighting",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9245,
+      "name": "Linens and Bedding",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 9338,
+      "name": "Home Products - All else",
+      "level": 1,
+      "parent_id": 9342
+    },
+    {
+      "id": 80,
+      "name": "Hospitals",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 266,
+      "name": "Hotel and Motel - Lodging",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9209,
+      "name": "Hotels",
+      "level": 1,
+      "parent_id": 266
+    },
+    {
+      "id": 9211,
+      "name": "Motels",
+      "level": 1,
+      "parent_id": 266
+    },
+    {
+      "id": 9210,
+      "name": "Resorts",
+      "level": 1,
+      "parent_id": 266
+    },
+    {
+      "id": 9334,
+      "name": "Hotel and Motel - Lodging - All else",
+      "level": 1,
+      "parent_id": 266
+    },
+    {
+      "id": 123,
+      "name": "Household Appliance Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5204,
+      "name": "Anti-theft",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9328,
+      "name": "Audio Accessories",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9262,
+      "name": "Body Scrubbers and Massage Devices",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9203,
+      "name": "Cameras and Accessories",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5210,
+      "name": "Coffee Maker",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5215,
+      "name": "Computer",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9293,
+      "name": "Connected Wearables",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5211,
+      "name": "Cooking appliances",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5216,
+      "name": "Copier/scanner",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5209,
+      "name": "DVD Player",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9263,
+      "name": "Dishwasher",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5218,
+      "name": "E-reader",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5203,
+      "name": "Fans",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5214,
+      "name": "Fax",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5202,
+      "name": "Heaters",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5207,
+      "name": "Irons",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9265,
+      "name": "Kettle",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5208,
+      "name": "Light Bulbs",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5206,
+      "name": "Ovens/stoves/microwaves",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9141,
+      "name": "Personal Audio",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9147,
+      "name": "Pressure Washer",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5217,
+      "name": "Printers",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5205,
+      "name": "Refrigerators",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9264,
+      "name": "Sewing Machine",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5213,
+      "name": "Tablet",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5212,
+      "name": "Television",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5201,
+      "name": "Vacuum",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5200,
+      "name": "Washing Machine/Dryers",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 9366,
+      "name": "Clothes Dryers",
+      "level": 2,
+      "parent_id": 5200
+    },
+    {
+      "id": 9173,
+      "name": "Clothes Washing Machine",
+      "level": 2,
+      "parent_id": 5200
+    },
+    {
+      "id": 9148,
+      "name": "Water Purifier",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 5219,
+      "name": "Household Appliance Manufacture - All else",
+      "level": 1,
+      "parent_id": 123
+    },
+    {
+      "id": 220,
+      "name": "Household Appliance Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5221,
+      "name": "Electrical Store",
+      "level": 1,
+      "parent_id": 220
+    },
+    {
+      "id": 5220,
+      "name": "Household Store",
+      "level": 1,
+      "parent_id": 220
+    },
+    {
+      "id": 5222,
+      "name": "Household Appliance Stores - All else",
+      "level": 1,
+      "parent_id": 220
+    },
+    {
+      "id": 5223,
+      "name": "Household Tools",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5225,
+      "name": "Electric Handheld tools ",
+      "level": 1,
+      "parent_id": 5223
+    },
+    {
+      "id": 5224,
+      "name": "Handheld tools",
+      "level": 1,
+      "parent_id": 5223
+    },
+    {
+      "id": 5226,
+      "name": "Nails, Screws, Bolts, etc.",
+      "level": 1,
+      "parent_id": 5223
+    },
+    {
+      "id": 5227,
+      "name": "Household Tools - All else",
+      "level": 1,
+      "parent_id": 5223
+    },
+    {
+      "id": 5228,
+      "name": "Housekeeping",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5236,
+      "name": "Air fresheners",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9219,
+      "name": "Carpet Cleaner",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5231,
+      "name": "Detergents",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5232,
+      "name": "Dish products",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9187,
+      "name": "Dishwasher Powder",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9220,
+      "name": "Floor Cleaner",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9273,
+      "name": "Foils and Wraps",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5230,
+      "name": "Food Storage products",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9146,
+      "name": "Furniture Polish",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5233,
+      "name": "Household cleaners",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5235,
+      "name": "Household disinfectants",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9275,
+      "name": "Laundry Care",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5229,
+      "name": "Paper goods",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9274,
+      "name": "Pest Control",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5234,
+      "name": "Sponges, mops, cloths",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5237,
+      "name": "Trash bags",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 9301,
+      "name": "Window and Glass Treatments",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5238,
+      "name": "Housekeeping - All else",
+      "level": 1,
+      "parent_id": 5228
+    },
+    {
+      "id": 5239,
+      "name": "Illegal Activities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 124,
+      "name": "Industrial Machinery Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 361,
+      "name": "Industrial Machinery Wholesalers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 362,
+      "name": "Industrial Supply Wholesalers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 299,
+      "name": "Information Technology",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 375,
+      "name": "Inland Barge Transport",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 65,
+      "name": "Insurance Agencies",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5240,
+      "name": "Building Agency ",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5241,
+      "name": "Car Agency",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5246,
+      "name": "Commercial Agency",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5242,
+      "name": "Health Agency",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5243,
+      "name": "Home Agency",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5247,
+      "name": "Life Agency",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5244,
+      "name": "Pet Agency",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5245,
+      "name": "Travel Agency",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 5248,
+      "name": "Insurance Agencies - All else",
+      "level": 1,
+      "parent_id": 65
+    },
+    {
+      "id": 66,
+      "name": "Insurance Carriers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5249,
+      "name": "Building Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5250,
+      "name": "Car Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5255,
+      "name": "Commercial Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5251,
+      "name": "Health Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5252,
+      "name": "Home Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5256,
+      "name": "Life Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5253,
+      "name": "Pet Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5254,
+      "name": "Travel Carriers",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 5257,
+      "name": "Insurance Carriers - All else",
+      "level": 1,
+      "parent_id": 66
+    },
+    {
+      "id": 267,
+      "name": "Interior Design Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5258,
+      "name": "Internet",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9283,
+      "name": "Cloud Services",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 9298,
+      "name": "Digital Media and Game Virtual Store",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 5259,
+      "name": "Internet Comparison Service",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 5260,
+      "name": "Internet Dating",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 5262,
+      "name": "Internet Social Networking",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 5261,
+      "name": "Internet gaming",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 5263,
+      "name": "Search Engine",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 9297,
+      "name": "Streaming Service",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 9296,
+      "name": "Web Hosting",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 5264,
+      "name": "Internet - All else",
+      "level": 1,
+      "parent_id": 5258
+    },
+    {
+      "id": 268,
+      "name": "Internet Service Providers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 221,
+      "name": "Internet and Catalog Retailers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5265,
+      "name": "Internet Auction",
+      "level": 1,
+      "parent_id": 221
+    },
+    {
+      "id": 5266,
+      "name": "Various/Catalog",
+      "level": 1,
+      "parent_id": 221
+    },
+    {
+      "id": 5267,
+      "name": "Internet and Catalog Retailors - All else",
+      "level": 1,
+      "parent_id": 221
+    },
+    {
+      "id": 67,
+      "name": "Investment Banking",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 269,
+      "name": "Janitorial Services and Carpet Cleaning",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 222,
+      "name": "Jewelry Retail",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 81,
+      "name": "Kidney Dialysis Centers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 44,
+      "name": "Landscaping Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 68,
+      "name": "Legal Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9184,
+      "name": "Injury Health Claims",
+      "level": 1,
+      "parent_id": 68
+    },
+    {
+      "id": 9688,
+      "name": "Lawsuits - Class Action and Personal Injury",
+      "level": 1,
+      "parent_id": 68
+    },
+    {
+      "id": 9369,
+      "name": "Legal Services - All else",
+      "level": 1,
+      "parent_id": 68
+    },
+    {
+      "id": 125,
+      "name": "Lighting Equipment Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 272,
+      "name": "Linen and Uniform Supply Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 176,
+      "name": "Local Bus Transportation",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 45,
+      "name": "Lumber Wholesalers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 126,
+      "name": "Machine Shops",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 127,
+      "name": "Machine Tool Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 301,
+      "name": "Magazine Publishers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5268,
+      "name": "Men's Magazines",
+      "level": 1,
+      "parent_id": 301
+    },
+    {
+      "id": 5269,
+      "name": "Women's Magazines",
+      "level": 1,
+      "parent_id": 301
+    },
+    {
+      "id": 5270,
+      "name": "Magazine Publishers - All else",
+      "level": 1,
+      "parent_id": 301
+    },
+    {
+      "id": 82,
+      "name": "Managed Healthcare",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5271,
+      "name": "Managed Health Services",
+      "level": 1,
+      "parent_id": 82
+    },
+    {
+      "id": 5272,
+      "name": "Managed Healthcare - All else",
+      "level": 1,
+      "parent_id": 82
+    },
+    {
+      "id": 5273,
+      "name": "Management Consulting",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 46,
+      "name": "Manufactured Housing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 376,
+      "name": "Manufacturing Sector",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 177,
+      "name": "Marinas",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 273,
+      "name": "Market Research Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 364,
+      "name": "Material Handling Equipment Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 20,
+      "name": "Meat Products Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 83,
+      "name": "Medical & Imaging Laboratories",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5274,
+      "name": "Medical Imaging equipment",
+      "level": 1,
+      "parent_id": 83
+    },
+    {
+      "id": 5275,
+      "name": "Medical & Imaging Laboratories - All else",
+      "level": 1,
+      "parent_id": 83
+    },
+    {
+      "id": 84,
+      "name": "Medical Equipment Distributors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 85,
+      "name": "Medical Supplies and Devices",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5276,
+      "name": "Medical Assistance products ",
+      "level": 1,
+      "parent_id": 85
+    },
+    {
+      "id": 5277,
+      "name": "Medical Supplies and Devices - All else",
+      "level": 1,
+      "parent_id": 85
+    },
+    {
+      "id": 130,
+      "name": "Metal Coating, Engraving, & Heat Treating",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 131,
+      "name": "Metal Ore Mining",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 132,
+      "name": "Metal Valve Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 69,
+      "name": "Mortgage Banking",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 133,
+      "name": "Motor, Generator, Pump, and Compressor Mfg",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 223,
+      "name": "Motorcycle Dealers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 134,
+      "name": "Motorcycle Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5278,
+      "name": "Motorcycle accessories",
+      "level": 1,
+      "parent_id": 134
+    },
+    {
+      "id": 5279,
+      "name": "Motorcycle Manufacturing - All else",
+      "level": 1,
+      "parent_id": 134
+    },
+    {
+      "id": 178,
+      "name": "Movie Theatres",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 303,
+      "name": "Movies & TV Production and Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5280,
+      "name": "Cinema Genre",
+      "level": 1,
+      "parent_id": 303
+    },
+    {
+      "id": 5281,
+      "name": "Action/thriller Cinema",
+      "level": 2,
+      "parent_id": 5280
+    },
+    {
+      "id": 5282,
+      "name": "Comedy Cinema",
+      "level": 2,
+      "parent_id": 5280
+    },
+    {
+      "id": 5283,
+      "name": "Drama Cinema",
+      "level": 2,
+      "parent_id": 5280
+    },
+    {
+      "id": 5284,
+      "name": "Family/Kids Cinema",
+      "level": 2,
+      "parent_id": 5280
+    },
+    {
+      "id": 5286,
+      "name": "Sci-Fi/Horror Cinema",
+      "level": 2,
+      "parent_id": 5280
+    },
+    {
+      "id": 5285,
+      "name": "War/Historical/Factual/Documentary Cinema",
+      "level": 2,
+      "parent_id": 5280
+    },
+    {
+      "id": 5287,
+      "name": "Cinema Genre - All else",
+      "level": 2,
+      "parent_id": 5280
+    },
+    {
+      "id": 5295,
+      "name": "DVD/video Genre",
+      "level": 1,
+      "parent_id": 303
+    },
+    {
+      "id": 5296,
+      "name": "Action/thriller",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5297,
+      "name": "Comedy",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5298,
+      "name": "Drama",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5299,
+      "name": "Family/Kids",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5301,
+      "name": "Fitness/Health",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5300,
+      "name": "Sci-Fi/Horror",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5302,
+      "name": "War/Historical/Factual/Documentary",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5303,
+      "name": "DVD/video gene - All else",
+      "level": 2,
+      "parent_id": 5295
+    },
+    {
+      "id": 5288,
+      "name": "Ratings",
+      "level": 1,
+      "parent_id": 303
+    },
+    {
+      "id": 5289,
+      "name": "Rating: G",
+      "level": 2,
+      "parent_id": 5288
+    },
+    {
+      "id": 5293,
+      "name": "Rating: NC-17",
+      "level": 2,
+      "parent_id": 5288
+    },
+    {
+      "id": 5290,
+      "name": "Rating: PG",
+      "level": 2,
+      "parent_id": 5288
+    },
+    {
+      "id": 5291,
+      "name": "Rating: PG-13",
+      "level": 2,
+      "parent_id": 5288
+    },
+    {
+      "id": 5292,
+      "name": "Rating: R",
+      "level": 2,
+      "parent_id": 5288
+    },
+    {
+      "id": 5294,
+      "name": "Ratings - All else",
+      "level": 2,
+      "parent_id": 5288
+    },
+    {
+      "id": 5304,
+      "name": "Movies & TV Production and Distribution - All else",
+      "level": 1,
+      "parent_id": 303
+    },
+    {
+      "id": 336,
+      "name": "Moving and Storage",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5305,
+      "name": "Delivery Services",
+      "level": 1,
+      "parent_id": 336
+    },
+    {
+      "id": 179,
+      "name": "Municipal Governments",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5307,
+      "name": "Anti- Drink & Drive",
+      "level": 1,
+      "parent_id": 179
+    },
+    {
+      "id": 5309,
+      "name": "Anti-smoking ad",
+      "level": 1,
+      "parent_id": 179
+    },
+    {
+      "id": 5306,
+      "name": "COI",
+      "level": 1,
+      "parent_id": 179
+    },
+    {
+      "id": 5308,
+      "name": "Road Safety",
+      "level": 1,
+      "parent_id": 179
+    },
+    {
+      "id": 5310,
+      "name": "Municipal Governments - All else",
+      "level": 1,
+      "parent_id": 179
+    },
+    {
+      "id": 180,
+      "name": "Museums, Zoos, and Parks",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 304,
+      "name": "Music Production and Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9150,
+      "name": "Adult Contemporary",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5311,
+      "name": "Classical",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5312,
+      "name": "Concert",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5313,
+      "name": "Dance",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5314,
+      "name": "Disco",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5315,
+      "name": "Indie",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5316,
+      "name": "Kids Music",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5317,
+      "name": "Pop",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5318,
+      "name": "R&B",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5319,
+      "name": "Rap",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 9151,
+      "name": "Retro",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5320,
+      "name": "Rock",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5321,
+      "name": "Spoken ",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 5322,
+      "name": "Music Production and Distribution - All else",
+      "level": 1,
+      "parent_id": 304
+    },
+    {
+      "id": 224,
+      "name": "Music Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 135,
+      "name": "Musical Instrument Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 225,
+      "name": "Musical Instrument Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 181,
+      "name": "Natural Gas Production and Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 305,
+      "name": "Newspapers and News Organizations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5323,
+      "name": "Non-alcoholic beverages",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5328,
+      "name": "Coffee",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 5330,
+      "name": "Energy drinks",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 9234,
+      "name": "Flavored Milk and Milk Drinks",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 9267,
+      "name": "Flavored Water",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 5326,
+      "name": "Juice",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 5327,
+      "name": "Milk",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 9266,
+      "name": "Non-Alcoholic Aperitifs, Beer, Wine, and Mocktails",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 5325,
+      "name": "Soda",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 5329,
+      "name": "Tea",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 5324,
+      "name": "Water",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 5331,
+      "name": "Non-alcoholic beverages - All else",
+      "level": 1,
+      "parent_id": 5323
+    },
+    {
+      "id": 338,
+      "name": "Nonmetallic Mineral Mining and Quarrying",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 182,
+      "name": "Nonprofit Institutions",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5332,
+      "name": "Charity",
+      "level": 1,
+      "parent_id": 182
+    },
+    {
+      "id": 5333,
+      "name": "Issues and Awareness",
+      "level": 1,
+      "parent_id": 182
+    },
+    {
+      "id": 5334,
+      "name": "Nonprofit Institutions - All else",
+      "level": 1,
+      "parent_id": 182
+    },
+    {
+      "id": 21,
+      "name": "Nurseries",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 86,
+      "name": "Nursing Homes and Assisted Living",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 367,
+      "name": "Office Supply and Paper Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5335,
+      "name": "Stationary",
+      "level": 1,
+      "parent_id": 367
+    },
+    {
+      "id": 5336,
+      "name": "Writing instruments",
+      "level": 1,
+      "parent_id": 367
+    },
+    {
+      "id": 5337,
+      "name": "Office Supply and Paper Distribution - All else",
+      "level": 1,
+      "parent_id": 367
+    },
+    {
+      "id": 339,
+      "name": "Oil and Gas Exploration and Production",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 136,
+      "name": "Oil and Gas Field Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 87,
+      "name": "Optometrists and Opticians",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 88,
+      "name": "Outpatient Surgical Centers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 137,
+      "name": "Paint and Coating Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 47,
+      "name": "Painting and Wall Covering Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 138,
+      "name": "Paper Products Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5338,
+      "name": "Pawnbrokers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 274,
+      "name": "Personnel Staffing Agencies",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5341,
+      "name": "Business Recruitment",
+      "level": 1,
+      "parent_id": 274
+    },
+    {
+      "id": 5340,
+      "name": "Job Searching and Career Management platforms",
+      "level": 1,
+      "parent_id": 274
+    },
+    {
+      "id": 5339,
+      "name": "Temporary Staffing",
+      "level": 1,
+      "parent_id": 274
+    },
+    {
+      "id": 5342,
+      "name": "Personnel Staffing Agencies - All else",
+      "level": 1,
+      "parent_id": 274
+    },
+    {
+      "id": 22,
+      "name": "Pest Control Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9190,
+      "name": "Pet Care and Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9370,
+      "name": "Pet Breeders",
+      "level": 1,
+      "parent_id": 9190
+    },
+    {
+      "id": 9371,
+      "name": "Pet Grooming",
+      "level": 1,
+      "parent_id": 9190
+    },
+    {
+      "id": 9372,
+      "name": "Pet Sitting",
+      "level": 1,
+      "parent_id": 9190
+    },
+    {
+      "id": 9373,
+      "name": "Pet Supplies",
+      "level": 1,
+      "parent_id": 9190
+    },
+    {
+      "id": 9374,
+      "name": "Pet Treats",
+      "level": 1,
+      "parent_id": 9190
+    },
+    {
+      "id": 9375,
+      "name": "Pet Care and Services - All else",
+      "level": 1,
+      "parent_id": 9190
+    },
+    {
+      "id": 139,
+      "name": "Pet Food Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 228,
+      "name": "Pet Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5343,
+      "name": "Pet Litter",
+      "level": 1,
+      "parent_id": 228
+    },
+    {
+      "id": 140,
+      "name": "Petroleum Refining",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 342,
+      "name": "Petroleum Wholesale Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 373,
+      "name": "Pharmaceutical Manufacture and Sale - over the counter",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9291,
+      "name": "Alcohol Dependence",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5350,
+      "name": "Allergy",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 9285,
+      "name": "Anti-Diarrhea",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 9286,
+      "name": "Anti-Nausea",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 9284,
+      "name": "Anti-Snoring",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5345,
+      "name": "Anti-smoking aid",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5358,
+      "name": "Bandages",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5351,
+      "name": "Condom",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5352,
+      "name": "Contraception",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5344,
+      "name": "Cough Flu-analgesics",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5348,
+      "name": "Digestion/Laxative",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5346,
+      "name": "Disinfectant/antiseptic",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 9331,
+      "name": "Ear Products",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5353,
+      "name": "Foot care",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5347,
+      "name": "Hearing devices",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5356,
+      "name": "Indigestion",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5363,
+      "name": "Insect Repellants",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5355,
+      "name": "Men's Health",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 9289,
+      "name": "Menopause",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5362,
+      "name": "Nasal products",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5360,
+      "name": "Non-FDA approved Drugs",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5354,
+      "name": "Optical",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5357,
+      "name": "Painkiller",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5359,
+      "name": "Pregnancy Test",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5361,
+      "name": "Sleep Remedy",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5349,
+      "name": "Vitamins",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 5364,
+      "name": "Pharmaceutical Manufacture and Sale - over the counter - All else",
+      "level": 1,
+      "parent_id": 373
+    },
+    {
+      "id": 89,
+      "name": "Pharmaceutical Manufacture and Sale - prescription",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5367,
+      "name": "Allergy Prescription ",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9060,
+      "name": "Arthritis Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9063,
+      "name": "Asthma Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9064,
+      "name": "Blood Sugar & Diabetes Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9059,
+      "name": "Cancer Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 5369,
+      "name": "Cough Flu-analgesics Prescription ",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9693,
+      "name": "Dupuytren's Contracture & Peyronie's disease prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 5368,
+      "name": "Erectile Dysfunction products Prescription ",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9690,
+      "name": "Eye disease prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9695,
+      "name": "Gastrointestinal Relief/Digestion Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9061,
+      "name": "HIV & Aids Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9067,
+      "name": "Heart and Cardiovascular Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9290,
+      "name": "Hemorrhoid Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9062,
+      "name": "Infectious Diseases & Viruses Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9691,
+      "name": "Involuntary movement prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9689,
+      "name": "Lupus prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9288,
+      "name": "Menopause Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9066,
+      "name": "Mental Health Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9696,
+      "name": "Multiple Sclerosis Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9694,
+      "name": "Opioid Overdose treatment",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9692,
+      "name": "Osteoporosis prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 5365,
+      "name": "Painkillers Prescription ",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9065,
+      "name": "Skin Conditions Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 5366,
+      "name": "Sleep Remedy Prescription ",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9149,
+      "name": "Thrush Prescription",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 9287,
+      "name": "Vaccines",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 5370,
+      "name": "Pharmaceutical Manufacture and Sale - prescription - All else",
+      "level": 1,
+      "parent_id": 89
+    },
+    {
+      "id": 276,
+      "name": "Photo Studios and Commercial Photography",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 229,
+      "name": "Photofinishing and Camera Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 90,
+      "name": "Physician Offices",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5371,
+      "name": "Piracy",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 143,
+      "name": "Plastic Resins & Synthetic Fibers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 142,
+      "name": "Plastic and Rubber Products Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9127,
+      "name": "Political Issues and Policy",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9570,
+      "name": "Candidate PAC",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9577,
+      "name": "Crime",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9579,
+      "name": "Education",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9602,
+      "name": "Election Awareness",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9576,
+      "name": "Election law",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9574,
+      "name": "Environment / oil and gas",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9573,
+      "name": "Gambling",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9578,
+      "name": "Religion",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9572,
+      "name": "Same-sex marriage / LGBTQ+ rights",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9571,
+      "name": "Sexual reproduction (abortion)",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9575,
+      "name": "Taxation",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9580,
+      "name": "Workers rights / minimum wage",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9581,
+      "name": "Political Issues and Policy - All else",
+      "level": 1,
+      "parent_id": 9127
+    },
+    {
+      "id": 9814,
+      "name": "Political Parties",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9815,
+      "name": "Local Party",
+      "level": 1,
+      "parent_id": 9814
+    },
+    {
+      "id": 9817,
+      "name": "National Party",
+      "level": 1,
+      "parent_id": 9814
+    },
+    {
+      "id": 9816,
+      "name": "State Party",
+      "level": 1,
+      "parent_id": 9814
+    },
+    {
+      "id": 378,
+      "name": "Politicians",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9813,
+      "name": "Councillor",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9811,
+      "name": "Governor/ Premier",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9584,
+      "name": "House of Representatives (Federal)",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9812,
+      "name": "Mayor",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9586,
+      "name": "President/ Prime Minister",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9582,
+      "name": "Senate (Federal)",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9585,
+      "name": "State House/ Legislative Assembly",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9583,
+      "name": "State Senate/ Legislative Council",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9587,
+      "name": "Politicians - All else",
+      "level": 1,
+      "parent_id": 378
+    },
+    {
+      "id": 9261,
+      "name": "Pool and Spa Installation and Maintenance",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 23,
+      "name": "Poultry Processing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 144,
+      "name": "Primary Metals Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 183,
+      "name": "Private Schools K-12",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 277,
+      "name": "Professional Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 184,
+      "name": "Professional Sports Teams and Organizations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5372,
+      "name": "Athletic Governing Bodies",
+      "level": 1,
+      "parent_id": 184
+    },
+    {
+      "id": 306,
+      "name": "Public Relations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 185,
+      "name": "Public Schools K-12",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 145,
+      "name": "Pulp and Paper Mills",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 307,
+      "name": "Radio Broadcasting and Programming",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 146,
+      "name": "Railroad Equipment Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 343,
+      "name": "Railroads",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 48,
+      "name": "Real Estate Brokerage and Management",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5373,
+      "name": "Real Estate - Housing",
+      "level": 1,
+      "parent_id": 48
+    },
+    {
+      "id": 5374,
+      "name": "Real Estate - Offices",
+      "level": 1,
+      "parent_id": 48
+    },
+    {
+      "id": 5375,
+      "name": "Real Estate Agencies",
+      "level": 1,
+      "parent_id": 48
+    },
+    {
+      "id": 5376,
+      "name": "Real Estate Brokerage and Management - All else",
+      "level": 1,
+      "parent_id": 48
+    },
+    {
+      "id": 49,
+      "name": "Real Estate Investment Trusts (REITs)",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9188,
+      "name": "Recreational Sports Equipment",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 230,
+      "name": "Recreational Vehicle Dealers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 147,
+      "name": "Recreational Vehicle Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 186,
+      "name": "Recreational Vehicle Parks",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9330,
+      "name": "Recycling",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 91,
+      "name": "Rehabilitation Therapy Practices",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 50,
+      "name": "Residential Real Estate Construction",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 24,
+      "name": "Restaurants",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5378,
+      "name": "Food delivery Service",
+      "level": 1,
+      "parent_id": 24
+    },
+    {
+      "id": 5377,
+      "name": "Take out Restaurants",
+      "level": 1,
+      "parent_id": 24
+    },
+    {
+      "id": 5379,
+      "name": "Restaurants - All else",
+      "level": 1,
+      "parent_id": 24
+    },
+    {
+      "id": 9345,
+      "name": "Retail Subscription Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9346,
+      "name": "Clothing Subscriptions",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9347,
+      "name": "Grocery Subscriptions",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9348,
+      "name": "Makeup and Beauty Supscriptions",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9292,
+      "name": "Meal Kit Services",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9350,
+      "name": "Personal Care Subscriptions",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9349,
+      "name": "Pet Food and Supply Subscriptions",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9351,
+      "name": "Vitamin and Supplement Subscriptions",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9352,
+      "name": "Wine Subscriptions",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 9353,
+      "name": "Retail Subscription Services - All else",
+      "level": 1,
+      "parent_id": 9345
+    },
+    {
+      "id": 389,
+      "name": "Retail and General Merchandise",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9326,
+      "name": "Local Stores",
+      "level": 1,
+      "parent_id": 389
+    },
+    {
+      "id": 9324,
+      "name": "Shopping Centers",
+      "level": 1,
+      "parent_id": 389
+    },
+    {
+      "id": 5380,
+      "name": "Teleshopping",
+      "level": 1,
+      "parent_id": 389
+    },
+    {
+      "id": 9356,
+      "name": "Retail and General Merchandise - All else",
+      "level": 1,
+      "parent_id": 389
+    },
+    {
+      "id": 51,
+      "name": "Roofing, Siding, and Sheet Metal Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 308,
+      "name": "Sales Promotion Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 148,
+      "name": "Sawmills and Plywood Mills",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 149,
+      "name": "Scrap Metals-Recycling",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 150,
+      "name": "Search, Detection, and Navigation Equipment Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 71,
+      "name": "Securities Brokers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 52,
+      "name": "Security System Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5382,
+      "name": "Fire Alarms",
+      "level": 1,
+      "parent_id": 52
+    },
+    {
+      "id": 5381,
+      "name": "Household security",
+      "level": 1,
+      "parent_id": 52
+    },
+    {
+      "id": 5383,
+      "name": "Security System Services - All else",
+      "level": 1,
+      "parent_id": 52
+    },
+    {
+      "id": 232,
+      "name": "Shoe Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 53,
+      "name": "Site Preparation Contractors",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 187,
+      "name": "Ski Facilities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 151,
+      "name": "Soap and Detergent Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9157,
+      "name": "Software Applications",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9162,
+      "name": "Antivirus Software",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9163,
+      "name": "Browsers",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9164,
+      "name": "Computer Animation",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9165,
+      "name": "Databases",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9166,
+      "name": "Desktop Publishing",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9167,
+      "name": "Digital Audio",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9168,
+      "name": "Graphics Software",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9171,
+      "name": "Messaging Software",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9169,
+      "name": "Operating Systems",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9158,
+      "name": "Photo Editing Software",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9170,
+      "name": "Productivity Software",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9159,
+      "name": "Shareware and Freeware",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9160,
+      "name": "Video Software",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9161,
+      "name": "Web Conferencing",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 9354,
+      "name": "Software Applications - All else",
+      "level": 1,
+      "parent_id": 9157
+    },
+    {
+      "id": 188,
+      "name": "Spa Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 233,
+      "name": "Specialty Food Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5395,
+      "name": "Health Food Store",
+      "level": 1,
+      "parent_id": 233
+    },
+    {
+      "id": 5394,
+      "name": "Non-Allergy",
+      "level": 1,
+      "parent_id": 233
+    },
+    {
+      "id": 5396,
+      "name": "Specialty Food Stores - All else",
+      "level": 1,
+      "parent_id": 233
+    },
+    {
+      "id": 234,
+      "name": "Specialty Retail",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 377,
+      "name": "Spirits, Liquor Producers & Distilleries",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5397,
+      "name": "Beer/Cider/Lager Producer & Distillery",
+      "level": 1,
+      "parent_id": 377
+    },
+    {
+      "id": 5399,
+      "name": "Spirits Producer & Distillery",
+      "level": 1,
+      "parent_id": 377
+    },
+    {
+      "id": 5398,
+      "name": "Wine Producer & Distillery",
+      "level": 1,
+      "parent_id": 377
+    },
+    {
+      "id": 5400,
+      "name": "Spirits, Liquor Producers & Distilleries - All else",
+      "level": 1,
+      "parent_id": 377
+    },
+    {
+      "id": 189,
+      "name": "Sporting Goods Retailers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9194,
+      "name": "Golf Store",
+      "level": 1,
+      "parent_id": 189
+    },
+    {
+      "id": 5401,
+      "name": "indoor sports equipment",
+      "level": 1,
+      "parent_id": 189
+    },
+    {
+      "id": 5402,
+      "name": "outdoor sports equipment",
+      "level": 1,
+      "parent_id": 189
+    },
+    {
+      "id": 5403,
+      "name": "Golf Accessories",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5404,
+      "name": "Golf Apparel",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5405,
+      "name": "Golf Bags",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5406,
+      "name": "Golf Balls",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5407,
+      "name": "Golf Carts",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5408,
+      "name": "Golf Clubs",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5410,
+      "name": "Golf GPS/Rangefinder",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5409,
+      "name": "Golf Gloves",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5411,
+      "name": "Golf Grips",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 9218,
+      "name": "Golf Putter",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5412,
+      "name": "Golf Shafts",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5413,
+      "name": "Golf Shoes",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5414,
+      "name": "Golf Training Aids",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5415,
+      "name": "Tennis Equipment",
+      "level": 2,
+      "parent_id": 5402
+    },
+    {
+      "id": 5416,
+      "name": "Sporting Goods Retailers - All else",
+      "level": 1,
+      "parent_id": 189
+    },
+    {
+      "id": 5417,
+      "name": "Sports Betting",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 379,
+      "name": "State and Federal Government",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 371,
+      "name": "Steel Distribution",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 54,
+      "name": "Structural Metals Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 25,
+      "name": "Sugar Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 312,
+      "name": "TV Cable, Pay & Broadcast Networks",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9221,
+      "name": "Media Content TV Channel",
+      "level": 1,
+      "parent_id": 312
+    },
+    {
+      "id": 5464,
+      "name": "TV Licensing",
+      "level": 1,
+      "parent_id": 312
+    },
+    {
+      "id": 9337,
+      "name": "TV Cable, Pay & Broadcast Networks - All else",
+      "level": 1,
+      "parent_id": 312
+    },
+    {
+      "id": 280,
+      "name": "Taxi and Limousine Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 310,
+      "name": "Technology Sector",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 281,
+      "name": "Telecommunication Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9142,
+      "name": "Directory Assistance Services",
+      "level": 1,
+      "parent_id": 281
+    },
+    {
+      "id": 5418,
+      "name": "Telephone Networks",
+      "level": 1,
+      "parent_id": 281
+    },
+    {
+      "id": 5419,
+      "name": "Telephone Stores",
+      "level": 1,
+      "parent_id": 281
+    },
+    {
+      "id": 5420,
+      "name": "Telecommunication Services - All else",
+      "level": 1,
+      "parent_id": 281
+    },
+    {
+      "id": 154,
+      "name": "Telecommunications Equipment Manufacturers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5422,
+      "name": "Handset/Mobile",
+      "level": 1,
+      "parent_id": 154
+    },
+    {
+      "id": 5421,
+      "name": "Telephone Accessories",
+      "level": 1,
+      "parent_id": 154
+    },
+    {
+      "id": 5423,
+      "name": "Telecommunications Equipment Manufacturers - All else",
+      "level": 1,
+      "parent_id": 154
+    },
+    {
+      "id": 282,
+      "name": "Telemarketing Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 283,
+      "name": "Testing Laboratories",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 155,
+      "name": "Textile Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 26,
+      "name": "Timber Operations",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 236,
+      "name": "Tire Dealers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 156,
+      "name": "Tire Manufacturers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 372,
+      "name": "Tire Wholesalers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 55,
+      "name": "Title Insurance Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 381,
+      "name": "Tobacco & Smoking Paraphernalia",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5425,
+      "name": "Marijuana",
+      "level": 1,
+      "parent_id": 381
+    },
+    {
+      "id": 5424,
+      "name": "e-cigarette",
+      "level": 1,
+      "parent_id": 381
+    },
+    {
+      "id": 5426,
+      "name": "Tobacco & Smoking Paraphernalia - All else",
+      "level": 1,
+      "parent_id": 381
+    },
+    {
+      "id": 27,
+      "name": "Tobacco Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5384,
+      "name": "Toiletries",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5385,
+      "name": "Anti-perspirant/Deodorant/ Body Spray",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5391,
+      "name": "Body wash and Soap",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5389,
+      "name": "Children's toiletries",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5390,
+      "name": "Cleanser/acne cream",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5386,
+      "name": "Dental Products (toothpaste, toothbrush, floss etc.)",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 9193,
+      "name": "Floss",
+      "level": 2,
+      "parent_id": 5386
+    },
+    {
+      "id": 9281,
+      "name": "Teeth Whiteners",
+      "level": 2,
+      "parent_id": 5386
+    },
+    {
+      "id": 9192,
+      "name": "Toothbrush",
+      "level": 2,
+      "parent_id": 5386
+    },
+    {
+      "id": 9191,
+      "name": "Toothpaste",
+      "level": 2,
+      "parent_id": 5386
+    },
+    {
+      "id": 9204,
+      "name": "Facial Tissue",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 9278,
+      "name": "Incontinence Products",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5387,
+      "name": "Men's shaving products",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5392,
+      "name": "Personal care baby products",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 9277,
+      "name": "Toilet Tissue",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5388,
+      "name": "Women's shaving products",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 5393,
+      "name": "Toiletries - All else",
+      "level": 1,
+      "parent_id": 5384
+    },
+    {
+      "id": 158,
+      "name": "Toy Manufacture",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5455,
+      "name": "Action Figure",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5443,
+      "name": "Baby Toys (0-3 yrs.)",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9205,
+      "name": "Ball Game",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5454,
+      "name": "Beads/Fashion",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5438,
+      "name": "Board games",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5441,
+      "name": "Board game - Adult",
+      "level": 2,
+      "parent_id": 5438
+    },
+    {
+      "id": 5439,
+      "name": "Board game - Child 4-8 yrs.",
+      "level": 2,
+      "parent_id": 5438
+    },
+    {
+      "id": 5440,
+      "name": "Board game - Child 8-12 yrs.",
+      "level": 2,
+      "parent_id": 5438
+    },
+    {
+      "id": 5442,
+      "name": "Board games - All else",
+      "level": 2,
+      "parent_id": 5438
+    },
+    {
+      "id": 5437,
+      "name": "Boy and girl toys",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5435,
+      "name": "Boy toys",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5451,
+      "name": "Car playset/Remote Control",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5450,
+      "name": "Cars/Trucks/Trains",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9195,
+      "name": "Toy Cars",
+      "level": 2,
+      "parent_id": 5450
+    },
+    {
+      "id": 9197,
+      "name": "Toy Trains",
+      "level": 2,
+      "parent_id": 5450
+    },
+    {
+      "id": 9196,
+      "name": "Toy Trucks",
+      "level": 2,
+      "parent_id": 5450
+    },
+    {
+      "id": 5446,
+      "name": "Collectibles",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5452,
+      "name": "Construction Set",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9198,
+      "name": "Toy Construction Over 7 years",
+      "level": 2,
+      "parent_id": 5452
+    },
+    {
+      "id": 9199,
+      "name": "Toy Construction Under 7 years",
+      "level": 2,
+      "parent_id": 5452
+    },
+    {
+      "id": 5456,
+      "name": "Cooking Set",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5445,
+      "name": "Creative",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5449,
+      "name": "Dolls",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9200,
+      "name": "Fashion dolls",
+      "level": 2,
+      "parent_id": 5449
+    },
+    {
+      "id": 9201,
+      "name": "Interactive Feature Dolls",
+      "level": 2,
+      "parent_id": 5449
+    },
+    {
+      "id": 9202,
+      "name": "Mini, Micro, and Pocket Dolls",
+      "level": 2,
+      "parent_id": 5449
+    },
+    {
+      "id": 5444,
+      "name": "Educational",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9152,
+      "name": "Electronic Toy",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5434,
+      "name": "Gaming Consoles",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5436,
+      "name": "Girl Toys",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9153,
+      "name": "Interactive Toy",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5457,
+      "name": "Kites/Gliders",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9154,
+      "name": "Musical Toy",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5458,
+      "name": "Outdoor",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5453,
+      "name": "Paint/Draw",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5447,
+      "name": "Playdoh",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5459,
+      "name": "Robot",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5448,
+      "name": "Role Play/Pretend Play",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5460,
+      "name": "Skateboard/Scooter",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5461,
+      "name": "Soft Toys",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 9223,
+      "name": "Trading Cards",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 5462,
+      "name": "Toy Manufacture - All else",
+      "level": 1,
+      "parent_id": 158
+    },
+    {
+      "id": 237,
+      "name": "Toy and Hobby Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5431,
+      "name": "Board games Store",
+      "level": 1,
+      "parent_id": 237
+    },
+    {
+      "id": 5430,
+      "name": "Boy and girl toys Store",
+      "level": 1,
+      "parent_id": 237
+    },
+    {
+      "id": 5428,
+      "name": "Boy toys Store",
+      "level": 1,
+      "parent_id": 237
+    },
+    {
+      "id": 5427,
+      "name": "Gaming consoles Store",
+      "level": 1,
+      "parent_id": 237
+    },
+    {
+      "id": 5429,
+      "name": "Girl Toys Store",
+      "level": 1,
+      "parent_id": 237
+    },
+    {
+      "id": 5432,
+      "name": "Toys for newborns",
+      "level": 1,
+      "parent_id": 237
+    },
+    {
+      "id": 5433,
+      "name": "Toy and Hobby Stores - All else",
+      "level": 1,
+      "parent_id": 237
+    },
+    {
+      "id": 9206,
+      "name": "Travel",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9207,
+      "name": "Domestic Travel",
+      "level": 1,
+      "parent_id": 9206
+    },
+    {
+      "id": 9156,
+      "name": "Holiday Vacation Travel",
+      "level": 1,
+      "parent_id": 9206
+    },
+    {
+      "id": 9208,
+      "name": "International Travel",
+      "level": 1,
+      "parent_id": 9206
+    },
+    {
+      "id": 9212,
+      "name": "Rail Travel",
+      "level": 1,
+      "parent_id": 9206
+    },
+    {
+      "id": 9155,
+      "name": "Travel Accessories",
+      "level": 1,
+      "parent_id": 9206
+    },
+    {
+      "id": 9300,
+      "name": "Travel - All else",
+      "level": 1,
+      "parent_id": 9206
+    },
+    {
+      "id": 190,
+      "name": "Travel Agencies and Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9213,
+      "name": "Online Travel Services",
+      "level": 1,
+      "parent_id": 190
+    },
+    {
+      "id": 5463,
+      "name": "Tourism",
+      "level": 1,
+      "parent_id": 190
+    },
+    {
+      "id": 159,
+      "name": "Truck and Bus Manufacturing",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 347,
+      "name": "Trucking",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9787,
+      "name": "UK Less Healthy Foods",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9789,
+      "name": "UK Less Healthy Foods Exemption",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 9788,
+      "name": "UK Non-less Healthy Foods",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 238,
+      "name": "Used Merchandise Stores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 73,
+      "name": "Venture Capital",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 28,
+      "name": "Veterinary Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 5465,
+      "name": "Pet Medicine",
+      "level": 1,
+      "parent_id": 28
+    },
+    {
+      "id": 5466,
+      "name": "Veterinary Services - All else",
+      "level": 1,
+      "parent_id": 28
+    },
+    {
+      "id": 9294,
+      "name": "Virtual and Augmented Reality Devices",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 239,
+      "name": "Warehouse Clubs and Superstores",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 348,
+      "name": "Warehousing and Storage",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 191,
+      "name": "Waste Management",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 192,
+      "name": "Water & Sewer Utilities",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 29,
+      "name": "Wineries",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 314,
+      "name": "Wired Telecommunications Carriers",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 315,
+      "name": "Wireless Telecommunications Services",
+      "level": 0,
+      "parent_id": 0
+    },
+    {
+      "id": 56,
+      "name": "Wood Flooring Manufacture",
+      "level": 0,
+      "parent_id": 0
+    }
+  ]
+}

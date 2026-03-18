@@ -188,6 +188,117 @@ def test_specificity_search_query_skips_malformed_www_anchor():
     assert '"Historica Canada"' in query
 
 
+def test_entity_search_query_uses_title_and_domain_hints():
+    llm = HybridLLM()
+    query = llm._build_entity_search_query(
+        brand="Mercy",
+        raw_category="Movie",
+        ocr_text="Mercy Movie.ca FILMED FOR IMAX NOW PLAYING",
+    )
+
+    assert "Mercy" in query
+    assert '"movie.ca"' in query
+    assert "IMAX" in query
+    assert "Movie" in query
+
+
+def test_query_entity_grounding_returns_structured_metadata(monkeypatch):
+    calls = {"count": 0}
+
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            calls["count"] += 1
+            return {
+                "entity_name": "Mercy",
+                "entity_kind": "film_release",
+                "genres": ["action", "thriller"],
+                "confidence": 0.94,
+                "reasoning": "Grounded from title and web search.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+    monkeypatch.setattr(
+        "video_service.core.llm.search_manager.search_results",
+        lambda query, timeout=45, max_results=5: [
+            {
+                "title": "Mercy (2025 film)",
+                "href": "https://example.test/mercy",
+                "body": "Mercy is an action thriller film now playing in IMAX.",
+            }
+        ],
+    )
+
+    llm = HybridLLM()
+    result, status = llm.query_entity_grounding(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="Mercy",
+        raw_category="Movie",
+        ocr_text="Mercy Movie.ca FILMED FOR IMAX NOW PLAYING",
+    )
+
+    assert status == "ok"
+    assert result["entity_name"] == "Mercy"
+    assert result["entity_kind"] == "film_release"
+    assert result["genres"] == ["action", "thriller"]
+    assert result["_search_results"]
+    assert calls["count"] == 1
+
+
+def test_query_entity_search_rescue_accepts_exact_candidate_text_on_retry(monkeypatch):
+    calls = {"count": 0}
+
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "brand": "Mercy",
+                    "confidence": 0.7,
+                    "reasoning": "Missing category index on first pass.",
+                }
+            return {
+                "brand": "1",
+                "category": "Action/thriller Cinema",
+                "confidence": 0.94,
+                "reasoning": "Exact candidate on retry.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_entity_search_rescue(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="Mercy",
+        raw_category="Movie",
+        current_category="Comedy",
+        entity_name="Mercy",
+        entity_kind="film_release",
+        ocr_text="Mercy Movie.ca FILMED FOR IMAX NOW PLAYING",
+        genres=["action", "thriller"],
+        branch_label="Cinema Genre",
+        search_results=[
+            {
+                "title": "Mercy (2025 film)",
+                "href": "https://example.test/mercy",
+                "body": "Mercy is an action thriller film now playing in IMAX.",
+            }
+        ],
+        candidate_categories=["Cinema Genre", "Comedy Cinema", "Action/thriller Cinema"],
+        candidate_category_contexts={
+            "Cinema Genre": "Movies & TV Production and Distribution : Cinema Genre",
+            "Comedy Cinema": "Movies & TV Production and Distribution : Cinema Genre : Comedy Cinema",
+            "Action/thriller Cinema": "Movies & TV Production and Distribution : Cinema Genre : Action/thriller Cinema",
+        },
+    )
+
+    assert status == "ok"
+    assert result["brand"] == "Mercy"
+    assert result["category"] == "Action/thriller Cinema"
+    assert result["category_index"] == 3
+
+
 def test_create_provider_routes_qwen_models_to_qwen_plugin():
     provider = create_provider("Ollama", "qwen3-vl:8b-instruct", context_size=8192)
     assert isinstance(provider, OllamaQwenProvider)
@@ -362,6 +473,188 @@ def test_llama_server_pipeline_omits_prompt_categories_and_uses_structure_only_s
     assert category_schema == {"type": "string"}
 
 
+def test_lm_studio_category_rerank_uses_category_index_schema(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"category_index":3,"confidence":0.92,"reasoning":"ok"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    llm = HybridLLM()
+    result, status = llm.query_category_rerank(
+        provider="LM Studio",
+        backend_model="local-model",
+        brand="TELUS",
+        raw_category="Mobile Phone Service Provider",
+        mapped_category="Wireless Telecommunications Services",
+        ocr_text="TELUS iPhone 17e Compared to iPhone 16e",
+        reasoning="The ad shows a TELUS-branded iPhone handset comparison.",
+        candidate_categories=[
+            "Wireless Telecommunications Services",
+            "Telecommunication Services",
+            "Handset/Mobile",
+        ],
+    )
+
+    assert status == "ok"
+    assert result["brand"] == "TELUS"
+    assert result["category"] == "Handset/Mobile"
+    schema = calls[0]["json"]["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["category_index", "confidence", "reasoning"]
+    assert "brand" not in schema["properties"]
+    assert "category" not in schema["properties"]
+
+
+def test_lm_studio_entity_grounding_uses_grounding_schema(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"entity_name":"Mercy","entity_kind":"film_release","genres":["action","thriller"],"confidence":0.94,"reasoning":"ok"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+    monkeypatch.setattr(
+        "video_service.core.llm.search_manager.search_results",
+        lambda query, timeout=45, max_results=5: [
+            {"title": "Mercy (2025 film)", "href": "https://example.test/mercy", "body": "Action thriller film."}
+        ],
+    )
+
+    llm = HybridLLM()
+    result, status = llm.query_entity_grounding(
+        provider="LM Studio",
+        backend_model="local-model",
+        brand="Mercy",
+        raw_category="Movie",
+        ocr_text="Mercy Movie.ca FILMED FOR IMAX NOW PLAYING",
+    )
+
+    assert status == "ok"
+    assert result["entity_name"] == "Mercy"
+    schema = calls[0]["json"]["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["entity_name", "entity_kind", "genres", "confidence", "reasoning"]
+    assert schema["properties"]["entity_kind"]["enum"] == [
+        "film_release",
+        "stage_production",
+        "venue_exhibitor",
+        "tv_program",
+        "live_event",
+        "unknown",
+    ]
+
+
+def test_lm_studio_entity_branch_selection_uses_category_index_schema(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"category_index":2,"confidence":0.91,"reasoning":"ok"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    llm = HybridLLM()
+    result, status = llm.query_entity_search_rescue(
+        provider="LM Studio",
+        backend_model="local-model",
+        brand="Mercy",
+        raw_category="Movie",
+        current_category="Comedy",
+        entity_name="Mercy",
+        entity_kind="film_release",
+        ocr_text="Mercy Movie.ca FILMED FOR IMAX NOW PLAYING",
+        genres=["action", "thriller"],
+        branch_label="Cinema Genre",
+        search_results=[
+            {"title": "Mercy (2025 film)", "href": "https://example.test/mercy", "body": "Action thriller film."}
+        ],
+        candidate_categories=["Cinema Genre", "Action/thriller Cinema", "Comedy Cinema"],
+    )
+
+    assert status == "ok"
+    assert result["brand"] == "Mercy"
+    assert result["category"] == "Action/thriller Cinema"
+    schema = calls[0]["json"]["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["category_index", "confidence", "reasoning"]
+    assert "brand" not in schema["properties"]
+    assert "category" not in schema["properties"]
+
+
+def test_lm_studio_category_family_selection_uses_family_index_schema(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"family_index":2,"confidence":0.91,"reasoning":"ok"}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    llm = HybridLLM()
+    result, status = llm.query_category_family_selection(
+        provider="LM Studio",
+        backend_model="local-model",
+        brand="Audible",
+        raw_category="Audio Books",
+        mapped_category="Bookstores",
+        ocr_text="Audible original audiobook now streaming",
+        reasoning="The ad promotes an audiobook service.",
+        candidate_families=["Household Appliance Manufacture", "Book Publishers", "Bookstores"],
+        family_members={
+            "Household Appliance Manufacture": ["Personal Audio"],
+            "Book Publishers": ["Book Publishers"],
+            "Bookstores": ["Bookstores"],
+        },
+    )
+
+    assert status == "ok"
+    assert result["family"] == "Book Publishers"
+    schema = calls[0]["json"]["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["family_index", "confidence", "reasoning"]
+    assert "brand" not in schema["properties"]
+    assert "category" not in schema["properties"]
+
+
 def test_ollama_pipeline_omits_categories_from_prompt_and_sends_no_schema(monkeypatch):
     calls: list[dict] = []
 
@@ -399,7 +692,7 @@ def test_query_category_rerank_includes_device_over_provider_guidance(monkeypatc
             captured["user_prompt"] = user_prompt
             return {
                 "brand": "TELUS",
-                "category": "Handset/Mobile",
+                "category_index": 3,
                 "confidence": 0.92,
                 "reasoning": "The ad is centered on the iPhone device, not the carrier service plan.",
             }
@@ -420,24 +713,37 @@ def test_query_category_rerank_includes_device_over_provider_guidance(monkeypatc
             "Telecommunication Services",
             "Handset/Mobile",
         ],
+        candidate_category_contexts={
+            "Wireless Telecommunications Services": "Telecommunications : Wireless Telecommunications Services",
+            "Telecommunication Services": "Telecommunications : Telecommunication Services",
+            "Handset/Mobile": "Telecommunications : Handset/Mobile",
+        },
     )
 
     assert status == "ok"
     assert result["category"] == "Handset/Mobile"
+    assert result["category_index"] == 3
     assert "advertiser or provider brand does not automatically determine category" in captured["system_prompt"]
     assert "Decision Guidance: If the ad centers on a named phone/device model" in captured["user_prompt"]
+    assert "Parent/Leaf Path: Telecommunications : Handset/Mobile" in captured["user_prompt"]
+    assert "category_index" in captured["system_prompt"]
 
 
 def test_query_category_rerank_can_disable_product_focus_guidance(monkeypatch):
-    captured: dict[str, str] = {}
+    calls: list[dict[str, str]] = []
 
     class _CaptureProvider:
         def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
-            captured["system_prompt"] = system_prompt
-            captured["user_prompt"] = user_prompt
+            calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
+            if len(calls) == 1:
+                return {
+                    "brand": "TELUS",
+                    "category": "Wireless Telecommunications Services",
+                    "confidence": 0.9,
+                    "reasoning": "ok",
+                }
             return {
-                "brand": "TELUS",
-                "category": "Wireless Telecommunications Services",
+                "category_index": 1,
                 "confidence": 0.9,
                 "reasoning": "ok",
             }
@@ -463,8 +769,128 @@ def test_query_category_rerank_can_disable_product_focus_guidance(monkeypatch):
 
     assert status == "ok"
     assert result["category"] == "Wireless Telecommunications Services"
-    assert "advertiser or provider brand does not automatically determine category" not in captured["system_prompt"]
-    assert "Decision Guidance: None" in captured["user_prompt"]
+    assert len(calls) == 2
+    assert "advertiser or provider brand does not automatically determine category" not in calls[0]["system_prompt"]
+    assert "Decision Guidance: None" in calls[0]["user_prompt"]
+    assert "category_index is required" in calls[1]["system_prompt"]
+    assert "Do not return category text" in calls[1]["system_prompt"]
+
+
+def test_query_category_rerank_rejects_when_retry_still_omits_category_index(monkeypatch):
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            return {
+                "brand": "betterhelp",
+                "category": "Not A Candidate",
+                "confidence": 0.99,
+                "reasoning": "No valid index returned.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_category_rerank(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="betterhelp",
+        raw_category="Online Therapy Services",
+        mapped_category="Spa Services",
+        ocr_text="betterhelp.com online therapy platform",
+        reasoning="prior",
+        candidate_categories=[
+            "Rehabilitation Therapy Practices",
+            "Online Travel Services",
+            "Internet Service Providers",
+        ],
+    )
+
+    assert result is None
+    assert status == "missing_category_index"
+
+
+def test_query_category_family_selection_accepts_exact_family_text_on_retry(monkeypatch):
+    calls = {"count": 0}
+
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "confidence": 0.99,
+                    "reasoning": "Missing family index.",
+                }
+            return {
+                "category": "Book Publishers",
+                "confidence": 0.95,
+                "reasoning": "Best exact family from the provided list.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_category_family_selection(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="Audible",
+        raw_category="Audio Books",
+        mapped_category="Bookstores",
+        ocr_text="Audible original audiobook now streaming",
+        reasoning="The ad promotes an audiobook service.",
+        candidate_families=["Household Appliance Manufacture", "Book Publishers", "Bookstores"],
+        family_members={
+            "Household Appliance Manufacture": ["Personal Audio"],
+            "Book Publishers": ["Book Publishers"],
+            "Bookstores": ["Bookstores"],
+        },
+    )
+
+    assert status == "ok"
+    assert result["family"] == "Book Publishers"
+    assert result["family_index"] == 2
+
+
+def test_query_category_rerank_accepts_exact_candidate_text_on_retry(monkeypatch):
+    calls = {"count": 0}
+
+    class _CaptureProvider:
+        def generate_json(self, system_prompt: str, user_prompt: str, images=None, **kwargs) -> dict:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "brand": "betterhelp",
+                    "category": "",
+                    "confidence": 0.99,
+                    "reasoning": "Missing category index.",
+                }
+            return {
+                "brand": "1",
+                "category": "Rehabilitation Therapy Practices",
+                "confidence": 0.95,
+                "reasoning": "Best exact candidate from the provided list.",
+            }
+
+    monkeypatch.setattr("video_service.core.llm.create_provider", lambda *args, **kwargs: _CaptureProvider())
+
+    llm = HybridLLM()
+    result, status = llm.query_category_rerank(
+        provider="Llama Server",
+        backend_model="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        brand="betterhelp",
+        raw_category="Online Therapy Services",
+        mapped_category="Spa Services",
+        ocr_text="betterhelp.com online therapy platform",
+        reasoning="prior",
+        candidate_categories=[
+            "Rehabilitation Therapy Practices",
+            "Online Travel Services",
+            "Internet Service Providers",
+        ],
+    )
+
+    assert status == "ok"
+    assert result["brand"] == "betterhelp"
+    assert result["category"] == "Rehabilitation Therapy Practices"
+    assert result["category_index"] == 1
 
 
 def test_query_pipeline_prompt_prefers_promoted_product_over_provider_industry(monkeypatch):

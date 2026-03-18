@@ -1,6 +1,7 @@
 import time
 import os
 import re
+import math
 from collections.abc import Callable
 import torch
 import cv2
@@ -38,7 +39,17 @@ RESULT_COLUMNS = [
     "Reasoning",
     "category_match_method",
     "category_match_score",
+    "brand",
+    "confidence",
+    "reasoning",
+    "industry_id",
+    "industry_name",
+    "category_id",
+    "category_name",
 ]
+
+_CATEGORY_RERANK_TAXONOMY_CACHE_KEY: tuple[str, int] | None = None
+_CATEGORY_RERANK_TAXONOMY_CACHE: dict[str, object] | None = None
 
 
 def _normalize_ocr(text: str) -> str:
@@ -497,6 +508,39 @@ def _specificity_search_generic_raw_categories() -> set[str]:
     return values or {"Movie"}
 
 
+_ENTITY_SEARCH_GENERIC_MEDIA_CATEGORIES = {
+    "movie",
+    "movies",
+    "film",
+    "films",
+    "cinema",
+    "tv",
+    "television",
+    "entertainment",
+    "performance arts",
+    "theater",
+    "theatre",
+}
+_BROAD_MEDIA_TAXONOMY_LABELS = {
+    "Movies & TV Production and Distribution",
+    "Movies & TV Production and Distribution - All else",
+    "Cinema Genre",
+    "DVD/video Genre",
+    "Entertainment and Performance Arts",
+    "Entertainment and Performance Arts - All else",
+    "Event",
+    "TV Cable, Pay & Broadcast Networks",
+    "TV Cable, Pay & Broadcast Networks - All else",
+}
+_ENTITY_KIND_PRIMARY_BRANCH = {
+    "film_release": "Cinema Genre",
+    "stage_production": "Theater",
+    "venue_exhibitor": "Movie Theatres",
+    "tv_program": "DVD/video Genre",
+    "live_event": "Event",
+}
+
+
 def _is_valid_search_domain(domain: str) -> bool:
     labels = [label for label in (domain or "").strip().lower().split(".") if label]
     if len(labels) < 2:
@@ -509,6 +553,266 @@ def _is_valid_search_domain(domain: str) -> bool:
     if len(labels) == 2 and len(tld) > 10:
         return False
     return True
+
+
+def _entity_search_rescue_enabled(enable_search: bool, express_mode: bool) -> bool:
+    raw = os.environ.get("ENTITY_SEARCH_RESCUE_ENABLED", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if express_mode:
+        return False
+    return bool(enable_search)
+
+
+def _looks_like_generic_media_category(value: str) -> bool:
+    normalized = " ".join(str(value or "").lower().split())
+    if not normalized:
+        return False
+    if normalized in _ENTITY_SEARCH_GENERIC_MEDIA_CATEGORIES:
+        return True
+    return any(token in normalized for token in _ENTITY_SEARCH_GENERIC_MEDIA_CATEGORIES)
+
+
+def _text_has_any_cue(text: str, cues: set[str]) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    return any(cue in normalized for cue in cues)
+
+
+def _iter_taxonomy_records():
+    mapping_state = getattr(category_mapper, "mapping_state", None)
+    return tuple(getattr(mapping_state, "records", ()) or ())
+
+
+def _taxonomy_record_for_label(label_name: str):
+    target = str(label_name or "").strip().casefold()
+    for record in _iter_taxonomy_records():
+        label = str(record.name or "").strip()
+        if label.casefold() == target:
+            return record
+    return None
+
+
+def _taxonomy_path_names_for_label(label_name: str) -> tuple[str, ...]:
+    record = _taxonomy_record_for_label(label_name)
+    if record is None:
+        return tuple()
+    return tuple(str(name or "").strip() for name in getattr(record, "path_names", ()) or ())
+
+
+def _taxonomy_descendants_for_path_name(path_name: str, *, leaf_only: bool = True) -> list[str]:
+    records = _iter_taxonomy_records()
+    if not records:
+        return []
+    parent_ids = {
+        str(record.parent_id or "").strip()
+        for record in records
+        if str(record.parent_id or "").strip() not in {"", "0"}
+    }
+    path_name_folded = str(path_name or "").strip().casefold()
+    labels: list[str] = []
+    for record in records:
+        path_names = {str(name or "").strip().casefold() for name in record.path_names}
+        if path_name_folded not in path_names:
+            continue
+        if leaf_only and str(record.category_id or "").strip() in parent_ids:
+            continue
+        if "all else" in str(record.name or "").lower():
+            continue
+        label = str(record.name or "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _find_taxonomy_label(label_name: str) -> str:
+    target = str(label_name or "").strip().casefold()
+    for record in _iter_taxonomy_records():
+        label = str(record.name or "").strip()
+        if label.casefold() == target:
+            return label
+    return ""
+
+
+def _label_in_taxonomy_branch(label_name: str, branch_name: str) -> bool:
+    path_names = {name.casefold() for name in _taxonomy_path_names_for_label(label_name)}
+    branch_folded = str(branch_name or "").strip().casefold()
+    return bool(branch_folded and branch_folded in path_names)
+
+
+def _taxonomy_parent_label_for_label(label_name: str) -> str:
+    clean = str(label_name or "").strip()
+    if not clean:
+        return ""
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    parent_by_label = dict(taxonomy_stats.get("parent_by_label", {}) or {})
+    id_to_label = dict(taxonomy_stats.get("id_to_label", {}) or {})
+    parent_id = str(parent_by_label.get(clean, "") or "").strip()
+    if not parent_id:
+        return clean
+    return str(id_to_label.get(parent_id, "") or "").strip() or clean
+
+
+def _build_category_family_candidates(candidate_labels: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    ordered_families: list[str] = []
+    family_members: dict[str, list[str]] = {}
+    for candidate_label in candidate_labels:
+        clean = str(candidate_label or "").strip()
+        if not clean:
+            continue
+        family_label = _taxonomy_parent_label_for_label(clean)
+        if not family_label:
+            family_label = clean
+        if family_label not in ordered_families:
+            ordered_families.append(family_label)
+        members = family_members.setdefault(family_label, [])
+        if clean not in members:
+            members.append(clean)
+    return ordered_families, family_members
+
+
+def _expand_candidates_within_selected_family(
+    *,
+    selected_family: str,
+    current_candidates: list[str],
+    current_canonical: str,
+    raw_category: str,
+    predicted_brand: str,
+    ocr_text: str,
+    reasoning: str,
+    visual_matches: list[tuple[str, float]] | None = None,
+    limit: int = 8,
+) -> list[str]:
+    family_label = str(selected_family or "").strip()
+    if not family_label:
+        return list(current_candidates)
+
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    path_tokens_by_label = dict(taxonomy_stats.get("path_tokens_by_label", {}) or {})
+    query_tokens = _category_overlap_tokens(
+        " ".join(
+            part
+            for part in (
+                predicted_brand,
+                raw_category,
+                ocr_text,
+                reasoning,
+                " ".join(str(label or "").strip() for label, _score in (visual_matches or [])),
+            )
+            if str(part or "").strip()
+        )
+    )
+    head_tokens = _extract_head_concept_tokens(
+        " ".join(part for part in (raw_category, ocr_text, reasoning) if str(part or "").strip()),
+        max_terms=3,
+    )
+    visual_rank = {
+        str(label or "").strip(): idx
+        for idx, (label, _score) in enumerate((visual_matches or [])[:6], start=1)
+        if str(label or "").strip()
+    }
+
+    candidate_pool: list[str] = []
+
+    def _append(label: str) -> None:
+        clean = str(label or "").strip()
+        if clean and clean not in candidate_pool:
+            candidate_pool.append(clean)
+
+    _append(family_label)
+    for candidate in current_candidates:
+        if _taxonomy_parent_label_for_label(candidate) == family_label or candidate == family_label:
+            _append(candidate)
+    for descendant in _taxonomy_descendants_for_path_name(family_label, leaf_only=True):
+        _append(descendant)
+    for label, _score in visual_matches or []:
+        clean = str(label or "").strip()
+        if clean and (_taxonomy_parent_label_for_label(clean) == family_label or clean == family_label):
+            _append(clean)
+
+    if not candidate_pool:
+        return list(current_candidates)
+
+    current_rank = {
+        str(label or "").strip(): idx
+        for idx, label in enumerate(current_candidates, start=1)
+        if str(label or "").strip()
+    }
+
+    def _score(label: str) -> tuple[float, int, str]:
+        score = 0.0
+        if label == family_label:
+            score += 0.04
+        if label == current_canonical:
+            score += 0.05
+        if label in current_rank:
+            score += max(0.0, 0.22 - (0.02 * float(current_rank[label] - 1)))
+        if label in visual_rank:
+            score += max(0.0, 0.16 - (0.02 * float(visual_rank[label] - 1)))
+        candidate_tokens = set(path_tokens_by_label.get(label, set()))
+        if not candidate_tokens:
+            candidate_tokens = _category_overlap_tokens(
+                str(getattr(category_mapper, "get_category_path_text", lambda value: value)(label) or label)
+            )
+        if candidate_tokens:
+            score += min(0.015 * _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights), 0.12)
+            if head_tokens and any(token in candidate_tokens for token in head_tokens):
+                score += 0.08
+        return (score, -current_rank.get(label, 99), label)
+
+    ranked = sorted(candidate_pool, key=_score, reverse=True)
+    return ranked[: max(1, limit)]
+
+
+def _is_broad_media_taxonomy_label(label_name: str) -> bool:
+    clean = str(label_name or "").strip()
+    if not clean:
+        return False
+    if clean in _BROAD_MEDIA_TAXONOMY_LABELS:
+        return True
+    path_names = _taxonomy_path_names_for_label(clean)
+    if not path_names:
+        return False
+    terminal = path_names[-1]
+    return terminal in _BROAD_MEDIA_TAXONOMY_LABELS
+
+
+def _is_specific_media_taxonomy_label(label_name: str) -> bool:
+    clean = str(label_name or "").strip()
+    if not clean or _is_broad_media_taxonomy_label(clean):
+        return False
+    if clean == _find_taxonomy_label("Movie Theatres"):
+        return True
+    return any(
+        _label_in_taxonomy_branch(clean, branch_name)
+        for branch_name in ("Cinema Genre", "DVD/video Genre", "Theater", "Event")
+    )
+
+
+def _rank_entity_branch_labels(
+    labels: list[str],
+    *,
+    genres: list[str],
+    sorted_vision: dict[str, float],
+) -> list[str]:
+    visual_ranks = {str(label or "").strip(): idx for idx, (label, _score) in enumerate(_top_visual_matches(sorted_vision, limit=6), start=1)}
+
+    def _score(label: str) -> tuple[int, int, str]:
+        normalized_label = " ".join(str(label or "").strip().lower().split())
+        genre_score = 0
+        for genre in genres:
+            normalized_genre = " ".join(str(genre or "").strip().lower().split())
+            if not normalized_genre:
+                continue
+            if normalized_genre in normalized_label or normalized_label in normalized_genre:
+                genre_score += 4
+        visual_bonus = 0
+        if label in visual_ranks:
+            visual_bonus = max(0, 3 - visual_ranks[label])
+        parent_penalty = -2 if normalized_label in {"cinema genre", "dvd/video genre", "event"} else 0
+        return (genre_score + visual_bonus + parent_penalty, -visual_ranks.get(label, 99), normalized_label)
+
+    return sorted(labels, key=_score, reverse=True)
 
 
 def _extract_ocr_domains(text: str) -> list[str]:
@@ -700,6 +1004,141 @@ def _category_overlap_tokens(text: str) -> set[str]:
     return tokens
 
 
+def _get_category_rerank_taxonomy_stats() -> dict[str, object]:
+    global _CATEGORY_RERANK_TAXONOMY_CACHE_KEY, _CATEGORY_RERANK_TAXONOMY_CACHE
+
+    categories = list(getattr(category_mapper, "categories", []) or [])
+    fingerprint = str(getattr(category_mapper, "_taxonomy_fingerprint", "") or "")
+    cache_key = (fingerprint, len(categories))
+    if _CATEGORY_RERANK_TAXONOMY_CACHE_KEY == cache_key and _CATEGORY_RERANK_TAXONOMY_CACHE is not None:
+        return _CATEGORY_RERANK_TAXONOMY_CACHE
+
+    get_path_text = getattr(category_mapper, "get_category_path_text", None)
+    get_parent_id = getattr(category_mapper, "get_category_parent_id", None)
+    cat_to_id = dict(getattr(category_mapper, "cat_to_id", {}) or {})
+    parent_by_label: dict[str, str] = {}
+    path_tokens_by_label: dict[str, set[str]] = {}
+    token_doc_frequency: dict[str, int] = {}
+    children_by_parent: dict[str, list[str]] = {}
+    ancestor_ids_by_label: dict[str, tuple[str, ...]] = {}
+    id_to_label = {
+        str(category_id or "").strip(): label
+        for label, category_id in cat_to_id.items()
+        if str(category_id or "").strip()
+    }
+
+    for label in categories:
+        normalized_label = str(label or "").strip()
+        path_text = (
+            str(get_path_text(normalized_label) or normalized_label)
+            if callable(get_path_text)
+            else normalized_label
+        )
+        path_tokens = _category_overlap_tokens(path_text or normalized_label)
+        path_tokens_by_label[normalized_label] = path_tokens
+        for token in path_tokens:
+            token_doc_frequency[token] = int(token_doc_frequency.get(token, 0)) + 1
+
+        parent_id = (
+            str(get_parent_id(normalized_label) or "").strip()
+            if callable(get_parent_id)
+            else ""
+        )
+        if parent_id:
+            parent_by_label[normalized_label] = parent_id
+            children_by_parent.setdefault(parent_id, []).append(normalized_label)
+
+    total_docs = max(1, len(categories))
+    token_weights = {
+        token: 1.0 + math.log((1.0 + float(total_docs)) / (1.0 + float(df)))
+        for token, df in token_doc_frequency.items()
+        if token
+    }
+
+    for label in categories:
+        normalized_label = str(label or "").strip()
+        ancestor_ids: list[str] = []
+        current_parent_id = parent_by_label.get(normalized_label, "")
+        seen_ids: set[str] = set()
+        while current_parent_id and current_parent_id not in seen_ids:
+            seen_ids.add(current_parent_id)
+            ancestor_ids.append(current_parent_id)
+            parent_label = id_to_label.get(current_parent_id, "")
+            if not parent_label:
+                break
+            current_parent_id = parent_by_label.get(parent_label, "")
+        ancestor_ids_by_label[normalized_label] = tuple(ancestor_ids)
+
+    _CATEGORY_RERANK_TAXONOMY_CACHE_KEY = cache_key
+    _CATEGORY_RERANK_TAXONOMY_CACHE = {
+        "token_weights": token_weights,
+        "path_tokens_by_label": path_tokens_by_label,
+        "children_by_parent": children_by_parent,
+        "ancestor_ids_by_label": ancestor_ids_by_label,
+        "id_to_label": id_to_label,
+        "parent_by_label": parent_by_label,
+    }
+    return _CATEGORY_RERANK_TAXONOMY_CACHE
+
+
+def _weighted_category_overlap_score(
+    query_tokens: set[str],
+    candidate_tokens: set[str],
+    token_weights: dict[str, float],
+) -> float:
+    overlap = query_tokens & candidate_tokens
+    if not overlap:
+        return 0.0
+    return float(sum(float(token_weights.get(token, 1.0)) for token in overlap))
+
+
+def _extract_head_concept_tokens(text: str, *, max_terms: int = 2) -> list[str]:
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    ordered_tokens: list[tuple[str, float, int]] = []
+    seen: set[str] = set()
+    raw_tokens = re.findall(r"[A-Za-zÀ-ÿ0-9]{3,}", str(text or ""))
+    token_count = max(1, len(raw_tokens))
+    for index, raw_token in enumerate(raw_tokens):
+        token = _normalize_category_overlap_token(raw_token)
+        if len(token) < 3 or token in _CATEGORY_RERANK_OVERLAP_STOPWORDS or token in seen:
+            continue
+        seen.add(token)
+        position_bias = 1.0 + (float(index) / float(token_count))
+        score = float(token_weights.get(token, 1.0)) * position_bias
+        ordered_tokens.append((token, score, index))
+    ordered_tokens.sort(key=lambda item: (-float(item[1]), -int(item[2]), item[0]))
+    return [token for token, _score, _index in ordered_tokens[:max_terms]]
+
+
+def _build_category_rerank_head_probe(
+    *,
+    raw_category: str,
+    predicted_brand: str,
+    ocr_text: str,
+    reasoning: str,
+) -> str:
+    compact_cues = build_product_cue_query_text(
+        predicted_brand=predicted_brand,
+        ocr_summary=ocr_text,
+        reasoning_summary=reasoning,
+        family_context=raw_category,
+        max_chars=220,
+    )
+    terms: list[str] = []
+    seen: set[str] = set()
+    brand_norm = " ".join(str(predicted_brand or "").split()).strip()
+    if brand_norm and brand_norm.lower() not in {"unknown", "none", "n/a"}:
+        terms.append(brand_norm)
+    for source in (raw_category, compact_cues):
+        for token in _extract_head_concept_tokens(source, max_terms=2):
+            if token in seen:
+                continue
+            seen.add(token)
+            terms.append(token)
+    return " ".join(terms[:4]).strip()
+
+
 def _resolve_category_rerank_freeform_mismatch_score_threshold() -> float:
     raw = os.environ.get("CATEGORY_RERANK_FREEFORM_MISMATCH_SCORE_THRESHOLD", "0.78")
     try:
@@ -744,6 +1183,45 @@ def _freeform_label_mismatch_reason(
     return (
         f"freeform_label_mismatch raw={raw_category!r};mapped={current_canonical!r};"
         f"top1_score={top1_score:.4f}"
+    )
+
+
+def _head_concept_mismatch_reason(
+    *,
+    current_canonical: str,
+    raw_category: str,
+    exact_taxonomy_match: bool,
+    primary_candidates: list[tuple[str, float]],
+) -> str | None:
+    if exact_taxonomy_match:
+        return None
+    if not current_canonical or not raw_category or not primary_candidates:
+        return None
+
+    raw_heads = _extract_head_concept_tokens(raw_category, max_terms=2)
+    if not raw_heads:
+        return None
+
+    path_getter = getattr(category_mapper, "get_category_path_text", None)
+    current_path = (
+        str(path_getter(current_canonical) or current_canonical)
+        if callable(path_getter)
+        else current_canonical
+    )
+    current_tokens = _category_overlap_tokens(current_path)
+    if raw_heads[0] in current_tokens:
+        return None
+
+    try:
+        top1_score = float(primary_candidates[0][1] or 0.0)
+    except (TypeError, ValueError):
+        top1_score = 0.0
+    if top1_score >= 0.82:
+        return None
+
+    return (
+        f"head_concept_mismatch raw_heads={raw_heads!r};"
+        f"mapped={current_canonical!r};top1_score={top1_score:.4f}"
     )
 
 
@@ -797,6 +1275,410 @@ def _resolve_category_rerank_visual_score_threshold() -> float:
         return 0.55
 
 
+def _resolve_category_rerank_family_dispersion_margin_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_FAMILY_DISPERSION_MARGIN_THRESHOLD", "0.05")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning(
+            "invalid_category_rerank_family_dispersion_margin_threshold value=%r fallback=0.05",
+            raw,
+        )
+        return 0.05
+
+
+def _broad_neighbor_dispersion_reason(
+    *,
+    current_canonical: str,
+    raw_category: str,
+    exact_taxonomy_match: bool,
+    primary_candidates: list[tuple[str, float]],
+) -> str | None:
+    if exact_taxonomy_match:
+        return None
+    if not current_canonical or not raw_category or len(primary_candidates) < 2:
+        return None
+    raw_tokens = _category_overlap_tokens(raw_category)
+    if not raw_tokens or len(raw_tokens) > 4:
+        return None
+
+    try:
+        top1_score = float(primary_candidates[0][1] or 0.0)
+    except (TypeError, ValueError):
+        top1_score = 0.0
+    if top1_score >= 0.92:
+        return None
+
+    margin = _resolve_category_rerank_family_dispersion_margin_threshold()
+    considered = [
+        str(label or "").strip()
+        for label, score_raw in primary_candidates[:5]
+        if str(label or "").strip()
+        and (top1_score - float(score_raw or 0.0)) <= margin
+    ]
+    if len(considered) < 2:
+        return None
+
+    family_labels: list[str] = []
+    for label in considered:
+        family_label = _taxonomy_parent_label_for_label(label)
+        if not family_label:
+            family_label = label
+        if family_label not in family_labels:
+            family_labels.append(family_label)
+    if len(family_labels) < 2:
+        return None
+
+    canonical_tokens = _category_overlap_tokens(current_canonical)
+    if raw_tokens & canonical_tokens and len(family_labels) == 2 and len(considered) == 2:
+        return None
+
+    return (
+        f"broad_neighbor_dispersion raw={raw_category!r};mapped={current_canonical!r};"
+        f"families={family_labels!r};top1_score={top1_score:.4f}"
+    )
+
+
+def _build_category_rerank_probe_specs(
+    *,
+    raw_category: str,
+    predicted_brand: str,
+    ocr_text: str,
+    reasoning: str,
+    primary_limit: int,
+    evidence_limit: int,
+) -> tuple[list[tuple[str, str, int, dict[str, str]]], str, list[tuple[str, str]]]:
+    raw_norm = str(raw_category or "").strip()
+    brand_norm = str(predicted_brand or "").strip()
+    seen_queries: set[tuple[str, str, bool, bool]] = set()
+    debug_queries: list[tuple[str, str]] = []
+    specs: list[tuple[str, str, int, dict[str, str]]] = []
+
+    def _add_probe(
+        probe_name: str,
+        query_text: str,
+        *,
+        limit: int,
+        predicted_brand_value: str = "",
+        ocr_text_value: str = "",
+        reasoning_value: str = "",
+    ) -> None:
+        normalized_query = " ".join(str(query_text or "").split()).strip()
+        if not normalized_query:
+            return
+        key = (
+            normalized_query.casefold(),
+            " ".join(str(predicted_brand_value or "").split()).casefold(),
+            bool(str(ocr_text_value or "").strip()),
+            bool(str(reasoning_value or "").strip()),
+        )
+        if key in seen_queries:
+            return
+        seen_queries.add(key)
+        debug_queries.append((probe_name, normalized_query))
+        specs.append(
+            (
+                probe_name,
+                normalized_query,
+                limit,
+                {
+                    "predicted_brand": predicted_brand_value,
+                    "ocr_summary": ocr_text_value,
+                    "reasoning_summary": reasoning_value,
+                },
+            )
+        )
+
+    _add_probe("label", raw_norm, limit=primary_limit)
+    _add_probe(
+        "guided",
+        raw_norm,
+        limit=primary_limit,
+        predicted_brand_value=brand_norm,
+        ocr_text_value=ocr_text,
+        reasoning_value=reasoning,
+    )
+
+    evidence_query = _build_category_rerank_evidence_query(
+        brand=predicted_brand,
+        ocr_text=ocr_text,
+        reasoning=reasoning,
+        family_context=raw_category,
+    )
+    _add_probe("evidence", evidence_query, limit=evidence_limit)
+
+    ocr_cues = build_product_cue_query_text(
+        predicted_brand=brand_norm,
+        ocr_summary=ocr_text,
+        reasoning_summary="",
+        family_context=raw_norm,
+        max_chars=220,
+    )
+    _add_probe("ocr", ocr_cues, limit=evidence_limit)
+
+    reasoning_cues = build_product_cue_query_text(
+        predicted_brand=brand_norm,
+        ocr_summary="",
+        reasoning_summary=reasoning,
+        family_context=raw_norm,
+        max_chars=220,
+    )
+    _add_probe("reasoning", reasoning_cues, limit=evidence_limit)
+
+    head_probe = _build_category_rerank_head_probe(
+        raw_category=raw_norm,
+        predicted_brand=brand_norm,
+        ocr_text=ocr_text,
+        reasoning=reasoning,
+    )
+    _add_probe("head", head_probe, limit=evidence_limit)
+    return specs, evidence_query, debug_queries
+
+
+def _summarize_category_rerank_answers_for_log(candidates: list[tuple[str, float]]) -> list[str]:
+    path_getter = getattr(category_mapper, "get_category_path_text", None)
+    summarized: list[str] = []
+    for label, score in candidates:
+        normalized_label = str(label or "").strip()
+        if not normalized_label:
+            continue
+        path_text = (
+            str(path_getter(normalized_label) or normalized_label)
+            if callable(path_getter)
+            else normalized_label
+        )
+        summarized.append(f"{normalized_label}@{float(score):.4f} [{path_text}]")
+    return summarized
+
+
+def _merge_category_rerank_probe_candidates(
+    *,
+    probe_candidates: dict[str, list[tuple[str, float]]],
+    probe_queries: dict[str, str],
+    current_canonical: str,
+    combined_limit: int,
+) -> list[tuple[str, float]]:
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    path_tokens_by_label = dict(taxonomy_stats.get("path_tokens_by_label", {}) or {})
+    query_tokens = _category_overlap_tokens(" ".join(probe_queries.values()))
+    head_tokens = _extract_head_concept_tokens(" ".join(probe_queries.values()), max_terms=2)
+    primary_head = head_tokens[0] if head_tokens else ""
+    merged: dict[str, dict[str, object]] = {}
+
+    for probe_name, candidates in probe_candidates.items():
+        for rank, (label, score_raw) in enumerate(candidates):
+            canonical_label = str(label or "").strip()
+            if not canonical_label:
+                continue
+            try:
+                numeric_score = float(score_raw or 0.0)
+            except (TypeError, ValueError):
+                numeric_score = 0.0
+            entry = merged.setdefault(
+                canonical_label,
+                {
+                    "best_score": numeric_score,
+                    "support": set(),
+                    "best_rank": rank,
+                    "rank_sum": 0.0,
+                },
+            )
+            entry["best_score"] = max(float(entry["best_score"]), numeric_score)
+            support = entry["support"]
+            if isinstance(support, set):
+                support.add(probe_name)
+            entry["best_rank"] = min(int(entry["best_rank"]), rank)
+            entry["rank_sum"] = float(entry["rank_sum"]) + float(rank)
+
+    ranked: list[tuple[str, float]] = []
+    path_getter = getattr(category_mapper, "get_category_path_text", None)
+    for label, details in merged.items():
+        support = details["support"] if isinstance(details["support"], set) else set()
+        support_count = len(support)
+        best_score = float(details["best_score"])
+        best_rank = int(details["best_rank"])
+        path_text = ""
+        if callable(path_getter):
+            path_text = str(path_getter(label) or "")
+        candidate_tokens = set(path_tokens_by_label.get(label, set()))
+        if not candidate_tokens:
+            candidate_tokens = _category_overlap_tokens(path_text or label)
+        weighted_overlap = _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights)
+        combined_score = (
+            best_score
+            + (0.025 * max(0, support_count - 1))
+            + min(0.012 * float(weighted_overlap), 0.06)
+            - min(0.004 * float(best_rank), 0.02)
+        )
+        if "head" in support:
+            combined_score += 0.035
+        if primary_head and primary_head not in candidate_tokens:
+            combined_score -= 0.045
+        if label == current_canonical:
+            combined_score += 0.01
+        ranked.append((label, combined_score))
+
+    ranked.sort(key=lambda item: (-float(item[1]), item[0]))
+    return ranked[: max(1, combined_limit)]
+
+
+def _expand_category_rerank_branch_candidates(
+    *,
+    ranked_candidates: list[tuple[str, float]],
+    current_canonical: str,
+    probe_queries: dict[str, str],
+    combined_limit: int,
+) -> list[tuple[str, float]]:
+    categories = list(getattr(category_mapper, "categories", []) or [])
+    get_path_text = getattr(category_mapper, "get_category_path_text", None)
+    cat_to_id = dict(getattr(category_mapper, "cat_to_id", {}) or {})
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    children_by_parent = dict(taxonomy_stats.get("children_by_parent", {}) or {})
+    ancestor_ids_by_label = dict(taxonomy_stats.get("ancestor_ids_by_label", {}) or {})
+    id_to_label = dict(taxonomy_stats.get("id_to_label", {}) or {})
+    path_tokens_by_label = dict(taxonomy_stats.get("path_tokens_by_label", {}) or {})
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    if not categories or not callable(get_path_text) or not cat_to_id:
+        return ranked_candidates[: max(1, combined_limit)]
+
+    query_tokens = _category_overlap_tokens(" ".join(probe_queries.values()))
+    if not query_tokens:
+        return ranked_candidates[: max(1, combined_limit)]
+    expanded_scores: dict[str, float] = {
+        str(label or "").strip(): float(score)
+        for label, score in ranked_candidates
+        if str(label or "").strip()
+    }
+
+    branch_support: dict[str, float] = {}
+    for label, score in ranked_candidates:
+        normalized_label = str(label or "").strip()
+        if not normalized_label:
+            continue
+        category_id = str(cat_to_id.get(normalized_label, "") or "").strip()
+        if category_id and category_id in children_by_parent:
+            branch_support[category_id] = max(branch_support.get(category_id, float("-inf")), float(score))
+        for depth, ancestor_id in enumerate(ancestor_ids_by_label.get(normalized_label, ())):
+            if not ancestor_id or ancestor_id not in children_by_parent:
+                continue
+            inherited_score = float(score) * (0.8 ** depth)
+            branch_support[ancestor_id] = max(branch_support.get(ancestor_id, float("-inf")), inherited_score)
+
+    supported_branches = [
+        branch_id
+        for branch_id, _score in sorted(
+            branch_support.items(),
+            key=lambda item: (-float(item[1]), item[0]),
+        )
+        if branch_id in children_by_parent
+    ][:3]
+
+    def _candidate_bonus(candidate_label: str, *, relation: str, seed_score: float) -> float:
+        candidate_tokens = set(path_tokens_by_label.get(candidate_label, set()))
+        if not candidate_tokens:
+            candidate_tokens = _category_overlap_tokens(str(get_path_text(candidate_label) or candidate_label))
+        overlap = _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights)
+        relation_penalty = {
+            "child": 0.02,
+            "sibling": 0.03,
+            "parent": 0.04,
+            "branch": 0.035,
+        }.get(relation, 0.04)
+        return seed_score - relation_penalty + min(0.012 * float(overlap), 0.06)
+
+    seed_labels: list[str] = []
+    for label, _score in ranked_candidates[:4]:
+        normalized = str(label or "").strip()
+        if normalized and normalized not in seed_labels:
+            seed_labels.append(normalized)
+    if current_canonical and current_canonical not in seed_labels:
+        seed_labels.append(current_canonical)
+
+    for seed_label in seed_labels:
+        seed_score = expanded_scores.get(seed_label)
+        if seed_score is None:
+            continue
+        seed_id = str(cat_to_id.get(seed_label, "") or "").strip()
+        parent_ids = ancestor_ids_by_label.get(seed_label, ())
+        parent_id = parent_ids[0] if parent_ids else ""
+
+        if parent_id:
+            parent_label = id_to_label.get(parent_id, "")
+            if parent_label:
+                expanded_scores[parent_label] = max(
+                    expanded_scores.get(parent_label, float("-inf")),
+                    _candidate_bonus(parent_label, relation="parent", seed_score=seed_score),
+                )
+
+            sibling_candidates = []
+            for sibling in children_by_parent.get(parent_id, []):
+                if sibling == seed_label or sibling in expanded_scores:
+                    continue
+                candidate_tokens = _category_overlap_tokens(sibling)
+                if not candidate_tokens:
+                    continue
+                if _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights) <= 0.0:
+                    continue
+                sibling_candidates.append(
+                    (
+                        sibling,
+                        _candidate_bonus(sibling, relation="sibling", seed_score=seed_score),
+                    )
+                )
+            sibling_candidates.sort(key=lambda item: (-float(item[1]), item[0]))
+            for sibling, sibling_score in sibling_candidates[:2]:
+                expanded_scores[sibling] = max(expanded_scores.get(sibling, float("-inf")), sibling_score)
+
+        if seed_id:
+            child_candidates = []
+            for child in children_by_parent.get(seed_id, []):
+                if child in expanded_scores:
+                    continue
+                candidate_tokens = _category_overlap_tokens(child)
+                if not candidate_tokens:
+                    continue
+                if _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights) <= 0.0:
+                    continue
+                child_candidates.append(
+                    (
+                        child,
+                        _candidate_bonus(child, relation="child", seed_score=seed_score),
+                    )
+                )
+            child_candidates.sort(key=lambda item: (-float(item[1]), item[0]))
+            for child, child_score in child_candidates[:3]:
+                expanded_scores[child] = max(expanded_scores.get(child, float("-inf")), child_score)
+
+    for branch_id in supported_branches:
+        branch_score = float(branch_support.get(branch_id, 0.0))
+        branch_candidates = []
+        for child_label in children_by_parent.get(branch_id, []):
+            if child_label in expanded_scores:
+                continue
+            candidate_tokens = _category_overlap_tokens(child_label)
+            if not candidate_tokens:
+                continue
+            weighted_overlap = _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights)
+            if weighted_overlap <= 0.0:
+                continue
+            branch_candidates.append(
+                (
+                    child_label,
+                    _candidate_bonus(child_label, relation="branch", seed_score=branch_score),
+                )
+            )
+        branch_candidates.sort(key=lambda item: (-float(item[1]), item[0]))
+        for child_label, child_score in branch_candidates[:4]:
+            expanded_scores[child_label] = max(expanded_scores.get(child_label, float("-inf")), child_score)
+
+    final_ranked = sorted(
+        expanded_scores.items(),
+        key=lambda item: (-float(item[1]), item[0]),
+    )
+    return final_ranked[: max(1, combined_limit)]
+
+
 def _build_category_rerank_candidates(
     *,
     raw_category: str,
@@ -804,52 +1686,54 @@ def _build_category_rerank_candidates(
     predicted_brand: str,
     ocr_text: str,
     reasoning: str = "",
-    primary_limit: int = 5,
-    evidence_limit: int = 3,
-    combined_limit: int = 8,
+    visual_matches: list[tuple[str, float]] | None = None,
+    primary_limit: int = 8,
+    evidence_limit: int = 6,
+    combined_limit: int = 12,
 ) -> tuple[list[tuple[str, float]], list[tuple[str, float]], list[tuple[str, float]]]:
     if not hasattr(category_mapper, "get_mapper_neighbor_categories"):
         return [], [], []
 
-    def _merge_ranked_candidates(
-        *candidate_lists: list[tuple[str, float]],
-        limit: int,
-    ) -> list[tuple[str, float]]:
-        merged: list[tuple[str, float]] = []
-        seen: set[str] = set()
-        for candidates in candidate_lists:
-            for label, score in candidates:
-                canonical_label = str(label or "").strip()
-                if not canonical_label:
-                    continue
-                key = canonical_label.casefold()
-                if key in seen:
-                    continue
-                seen.add(key)
-                try:
-                    numeric_score = float(score)
-                except (TypeError, ValueError):
-                    numeric_score = 0.0
-                merged.append((canonical_label, numeric_score))
-                if len(merged) >= limit:
-                    return merged
-        return merged
-
-    try:
-        primary_candidates = list(
-            category_mapper.get_mapper_neighbor_categories(
-                raw_category=raw_category,
-                predicted_brand=predicted_brand,
-                ocr_summary=ocr_text,
-                reasoning_summary=reasoning,
-                top_k=primary_limit,
-            )
-        )
-    except Exception as exc:
-        logger.warning("category_rerank_candidates_failed: %s", exc)
-        return [], [], []
-
     canonical = str(current_match.get("canonical_category", "") or "").strip()
+    probe_specs, evidence_query, probe_debug_queries = _build_category_rerank_probe_specs(
+        raw_category=raw_category,
+        predicted_brand=predicted_brand,
+        ocr_text=ocr_text,
+        reasoning=reasoning,
+        primary_limit=primary_limit,
+        evidence_limit=evidence_limit,
+    )
+
+    probe_candidates: dict[str, list[tuple[str, float]]] = {}
+    primary_candidates: list[tuple[str, float]] = []
+    evidence_neighbors: list[tuple[str, float]] = []
+
+    for probe_name, query_text, limit, probe_kwargs in probe_specs:
+        try:
+            candidates = list(
+                category_mapper.get_mapper_neighbor_categories(
+                    raw_category=query_text,
+                    predicted_brand=str(probe_kwargs.get("predicted_brand", "") or ""),
+                    ocr_summary=str(probe_kwargs.get("ocr_summary", "") or ""),
+                    reasoning_summary=str(probe_kwargs.get("reasoning_summary", "") or ""),
+                    top_k=limit,
+                )
+            )
+        except Exception as exc:
+            logger.warning("category_rerank_%s_neighbors_failed: %s", probe_name, exc)
+            candidates = []
+        probe_candidates[probe_name] = candidates
+        logger.info(
+            "category_rerank_probe probe=%s query=%r answers=%r",
+            probe_name,
+            query_text,
+            _summarize_category_rerank_answers_for_log(candidates),
+        )
+        if probe_name == "guided":
+            primary_candidates = candidates
+        elif probe_name == "evidence":
+            evidence_neighbors = candidates
+
     if canonical and canonical not in {label for label, _score in primary_candidates}:
         score_raw = current_match.get("category_match_score", 0.0)
         try:
@@ -857,30 +1741,47 @@ def _build_category_rerank_candidates(
         except (TypeError, ValueError):
             score = 0.0
         primary_candidates.append((canonical, score))
+        probe_candidates.setdefault("guided", []).append((canonical, score))
 
-    evidence_neighbors: list[tuple[str, float]] = []
-    evidence_query = _build_category_rerank_evidence_query(
-        brand=predicted_brand,
-        ocr_text=ocr_text,
-        reasoning=reasoning,
-        family_context=raw_category,
-    )
-    if evidence_query:
-        try:
-            evidence_neighbors = list(
-                category_mapper.get_mapper_neighbor_categories(
-                    raw_category=evidence_query,
-                    predicted_brand="",
-                    ocr_summary="",
-                    top_k=evidence_limit,
-                )
+    if visual_matches:
+        visual_candidates: list[tuple[str, float]] = []
+        for label, score_raw in visual_matches[:4]:
+            normalized_label = str(label or "").strip()
+            if not normalized_label:
+                continue
+            try:
+                visual_score = float(score_raw or 0.0)
+            except (TypeError, ValueError):
+                visual_score = 0.0
+            visual_candidates.append((normalized_label, visual_score))
+        if visual_candidates:
+            probe_candidates["visual"] = visual_candidates
+            logger.info(
+                "category_rerank_probe probe=visual query=%r answers=%r",
+                "visual_matches",
+                _summarize_category_rerank_answers_for_log(visual_candidates),
             )
-        except Exception as exc:
-            logger.warning("category_rerank_evidence_neighbors_failed: %s", exc)
-            evidence_neighbors = []
 
+    merged_candidates = _merge_category_rerank_probe_candidates(
+        probe_candidates=probe_candidates,
+        probe_queries={probe_name: query_text for probe_name, query_text, _limit, _kwargs in probe_specs},
+        current_canonical=canonical,
+        combined_limit=combined_limit,
+    )
+    expanded_candidates = _expand_category_rerank_branch_candidates(
+        ranked_candidates=merged_candidates,
+        current_canonical=canonical,
+        probe_queries={probe_name: query_text for probe_name, query_text, _limit, _kwargs in probe_specs},
+        combined_limit=combined_limit,
+    )
+    logger.info(
+        "category_rerank_candidates raw=%r probe_queries=%r merged=%r",
+        raw_category,
+        {probe_name: query for probe_name, query in probe_debug_queries},
+        _summarize_category_rerank_answers_for_log(expanded_candidates),
+    )
     return (
-        _merge_ranked_candidates(primary_candidates, evidence_neighbors, limit=combined_limit),
+        expanded_candidates,
         evidence_neighbors,
         primary_candidates,
     )
@@ -950,15 +1851,17 @@ def _should_run_category_rerank(
         predicted_brand=brand,
         ocr_text=ocr_text,
         reasoning=reasoning,
+        visual_matches=_top_visual_matches(sorted_vision, limit=4),
     )
     candidate_categories = [label for label, _score in mapper_candidates]
     if len(candidate_categories) < 2:
         return False, "insufficient_candidates", candidate_categories, []
 
+    uncertainty_candidates = primary_candidates or mapper_candidates
     uncertainty_reasons: list[str] = []
-    top1_score = float(mapper_candidates[0][1])
-    top2_score = float(mapper_candidates[1][1]) if len(mapper_candidates) > 1 else 0.0
-    top3_score = float(mapper_candidates[2][1]) if len(mapper_candidates) > 2 else top2_score
+    top1_score = float(uncertainty_candidates[0][1])
+    top2_score = float(uncertainty_candidates[1][1]) if len(uncertainty_candidates) > 1 else 0.0
+    top3_score = float(uncertainty_candidates[2][1]) if len(uncertainty_candidates) > 2 else top2_score
     if top1_score < _resolve_category_rerank_top1_score_threshold():
         uncertainty_reasons.append(f"top1_score={top1_score:.4f}")
     if (top1_score - top2_score) < _resolve_category_rerank_top2_gap_threshold():
@@ -980,7 +1883,19 @@ def _should_run_category_rerank(
         exact_taxonomy_match=exact_taxonomy_match,
         primary_candidates=primary_candidates,
     )
+    broad_dispersion_reason = _broad_neighbor_dispersion_reason(
+        current_canonical=canonical,
+        raw_category=raw_category,
+        exact_taxonomy_match=exact_taxonomy_match,
+        primary_candidates=primary_candidates,
+    )
     freeform_mismatch_reason = _freeform_label_mismatch_reason(
+        current_canonical=canonical,
+        raw_category=raw_category,
+        exact_taxonomy_match=exact_taxonomy_match,
+        primary_candidates=primary_candidates,
+    )
+    head_mismatch_reason = _head_concept_mismatch_reason(
         current_canonical=canonical,
         raw_category=raw_category,
         exact_taxonomy_match=exact_taxonomy_match,
@@ -990,7 +1905,9 @@ def _should_run_category_rerank(
         not uncertainty_reasons
         and not family_preference_reason
         and not family_primary_reason
+        and not broad_dispersion_reason
         and not freeform_mismatch_reason
+        and not head_mismatch_reason
     ):
         return False, "mapping_confident", candidate_categories, []
 
@@ -1024,8 +1941,12 @@ def _should_run_category_rerank(
             return True, family_preference_reason, candidate_categories, visual_matches
         if family_primary_reason:
             return True, family_primary_reason, candidate_categories, visual_matches
+        if broad_dispersion_reason:
+            return True, broad_dispersion_reason, candidate_categories, visual_matches
         if freeform_mismatch_reason:
             return True, freeform_mismatch_reason, candidate_categories, visual_matches
+        if head_mismatch_reason:
+            return True, head_mismatch_reason, candidate_categories, visual_matches
         return False, ";".join(uncertainty_reasons), candidate_categories, visual_matches
 
     reason_parts = [*uncertainty_reasons]
@@ -1033,8 +1954,12 @@ def _should_run_category_rerank(
         reason_parts.append(family_preference_reason)
     if family_primary_reason:
         reason_parts.append(family_primary_reason)
+    if broad_dispersion_reason:
+        reason_parts.append(broad_dispersion_reason)
     if freeform_mismatch_reason:
         reason_parts.append(freeform_mismatch_reason)
+    if head_mismatch_reason:
+        reason_parts.append(head_mismatch_reason)
     return (
         True,
         ";".join([*reason_parts, *contradiction_reasons]),
@@ -1128,6 +2053,151 @@ def _build_specificity_search_candidates(
         _append(label)
 
     return candidates
+
+
+def _build_entity_search_candidates(
+    *,
+    grounding: dict[str, object],
+    current_match: dict[str, object],
+    sorted_vision: dict[str, float],
+) -> tuple[str, list[str]]:
+    candidates: list[str] = []
+
+    def _append(label: str) -> None:
+        clean = str(label or "").strip()
+        if clean and clean not in candidates:
+            candidates.append(clean)
+
+    current_canonical = str(current_match.get("canonical_category", "") or "").strip()
+    entity_kind = str(grounding.get("entity_kind", "") or "").strip().lower()
+    genres = [
+        " ".join(str(genre or "").strip().lower().split())
+        for genre in (grounding.get("genres") or [])
+        if str(genre or "").strip()
+    ]
+
+    branch_label = _find_taxonomy_label(_ENTITY_KIND_PRIMARY_BRANCH.get(entity_kind, ""))
+    if not branch_label:
+        return "", []
+
+    branch_descendants: list[str] = []
+    if entity_kind == "film_release":
+        branch_descendants = _rank_entity_branch_labels(
+            _taxonomy_descendants_for_path_name(branch_label, leaf_only=True),
+            genres=genres,
+            sorted_vision=sorted_vision,
+        )
+        _append(branch_label)
+        for label in branch_descendants:
+            _append(label)
+    elif entity_kind == "tv_program":
+        branch_descendants = _rank_entity_branch_labels(
+            _taxonomy_descendants_for_path_name(branch_label, leaf_only=True),
+            genres=genres,
+            sorted_vision=sorted_vision,
+        )
+        _append(branch_label)
+        for label in branch_descendants:
+            _append(label)
+        _append(_find_taxonomy_label("Movies & TV Production and Distribution - All else"))
+    elif entity_kind == "stage_production":
+        _append(branch_label)
+        _append(_find_taxonomy_label("Event"))
+        _append(_find_taxonomy_label("Entertainment and Performance Arts - All else"))
+    elif entity_kind == "live_event":
+        _append(branch_label)
+        _append(_find_taxonomy_label("Theater"))
+        _append(_find_taxonomy_label("Entertainment and Performance Arts - All else"))
+    elif entity_kind == "venue_exhibitor":
+        _append(branch_label)
+    else:
+        return "", []
+
+    if current_canonical and _label_in_taxonomy_branch(current_canonical, branch_label):
+        _append(current_canonical)
+
+    for label, _score in _top_visual_matches(sorted_vision, limit=4):
+        if label == branch_label or _label_in_taxonomy_branch(label, branch_label):
+            _append(label)
+
+    return branch_label, candidates[:12]
+
+
+def _should_run_entity_search_rescue(
+    enable_search: bool,
+    express_mode: bool,
+    result_payload: dict[str, object] | None,
+    category_match: dict[str, object],
+    ocr_text: str,
+    sorted_vision: dict[str, float],
+) -> tuple[bool, str]:
+    if not _entity_search_rescue_enabled(enable_search, express_mode):
+        return False, "disabled"
+    if not isinstance(result_payload, dict):
+        return False, "invalid_result"
+
+    brand = str(result_payload.get("brand", "") or "").strip()
+    raw_category = str(result_payload.get("category", "") or "").strip()
+    canonical = str(category_match.get("canonical_category", "") or "").strip()
+    if not brand or brand.lower() in {"unknown", "none", "n/a"}:
+        return False, "brand_missing"
+
+    raw_generic = _looks_like_generic_media_category(raw_category)
+    canonical_broad = _is_broad_media_taxonomy_label(canonical)
+    domain = _extract_ocr_domains(ocr_text)
+
+    visual_matches = _top_visual_matches(sorted_vision, limit=2)
+    visual_media = any(
+        (
+            _is_broad_media_taxonomy_label(str(label or ""))
+            or _is_specific_media_taxonomy_label(str(label or ""))
+            or "movie" in str(label or "").lower()
+        )
+        for label, _score in visual_matches
+    )
+
+    score_raw = category_match.get("category_match_score", 0.0)
+    try:
+        mapper_score = float(score_raw or 0.0)
+    except (TypeError, ValueError):
+        mapper_score = 0.0
+
+    if not any((raw_generic, canonical_broad, visual_media)):
+        return False, "no_entity_signal"
+
+    if mapper_score >= 0.95 and canonical and _is_specific_media_taxonomy_label(canonical):
+        return False, f"confident_specific_mapping={canonical!r}@{mapper_score:.4f}"
+
+    reasons: list[str] = [
+        f"raw={raw_category!r}",
+        f"canonical={canonical!r}",
+        f"mapper_score={mapper_score:.4f}",
+    ]
+    if domain:
+        reasons.append(f"domain_hint={domain[0]!r}")
+    if raw_generic:
+        reasons.append("generic_media_raw")
+    if canonical_broad:
+        reasons.append("broad_media_canonical")
+    if visual_media:
+        reasons.append("visual_media_hint")
+    return True, ";".join(reasons)
+
+
+def _accept_entity_search_result(
+    current_match: dict[str, object],
+    refined_match: dict[str, object],
+    candidate_categories: list[str],
+) -> tuple[bool, str]:
+    current_canonical = str(current_match.get("canonical_category", "") or "")
+    refined_canonical = str(refined_match.get("canonical_category", "") or "")
+    if not refined_canonical:
+        return False, "entity_category_empty"
+    if candidate_categories and refined_canonical not in candidate_categories:
+        return False, f"outside_candidate_set={refined_canonical!r}"
+    if refined_canonical == current_canonical:
+        return False, f"unchanged_category={refined_canonical!r}"
+    return True, f"entity_refined_to={refined_canonical!r}"
 
 
 def _should_run_specificity_search_rescue(
@@ -1933,11 +3003,15 @@ def process_single_video(
 
         def _result_snapshot(payload: dict[str, object] | None) -> dict[str, object]:
             if not isinstance(payload, dict):
-                return {"brand": "", "category": "", "confidence": 0.0}
-            try:
-                confidence = float(payload.get("confidence", 0.0) or 0.0)
-            except Exception:
-                confidence = 0.0
+                return {"brand": "", "category": "", "confidence": None}
+            raw_confidence = payload.get("confidence")
+            if raw_confidence in (None, ""):
+                confidence = None
+            else:
+                try:
+                    confidence = float(raw_confidence)
+                except Exception:
+                    confidence = None
             return {
                 "brand": str(payload.get("brand", "") or ""),
                 "category": str(payload.get("category", "") or ""),
@@ -1948,6 +3022,18 @@ def process_single_video(
                 "brand_disambiguation_reason": str(payload.get("brand_disambiguation_reason", "") or ""),
                 "brand_evidence_strength": str(payload.get("brand_evidence_strength", "") or ""),
             }
+
+        def _category_match_snapshot(
+            payload: dict[str, object] | None,
+            match: dict[str, object] | None,
+        ) -> dict[str, object]:
+            snapshot = _result_snapshot(payload)
+            if isinstance(match, dict):
+                canonical_category = str(match.get("canonical_category", "") or "").strip()
+                if canonical_category:
+                    snapshot["category"] = canonical_category
+                snapshot["confidence"] = None
+            return snapshot
 
         def _append_trace_attempt(
             *,
@@ -1963,6 +3049,7 @@ def process_single_video(
             llm_mode: str = "standard",
             evidence_note: str = "",
             elapsed_ms: float | None = None,
+            comparison_payload: dict[str, object] | None = None,
         ) -> None:
             attempts = processing_trace.setdefault("attempts", [])
             if not isinstance(attempts, list):
@@ -1983,6 +3070,7 @@ def process_single_video(
                     "evidence_note": evidence_note,
                     "elapsed_ms": round(float(elapsed_ms), 1) if elapsed_ms is not None else None,
                     "result": _result_snapshot(result_payload),
+                    "comparison_result": _result_snapshot(comparison_payload) if comparison_payload else None,
                 }
             )
 
@@ -2750,6 +3838,173 @@ def process_single_video(
                 attempts[-1]["elapsed_ms"] = round((time.perf_counter() - attempt_started_at) * 1000.0, 1)
             return True
 
+        def _run_entity_search_refinement(
+            current_res: dict[str, object],
+            current_match: dict[str, object],
+        ) -> tuple[dict[str, object], dict[str, object], bool]:
+            entity_search_needed, entity_search_reason = _should_run_entity_search_rescue(
+                enable_search=bool(enable_search),
+                express_mode=express_mode,
+                result_payload=current_res,
+                category_match=current_match,
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
+            if not entity_search_needed:
+                return current_res, current_match, False
+
+            if stage_callback:
+                stage_callback("llm", f"entity search rescue provider={p.lower()} model={m}")
+            logger.info("[%s] fallback_triggered type=entity_search_rescue reason=%s", url, entity_search_reason)
+            entity_visual_matches = _top_visual_matches(sorted_vision, limit=4)
+            entity_candidates: list[str] = []
+            entity_grounding_fn = getattr(llm_engine, "query_entity_grounding", None)
+            entity_rescue_fn = getattr(llm_engine, "query_entity_search_rescue", None)
+            if not callable(entity_grounding_fn) or not callable(entity_rescue_fn):
+                entity_res, entity_reason = None, "unsupported"
+            else:
+                grounding_res, grounding_reason = entity_grounding_fn(
+                    p,
+                    m,
+                    brand=str(current_res.get("brand", "") or ""),
+                    raw_category=str(current_res.get("category", "") or ""),
+                    ocr_text=ocr_text,
+                    visual_matches=entity_visual_matches,
+                    context_size=ctx,
+                )
+                if isinstance(grounding_res, dict):
+                    entity_branch, entity_candidates = _build_entity_search_candidates(
+                        grounding=grounding_res,
+                        current_match=current_match,
+                        sorted_vision=sorted_vision,
+                    )
+                    logger.info(
+                        "[%s] entity_branch_selected entity_name=%r entity_kind=%r branch=%r genres=%r candidates=%s",
+                        url,
+                        str(grounding_res.get("entity_name", "") or ""),
+                        str(grounding_res.get("entity_kind", "") or ""),
+                        entity_branch,
+                        list(grounding_res.get("genres") or []),
+                        entity_candidates,
+                    )
+                    if not entity_branch or not entity_candidates:
+                        entity_res, entity_reason = None, "unsupported_entity_kind"
+                    elif len(entity_candidates) == 1:
+                        entity_res = {
+                            "brand": str(current_res.get("brand", "") or ""),
+                            "entity_name": str(grounding_res.get("entity_name", "") or ""),
+                            "entity_kind": str(grounding_res.get("entity_kind", "") or ""),
+                            "genres": list(grounding_res.get("genres") or []),
+                            "category": entity_candidates[0],
+                            "confidence": grounding_res.get("confidence", 0.0),
+                            "reasoning": str(grounding_res.get("reasoning", "") or ""),
+                        }
+                        entity_reason = "ok"
+                    else:
+                        entity_res, entity_reason = entity_rescue_fn(
+                            p,
+                            m,
+                            brand=str(current_res.get("brand", "") or ""),
+                            raw_category=str(current_res.get("category", "") or ""),
+                            current_category=str(current_match.get("canonical_category", "") or ""),
+                            entity_name=str(grounding_res.get("entity_name", "") or ""),
+                            entity_kind=str(grounding_res.get("entity_kind", "") or ""),
+                            ocr_text=ocr_text,
+                            genres=list(grounding_res.get("genres") or []),
+                            branch_label=entity_branch,
+                            search_results=list(grounding_res.get("_search_results") or []),
+                            candidate_categories=entity_candidates,
+                            candidate_category_contexts=category_mapper.get_category_context_map(
+                                entity_candidates
+                            )
+                            if hasattr(category_mapper, "get_category_context_map")
+                            else None,
+                            visual_matches=entity_visual_matches,
+                            context_size=ctx,
+                        )
+                else:
+                    entity_res, entity_reason = None, grounding_reason
+
+            if isinstance(entity_res, dict):
+                entity_candidates = list(entity_candidates or [])
+                entity_match = category_mapper.map_category(
+                    raw_category=entity_res.get("category", "Unknown"),
+                    job_id=job_id,
+                    suggested_categories_text="",
+                    predicted_brand=entity_res.get("brand", "Unknown"),
+                    ocr_summary=ocr_text,
+                )
+                entity_ok, entity_accept_reason = _accept_entity_search_result(
+                    current_match=current_match,
+                    refined_match=entity_match,
+                    candidate_categories=entity_candidates,
+                )
+                if entity_ok:
+                    logger.info(
+                        "[%s] fallback_accepted type=entity_search_rescue reason=%s",
+                        url,
+                        entity_accept_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="entity_search_rescue",
+                        title="Entity Search Rescue",
+                        status="accepted",
+                        source_frames=frames,
+                        detail="web entity refinement",
+                        trigger_reason=entity_search_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=entity_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(current_res, current_match),
+                        evidence_note=f"Entity grounding + branch selection refined the category because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+                    )
+                    return entity_res, entity_match, True
+
+                logger.info(
+                    "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
+                    url,
+                    entity_accept_reason,
+                    entity_search_reason,
+                )
+                _append_trace_attempt(
+                    attempt_type="entity_search_rescue",
+                    title="Entity Search Rescue",
+                    status="rejected",
+                    source_frames=frames,
+                    detail="web entity refinement",
+                    trigger_reason=entity_search_reason,
+                    ocr_text_value=ocr_text,
+                    result_payload=entity_res,
+                    ocr_mode_used="" if express_mode else om,
+                    llm_mode="standard",
+                    comparison_payload=_category_match_snapshot(current_res, current_match),
+                    evidence_note=f"Entity grounding + branch selection was rejected because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+                )
+                return current_res, current_match, False
+
+            logger.info(
+                "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
+                url,
+                entity_reason,
+                entity_search_reason,
+            )
+            _append_trace_attempt(
+                attempt_type="entity_search_rescue",
+                title="Entity Search Rescue",
+                status="rejected",
+                source_frames=frames,
+                detail="web entity refinement",
+                trigger_reason=entity_search_reason,
+                ocr_text_value=ocr_text,
+                result_payload=None,
+                ocr_mode_used="" if express_mode else om,
+                llm_mode="standard",
+                comparison_payload=_category_match_snapshot(current_res, current_match),
+                evidence_note=f"Entity grounding + branch selection did not run: {entity_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+            )
+            return current_res, current_match, False
+
         def _extract_full_video_rescue_frames() -> list[dict[str, object]]:
             rescue_frames, rescue_cap = extract_frames_for_pipeline(
                 url,
@@ -2880,12 +4135,23 @@ def process_single_video(
             ocr_summary=ocr_text,
             reasoning_summary=str(res.get("reasoning", "") or ""),
         )
-        category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = _should_run_category_rerank(
-            result_payload=res,
-            category_match=category_match,
-            ocr_text=ocr_text,
-            sorted_vision=sorted_vision,
-        )
+
+        res, category_match, entity_rescue_accepted = _run_entity_search_refinement(res, category_match)
+
+        if not entity_rescue_accepted:
+            category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = _should_run_category_rerank(
+                result_payload=res,
+                category_match=category_match,
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
+        else:
+            category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = (
+                False,
+                "entity_search_rescue_accepted",
+                [],
+                [],
+            )
         if category_rerank_needed:
             if stage_callback:
                 stage_callback("llm", f"category rerank provider={p.lower()} model={m}")
@@ -2895,23 +4161,102 @@ def process_single_video(
                 category_rerank_reason,
                 category_rerank_candidates,
             )
+            category_rerank_comparison = _category_match_snapshot(res, category_match)
             rerank_fn = getattr(llm_engine, "query_category_rerank", None)
+            family_selection_fn = getattr(llm_engine, "query_category_family_selection", None)
             if not callable(rerank_fn):
                 reranked_res, rerank_status = None, "unsupported"
+                rerank_candidate_categories = list(category_rerank_candidates)
+                family_note = ""
             else:
-                reranked_res, rerank_status = rerank_fn(
-                    p,
-                    m,
-                    brand=str(res.get("brand", "") or ""),
-                    raw_category=str(res.get("category", "") or ""),
-                    mapped_category=str(category_match.get("canonical_category", "") or ""),
-                    ocr_text=ocr_text,
-                    reasoning=str(res.get("reasoning", "") or ""),
-                    candidate_categories=category_rerank_candidates,
-                    visual_matches=category_rerank_visual_matches,
-                    context_size=ctx,
-                    product_focus_guidance_enabled=product_focus_guidance_enabled,
-                )
+                rerank_candidate_categories = list(category_rerank_candidates)
+                family_note = ""
+                if callable(family_selection_fn):
+                    family_candidates, family_members = _build_category_family_candidates(
+                        rerank_candidate_categories
+                    )
+                    if len(family_candidates) > 1:
+                        family_res, family_status = family_selection_fn(
+                            p,
+                            m,
+                            brand=str(res.get("brand", "") or ""),
+                            raw_category=str(res.get("category", "") or ""),
+                            mapped_category=str(category_match.get("canonical_category", "") or ""),
+                            ocr_text=ocr_text,
+                            reasoning=str(res.get("reasoning", "") or ""),
+                            candidate_families=family_candidates,
+                            candidate_family_contexts=category_mapper.get_category_context_map(
+                                family_candidates
+                            )
+                            if hasattr(category_mapper, "get_category_context_map")
+                            else None,
+                            family_members=family_members,
+                            visual_matches=category_rerank_visual_matches,
+                            context_size=ctx,
+                        )
+                        if isinstance(family_res, dict):
+                            selected_family = str(family_res.get("family", "") or "").strip()
+                            selected_members = list(family_members.get(selected_family, []))
+                            if selected_family and selected_members:
+                                rerank_candidate_categories = _expand_candidates_within_selected_family(
+                                    selected_family=selected_family,
+                                    current_candidates=selected_members,
+                                    current_canonical=str(category_match.get("canonical_category", "") or ""),
+                                    raw_category=str(res.get("category", "") or ""),
+                                    predicted_brand=str(res.get("brand", "") or ""),
+                                    ocr_text=ocr_text,
+                                    reasoning=str(res.get("reasoning", "") or ""),
+                                    visual_matches=category_rerank_visual_matches,
+                                )
+                                family_note = f"Selected family {selected_family!r}. "
+                                logger.info(
+                                    "[%s] category_family_selected family=%r candidates=%s",
+                                    url,
+                                    selected_family,
+                                    rerank_candidate_categories,
+                                )
+                            else:
+                                logger.info(
+                                    "[%s] category_family_selection_ignored reason=invalid_family family=%r",
+                                    url,
+                                    selected_family,
+                                )
+                        else:
+                            logger.info(
+                                "[%s] category_family_selection_skipped reason=%s",
+                                url,
+                                family_status,
+                            )
+                if len(rerank_candidate_categories) == 1:
+                    reranked_res = {
+                        "brand": str(res.get("brand", "") or ""),
+                        "category": rerank_candidate_categories[0],
+                        "confidence": res.get("confidence", 0.0),
+                        "reasoning": (
+                            f"{family_note}The selected family constrained the rerank to the sole "
+                            f"remaining candidate {rerank_candidate_categories[0]!r}."
+                        ).strip(),
+                    }
+                    rerank_status = "ok"
+                else:
+                    reranked_res, rerank_status = rerank_fn(
+                        p,
+                        m,
+                        brand=str(res.get("brand", "") or ""),
+                        raw_category=str(res.get("category", "") or ""),
+                        mapped_category=str(category_match.get("canonical_category", "") or ""),
+                        ocr_text=ocr_text,
+                        reasoning=str(res.get("reasoning", "") or ""),
+                        candidate_categories=rerank_candidate_categories,
+                        candidate_category_contexts=category_mapper.get_category_context_map(
+                            rerank_candidate_categories
+                        )
+                        if hasattr(category_mapper, "get_category_context_map")
+                        else None,
+                        visual_matches=category_rerank_visual_matches,
+                        context_size=ctx,
+                        product_focus_guidance_enabled=product_focus_guidance_enabled,
+                    )
             if isinstance(reranked_res, dict):
                 reranked_exact_match = _exact_taxonomy_match_from_label(
                     str(reranked_res.get("category", "") or "")
@@ -2929,11 +4274,11 @@ def process_single_video(
                         predicted_brand=reranked_res.get("brand", "Unknown"),
                         ocr_summary=ocr_text,
                         reasoning_summary=str(reranked_res.get("reasoning", "") or ""),
-                    )
+                )
                 rerank_ok, rerank_accept_reason = _accept_category_rerank_result(
                     category_match,
                     reranked_match,
-                    category_rerank_candidates,
+                    rerank_candidate_categories,
                 )
                 if rerank_ok:
                     res = reranked_res
@@ -2954,9 +4299,11 @@ def process_single_video(
                         result_payload=reranked_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=category_rerank_comparison,
                         evidence_note=(
                             f"Reranked within mapper candidates because {rerank_accept_reason}. "
-                            f"Candidates: {', '.join(category_rerank_candidates)}."
+                            f"{family_note}"
+                            f"Candidates: {', '.join(rerank_candidate_categories)}."
                         ),
                     )
                 else:
@@ -2977,9 +4324,11 @@ def process_single_video(
                         result_payload=reranked_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=category_rerank_comparison,
                         evidence_note=(
                             f"Rerank was rejected because {rerank_accept_reason}. "
-                            f"Candidates: {', '.join(category_rerank_candidates)}."
+                            f"{family_note}"
+                            f"Candidates: {', '.join(rerank_candidate_categories)}."
                         ),
                     )
             else:
@@ -3002,16 +4351,22 @@ def process_single_video(
                     llm_mode="standard",
                     evidence_note=(
                         f"Rerank did not run: {rerank_status}. "
-                        f"Candidates: {', '.join(category_rerank_candidates)}."
+                        f"{family_note}"
+                        f"Candidates: {', '.join(rerank_candidate_categories)}."
                     ),
                 )
-        specificity_needed, specificity_reason = _should_run_specificity_search_rescue(
-            enable_search=bool(enable_search),
-            express_mode=express_mode,
-            result_payload=res,
-            category_match=category_match,
-            ocr_text=ocr_text,
-            sorted_vision=sorted_vision,
+
+        specificity_needed, specificity_reason = (
+            (False, "entity_search_rescue_accepted")
+            if entity_rescue_accepted
+            else _should_run_specificity_search_rescue(
+                enable_search=bool(enable_search),
+                express_mode=express_mode,
+                result_payload=res,
+                category_match=category_match,
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
         )
         if specificity_needed:
             if stage_callback:
@@ -3032,6 +4387,11 @@ def process_single_video(
                 current_category=str(res.get("category", "") or category_match.get("canonical_category", "") or ""),
                 ocr_text=ocr_text,
                 candidate_categories=specificity_candidates,
+                candidate_category_contexts=category_mapper.get_category_context_map(
+                    specificity_candidates
+                )
+                if hasattr(category_mapper, "get_category_context_map")
+                else None,
                 visual_matches=visual_matches,
                 context_size=ctx,
             )
@@ -3068,6 +4428,7 @@ def process_single_video(
                         result_payload=refined_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
                         evidence_note=f"Search refinement narrowed the category because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
                     )
                 else:
@@ -3088,6 +4449,7 @@ def process_single_video(
                         result_payload=refined_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
                         evidence_note=f"Search refinement was rejected because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
                     )
             else:
@@ -3112,10 +4474,14 @@ def process_single_video(
                 )
         cat_out = category_match["canonical_category"]
         cat_id_out = category_match["category_id"]
+        industry_id_out = str(category_match.get("industry_id") or "")
+        industry_name_out = str(category_match.get("industry_name") or cat_out or "")
         signal_artifacts = {
             "mapper_plot": None,
             "mapper_top_matches": list(category_match.get("top_matches") or []),
             "mapper_query_fragments": list(category_match.get("mapping_query_fragments") or []),
+            "mapper_parent_category": str(category_match.get("parent_category") or ""),
+            "mapper_category_path_text": str(category_match.get("category_path_text") or ""),
             "visual_plot": None,
             "processing_trace": None,
             "llm_evidence_gallery": [],
@@ -3167,6 +4533,13 @@ def process_single_video(
             res.get("reasoning", ""),
             category_match["category_match_method"],
             category_match["category_match_score"],
+            res.get("brand", "Unknown"),
+            res.get("confidence", 0.0),
+            res.get("reasoning", ""),
+            industry_id_out,
+            industry_name_out,
+            cat_id_out,
+            cat_out,
         ]
         
         return sorted_vision, per_frame_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row, signal_artifacts
@@ -3180,7 +4553,7 @@ def process_single_video(
             "accepted_attempt_type": "",
             "trigger_reason": "pipeline_exception",
         }
-        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace, "llm_evidence_gallery": []}
+        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None, "Err", 0, str(e), "", "", "", ""], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace, "llm_evidence_gallery": []}
 
 def run_pipeline_job(
     src,

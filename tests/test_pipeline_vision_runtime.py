@@ -1016,6 +1016,154 @@ def test_pipeline_category_rerank_triggers_for_weak_freeform_mapping_without_ext
     )
 
 
+def test_pipeline_category_rerank_selects_supported_family_before_leaf(monkeypatch):
+    family_calls = {"count": 0}
+    rerank_calls = {"count": 0}
+
+    class _DummyMapper:
+        categories = [
+            "Book Publishers",
+            "Bookstores",
+            "Retail Subscription Services",
+            "Household Appliance Manufacture",
+            "Personal Audio",
+        ]
+        cat_to_id = {
+            "Book Publishers": "290",
+            "Bookstores": "200",
+            "Retail Subscription Services": "9345",
+            "Household Appliance Manufacture": "123",
+            "Personal Audio": "9141",
+        }
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(category_id="290", name="Book Publishers", path_names=("Book Publishers",), parent_id="0"),
+                types.SimpleNamespace(category_id="200", name="Bookstores", path_names=("Bookstores",), parent_id="0"),
+                types.SimpleNamespace(category_id="9345", name="Retail Subscription Services", path_names=("Retail Subscription Services",), parent_id="0"),
+                types.SimpleNamespace(category_id="123", name="Household Appliance Manufacture", path_names=("Household Appliance Manufacture",), parent_id="0"),
+                types.SimpleNamespace(category_id="9141", name="Personal Audio", path_names=("Household Appliance Manufacture", "Personal Audio"), parent_id="123"),
+            )
+        )
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            mapping = {
+                "Audio Books": ("Bookstores", "200", 0.58),
+                "Book Publishers": ("Book Publishers", "290", 0.99),
+                "Personal Audio": ("Personal Audio", "9141", 0.99),
+            }
+            canonical, category_id, score = mapping.get(raw, (raw or "Bookstores", "", 0.5))
+            return {
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", reasoning_summary="", top_k=8):
+            query = str(raw_category or "")
+            if query == "Audio Books":
+                return [
+                    ("Bookstores", 0.58),
+                    ("Personal Audio", 0.57),
+                    ("Book Publishers", 0.56),
+                    ("Retail Subscription Services", 0.55),
+                ][:top_k]
+            if "Audible" in query or "audiobook" in query.lower():
+                return [
+                    ("Book Publishers", 0.62),
+                    ("Bookstores", 0.60),
+                    ("Retail Subscription Services", 0.59),
+                    ("Personal Audio", 0.52),
+                ][:top_k]
+            return [("Bookstores", 0.58), ("Personal Audio", 0.57), ("Book Publishers", 0.56)][:top_k]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Book Publishers": "Book Publishers",
+                "Bookstores": "Bookstores",
+                "Retail Subscription Services": "Retail Subscription Services",
+                "Household Appliance Manufacture": "Household Appliance Manufacture",
+                "Personal Audio": "Household Appliance Manufacture : Personal Audio",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Audible original audiobook listen now"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Audible",
+                "category": "Audio Books",
+                "confidence": 0.99,
+                "reasoning": "The ad promotes audiobook listening through Audible.",
+            }
+
+        @staticmethod
+        def query_category_family_selection(*args, **kwargs):
+            family_calls["count"] += 1
+            return (
+                {
+                    "family": "Book Publishers",
+                    "family_index": 3,
+                    "confidence": 0.94,
+                    "reasoning": "The ad is about audiobook content, not audio hardware.",
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls["count"] += 1
+            return None, "should_not_run_after_family_constrains_to_single_candidate"
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/audible.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-family-audible",
+    )
+
+    assert family_calls["count"] == 1
+    assert rerank_calls["count"] == 0
+    assert row[2] == "290"
+    assert row[3] == "Book Publishers"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank"
+        and attempt.get("status") == "accepted"
+        and "Selected family 'Book Publishers'" in str(attempt.get("evidence_note", ""))
+        for attempt in attempts
+    )
+
+
 def test_extract_ocr_focus_region_returns_smaller_crop_for_text_band():
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
     cv2.putText(frame, "BRAND.COM", (34, 178), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
@@ -2840,23 +2988,72 @@ def test_pipeline_fails_closed_when_specificity_search_is_unavailable(monkeypatc
     assert processing_trace["attempts"][-1]["status"] == "rejected"
 
 
-def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak_mapper(monkeypatch):
-    specificity_calls = []
+def test_pipeline_accepts_entity_search_rescue_for_movie_title(monkeypatch):
+    grounding_calls = []
+    entity_calls = []
 
     class _DummyMapper:
-        categories = ["Comedy", "Action/Thriller Cinema"]
+        categories = ["Comedy Cinema", "Action/Thriller Cinema", "Theater"]
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(
+                    category_id="5280",
+                    name="Cinema Genre",
+                    path_names=("Movies & TV Production and Distribution", "Cinema Genre"),
+                    parent_id="303",
+                ),
+                types.SimpleNamespace(
+                    category_id="5281",
+                    name="Action/Thriller Cinema",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Action/Thriller Cinema",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5282",
+                    name="Comedy Cinema",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Comedy Cinema",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5101",
+                    name="Theater",
+                    path_names=("Entertainment and Performance Arts", "Event", "Theater"),
+                    parent_id="5097",
+                ),
+            )
+        )
 
         @staticmethod
         def get_mapper_neighbor_categories(**kwargs):
-            return [("Comedy", 0.6108), ("Action/Thriller Cinema", 0.89)]
+            return [("Comedy Cinema", 0.6108), ("Action/Thriller Cinema", 0.89)]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Comedy Cinema": "Movies & TV Production and Distribution : Cinema Genre : Comedy Cinema",
+                "Action/Thriller Cinema": "Movies & TV Production and Distribution : Cinema Genre : Action/Thriller Cinema",
+                "Theater": "Entertainment and Performance Arts : Event : Theater",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
 
         @staticmethod
         def map_category(**kwargs):
             raw = kwargs.get("raw_category", "")
             if raw == "Movie":
                 return {
-                    "canonical_category": "Comedy",
-                    "category_id": "5297",
+                    "canonical_category": "Comedy Cinema",
+                    "category_id": "5282",
                     "category_match_method": "embeddings",
                     "category_match_score": 0.6108,
                 }
@@ -2868,8 +3065,8 @@ def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak
                     "category_match_score": 0.89,
                 }
             return {
-                "canonical_category": raw or "Comedy",
-                "category_id": "5297",
+                "canonical_category": raw or "Comedy Cinema",
+                "category_id": "5282",
                 "category_match_method": "embeddings",
                 "category_match_score": 0.5,
             }
@@ -2890,14 +3087,38 @@ def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak
             }
 
         @staticmethod
-        def query_specificity_rescue(*args, **kwargs):
-            specificity_calls.append(kwargs)
+        def query_entity_grounding(*args, **kwargs):
+            grounding_calls.append(kwargs)
+            return (
+                {
+                    "entity_name": "Mercy",
+                    "entity_kind": "film_release",
+                    "genres": ["action", "thriller"],
+                    "confidence": 0.94,
+                    "reasoning": "grounded as a theatrical film",
+                    "_search_results": [
+                        {
+                            "title": "Mercy (2025 film)",
+                            "href": "https://example.test/mercy",
+                            "body": "Mercy is an action thriller film now playing in IMAX.",
+                        }
+                    ],
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_entity_search_rescue(*args, **kwargs):
+            entity_calls.append(kwargs)
             return (
                 {
                     "brand": "Mercy",
+                    "entity_name": "Mercy",
+                    "entity_kind": "film_release",
+                    "genres": ["action", "thriller"],
                     "category": "Action/Thriller Cinema",
                     "confidence": 0.94,
-                    "reasoning": "search refinement found theatrical positioning",
+                    "reasoning": "branch constrained selection landed on cinema action/thriller",
                 },
                 "ok",
             )
@@ -2931,12 +3152,618 @@ def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak
 
     assert row[2] == "5281"
     assert row[3] == "Action/Thriller Cinema"
-    assert specificity_calls
-    assert specificity_calls[0]["candidate_categories"] == ["Comedy", "Action/Thriller Cinema"]
+    assert grounding_calls
+    assert entity_calls
+    assert entity_calls[0]["branch_label"] == "Cinema Genre"
+    assert "Cinema Genre" in entity_calls[0]["candidate_categories"]
+    assert "Action/Thriller Cinema" in entity_calls[0]["candidate_categories"]
+    assert "Theater" not in entity_calls[0]["candidate_categories"]
     processing_trace = signal_artifacts["processing_trace"]
-    assert processing_trace["summary"]["accepted_attempt_type"] == "specificity_search_rescue"
-    assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["summary"]["accepted_attempt_type"] == "entity_search_rescue"
+    assert processing_trace["attempts"][-1]["attempt_type"] == "entity_search_rescue"
     assert processing_trace["attempts"][-1]["status"] == "accepted"
+
+
+def test_pipeline_runs_entity_search_before_category_rerank_for_movie_titles(monkeypatch):
+    calls = {"entity_grounding": 0, "entity_rescue": 0, "category_rerank": 0}
+
+    class _DummyMapper:
+        categories = ["Cinema Genre - All else", "Comedy Cinema", "Drama", "Movie Theatres"]
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(
+                    category_id="5280",
+                    name="Cinema Genre",
+                    path_names=("Movies & TV Production and Distribution", "Cinema Genre"),
+                    parent_id="303",
+                ),
+                types.SimpleNamespace(
+                    category_id="5287",
+                    name="Cinema Genre - All else",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Cinema Genre - All else",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5282",
+                    name="Comedy Cinema",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Comedy Cinema",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5290",
+                    name="Drama",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Drama",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5300",
+                    name="Movie Theatres",
+                    path_names=("Movies & TV Production and Distribution", "Movie Theatres"),
+                    parent_id="303",
+                ),
+            )
+        )
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Drama", 0.7106), ("Cinema Genre - All else", 0.6914), ("Comedy Cinema", 0.67)]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Cinema Genre - All else": "Movies & TV Production and Distribution : Cinema Genre : Cinema Genre - All else",
+                "Comedy Cinema": "Movies & TV Production and Distribution : Cinema Genre : Comedy Cinema",
+                "Drama": "Movies & TV Production and Distribution : Cinema Genre : Drama",
+                "Movie Theatres": "Movies & TV Production and Distribution : Movie Theatres",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            mapping = {
+                "Movie": ("Drama", "5290", 0.7106),
+                "Comedy Cinema": ("Comedy Cinema", "5282", 0.99),
+                "Cinema Genre - All else": ("Cinema Genre - All else", "5287", 0.99),
+            }
+            canonical, category_id, score = mapping.get(raw, (raw or "Drama", "5290", 0.5))
+            return {
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "LES FURIES AU CINEMA DES VENDREDI LESFURIES-FILM.COM"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Les Furies",
+                "category": "Movie",
+                "confidence": 1.0,
+                "reasoning": "broad movie label",
+            }
+
+        @staticmethod
+        def query_entity_grounding(*args, **kwargs):
+            calls["entity_grounding"] += 1
+            return (
+                {
+                    "entity_name": "Les Furies",
+                    "entity_kind": "film_release",
+                    "genres": ["comedy"],
+                    "confidence": 0.95,
+                    "reasoning": "grounded as a theatrical film",
+                    "_search_results": [
+                        {
+                            "title": "Les Furies film",
+                            "href": "https://example.test/les-furies",
+                            "body": "Les Furies is a comedy film opening in cinemas.",
+                        }
+                    ],
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_entity_search_rescue(*args, **kwargs):
+            calls["entity_rescue"] += 1
+            return (
+                {
+                    "brand": "Les Furies",
+                    "entity_name": "Les Furies",
+                    "entity_kind": "film_release",
+                    "genres": ["comedy"],
+                    "category": "Comedy Cinema",
+                    "confidence": 0.98,
+                    "reasoning": "grounded title and web evidence support comedy cinema",
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            calls["category_rerank"] += 1
+            return (
+                {
+                    "brand": "Les Furies",
+                    "category_index": 1,
+                    "confidence": 0.98,
+                    "reasoning": "should not be called when entity search already refined the title-driven movie",
+                },
+                "ok",
+            )
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 14.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(pipeline_module, "extract_frames_for_pipeline", lambda _url, **kwargs: (frames, None))
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/les-furies.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-entity-search-before-rerank",
+    )
+
+    assert row[2] == "5282"
+    assert row[3] == "Comedy Cinema"
+    assert calls["entity_grounding"] == 1
+    assert calls["entity_rescue"] == 1
+    assert calls["category_rerank"] == 0
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "entity_search_rescue"
+    assert [attempt["attempt_type"] for attempt in processing_trace["attempts"]] == [
+        "initial",
+        "entity_search_rescue",
+    ]
+
+
+def test_pipeline_skips_entity_search_for_non_media_domain_hints(monkeypatch):
+    entity_calls = {"grounding": 0, "rescue": 0}
+
+    class _DummyMapper:
+        categories = ["Consumer Electronics Stores", "Furniture Stores", "Movie Theatres"]
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(category_id="205", name="Consumer Electronics Stores", path_names=("Consumer Electronics Stores",), parent_id="0"),
+                types.SimpleNamespace(category_id="206", name="Furniture Stores", path_names=("Furniture Stores",), parent_id="0"),
+                types.SimpleNamespace(category_id="178", name="Movie Theatres", path_names=("Movie Theatres",), parent_id="0"),
+            )
+        )
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            if raw == "Retail - Electronics & Home Goods":
+                return {
+                    "canonical_category": "Consumer Electronics Stores",
+                    "category_id": "205",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.91,
+                }
+            return {
+                "canonical_category": raw or "Consumer Electronics Stores",
+                "category_id": "205",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [
+                ("Consumer Electronics Stores", 0.91),
+                ("Furniture Stores", 0.80),
+                ("Movie Theatres", 0.40),
+            ]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Consumer Electronics Stores": "Consumer Electronics Stores",
+                "Furniture Stores": "Furniture Stores",
+                "Movie Theatres": "Movie Theatres",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "The Brick thebrick.com low prices on home electronics and furniture"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "The Brick",
+                "category": "Retail - Electronics & Home Goods",
+                "confidence": 0.99,
+                "reasoning": "The ad promotes a retail chain selling electronics and home goods.",
+            }
+
+        @staticmethod
+        def query_entity_grounding(*args, **kwargs):
+            entity_calls["grounding"] += 1
+            return None, "should_not_run"
+
+        @staticmethod
+        def query_entity_search_rescue(*args, **kwargs):
+            entity_calls["rescue"] += 1
+            return None, "should_not_run"
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/the-brick.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-entity-search-non-media-skip",
+    )
+
+    assert entity_calls == {"grounding": 0, "rescue": 0}
+    assert row[2] == "205"
+    assert row[3] == "Consumer Electronics Stores"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert not any(attempt.get("attempt_type") == "entity_search_rescue" for attempt in attempts)
+
+
+def test_pipeline_accepts_entity_search_rescue_for_stage_presentation(monkeypatch):
+    grounding_calls = []
+    entity_calls = []
+
+    class _DummyMapper:
+        categories = ["Comedy Cinema", "Action/Thriller Cinema", "Theater", "Entertainment and Performance Arts - All else"]
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(
+                    category_id="5280",
+                    name="Cinema Genre",
+                    path_names=("Movies & TV Production and Distribution", "Cinema Genre"),
+                    parent_id="303",
+                ),
+                types.SimpleNamespace(
+                    category_id="5281",
+                    name="Action/Thriller Cinema",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Action/Thriller Cinema",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5282",
+                    name="Comedy Cinema",
+                    path_names=(
+                        "Movies & TV Production and Distribution",
+                        "Cinema Genre",
+                        "Comedy Cinema",
+                    ),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5101",
+                    name="Theater",
+                    path_names=("Entertainment and Performance Arts", "Event", "Theater"),
+                    parent_id="5097",
+                ),
+                types.SimpleNamespace(
+                    category_id="5107",
+                    name="Entertainment and Performance Arts - All else",
+                    path_names=("Entertainment and Performance Arts", "Entertainment and Performance Arts - All else"),
+                    parent_id="385",
+                ),
+            )
+        )
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Entertainment and Performance Arts - All else", 0.59), ("Theater", 0.58)]
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Comedy Cinema": "Movies & TV Production and Distribution : Cinema Genre : Comedy Cinema",
+                "Action/Thriller Cinema": "Movies & TV Production and Distribution : Cinema Genre : Action/Thriller Cinema",
+                "Theater": "Entertainment and Performance Arts : Event : Theater",
+                "Entertainment and Performance Arts - All else": "Entertainment and Performance Arts : Entertainment and Performance Arts - All else",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            if raw == "Entertainment":
+                return {
+                    "canonical_category": "Entertainment and Performance Arts - All else",
+                    "category_id": "5107",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.59,
+                }
+            if raw == "Theater":
+                return {
+                    "canonical_category": "Theater",
+                    "category_id": "5101",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.91,
+                }
+            return {
+                "canonical_category": raw or "Entertainment and Performance Arts - All else",
+                "category_id": "5107",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Hamlet tickets on stage this season"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Hamlet",
+                "category": "Entertainment",
+                "confidence": 0.99,
+                "reasoning": "title-driven performance ad",
+            }
+
+        @staticmethod
+        def query_entity_grounding(*args, **kwargs):
+            grounding_calls.append(kwargs)
+            return (
+                {
+                    "entity_name": "Hamlet",
+                    "entity_kind": "stage_production",
+                    "genres": ["drama"],
+                    "confidence": 0.93,
+                    "reasoning": "web results support a stage presentation",
+                    "_search_results": [
+                        {
+                            "title": "Hamlet stage production",
+                            "href": "https://example.test/hamlet",
+                            "body": "Hamlet returns to the stage this season.",
+                        }
+                    ],
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_entity_search_rescue(*args, **kwargs):
+            entity_calls.append(kwargs)
+            return (
+                {
+                    "brand": "Hamlet",
+                    "entity_name": "Hamlet",
+                    "entity_kind": "stage_production",
+                    "genres": ["drama"],
+                    "category": "Theater",
+                    "confidence": 0.93,
+                    "reasoning": "branch constrained selection landed on theater",
+                },
+                "ok",
+            )
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/hamlet.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-entity-search-stage",
+    )
+
+    assert row[2] == "5101"
+    assert row[3] == "Theater"
+    assert grounding_calls
+    assert entity_calls
+    assert entity_calls[0]["branch_label"] == "Theater"
+    assert "Theater" in entity_calls[0]["candidate_categories"]
+    assert "Comedy Cinema" not in entity_calls[0]["candidate_categories"]
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "entity_search_rescue"
+    assert processing_trace["attempts"][-1]["attempt_type"] == "entity_search_rescue"
+    assert processing_trace["attempts"][-1]["status"] == "accepted"
+
+
+def test_pipeline_entity_search_rescue_can_fall_back_to_branch_parent(monkeypatch):
+    class _DummyMapper:
+        categories = ["Cinema Genre", "Comedy Cinema", "Action/Thriller Cinema"]
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(
+                    category_id="5280",
+                    name="Cinema Genre",
+                    path_names=("Movies & TV Production and Distribution", "Cinema Genre"),
+                    parent_id="303",
+                ),
+                types.SimpleNamespace(
+                    category_id="5281",
+                    name="Action/Thriller Cinema",
+                    path_names=("Movies & TV Production and Distribution", "Cinema Genre", "Action/Thriller Cinema"),
+                    parent_id="5280",
+                ),
+                types.SimpleNamespace(
+                    category_id="5282",
+                    name="Comedy Cinema",
+                    path_names=("Movies & TV Production and Distribution", "Cinema Genre", "Comedy Cinema"),
+                    parent_id="5280",
+                ),
+            )
+        )
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Cinema Genre": "Movies & TV Production and Distribution : Cinema Genre",
+                "Comedy Cinema": "Movies & TV Production and Distribution : Cinema Genre : Comedy Cinema",
+                "Action/Thriller Cinema": "Movies & TV Production and Distribution : Cinema Genre : Action/Thriller Cinema",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            mapping = {
+                "Movie": ("Comedy Cinema", "5282", 0.58),
+                "Cinema Genre": ("Cinema Genre", "5280", 0.97),
+                "Comedy Cinema": ("Comedy Cinema", "5282", 0.97),
+            }
+            canonical, category_id, score = mapping.get(raw, (raw or "Cinema Genre", "5280", 0.5))
+            return {
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Mercy Movie.ca official trailer now playing"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Mercy",
+                "category": "Movie",
+                "confidence": 0.99,
+                "reasoning": "generic film label",
+            }
+
+        @staticmethod
+        def query_entity_grounding(*args, **kwargs):
+            return (
+                {
+                    "entity_name": "Mercy",
+                    "entity_kind": "film_release",
+                    "genres": [],
+                    "confidence": 0.74,
+                    "reasoning": "the ad is clearly a theatrical film but the exact genre is unclear",
+                    "_search_results": [{"title": "Mercy film", "href": "https://example.test/mercy", "body": "Mercy opens in theatres soon."}],
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_entity_search_rescue(*args, **kwargs):
+            return (
+                {
+                    "brand": "Mercy",
+                    "entity_name": "Mercy",
+                    "entity_kind": "film_release",
+                    "genres": [],
+                    "category": "Cinema Genre",
+                    "confidence": 0.74,
+                    "reasoning": "branch parent is safer than guessing the wrong leaf",
+                },
+                "ok",
+            )
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(pipeline_module, "extract_frames_for_pipeline", lambda _url, **kwargs: (frames, None))
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/mercy.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-entity-search-parent",
+    )
+
+    assert row[2] == "5280"
+    assert row[3] == "Cinema Genre"
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "entity_search_rescue"
 
 
 def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
@@ -2950,8 +3777,9 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
             top_k=5,
         ):
             if raw_category == "Hair Care":
-                assert predicted_brand == "Pantene"
-                assert reasoning_summary == "Pantene Miracle Rescue shampoos and conditioners."
+                if predicted_brand:
+                    assert predicted_brand == "Pantene"
+                    assert reasoning_summary == "Pantene Miracle Rescue shampoos and conditioners."
                 return [
                     ("Haircare products", 0.5612),
                     ("Haircare products - All else", 0.5499),
@@ -2960,7 +3788,10 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
                     ("Hair removal product", 0.4816),
                 ][:top_k]
 
-            assert raw_category == "Pantene Miracle Rescue shampoo conditioner"
+            assert raw_category in {
+                "Pantene Miracle Rescue shampoo conditioner",
+                "Pantene hair garbled should dominate compact query",
+            }
             return [
                 ("Shampoo/Conditioner", 0.6707),
                 ("Haircare products", 0.6112),
@@ -2981,13 +3812,7 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
     )
 
     labels = [label for label, _score in candidates]
-    assert labels[:5] == [
-        "Haircare products",
-        "Haircare products - All else",
-        "Hair loss product",
-        "Hair Care Services",
-        "Hair removal product",
-    ]
+    assert labels[0] == "Shampoo/Conditioner"
     assert primary_candidates[0][0] == "Haircare products"
     assert "Shampoo/Conditioner" in labels
     assert evidence_neighbors[0][0] == "Shampoo/Conditioner"
@@ -3050,3 +3875,419 @@ def test_category_rerank_triggers_for_specific_freeform_mismatch(monkeypatch):
         "Home Products",
         "Men's perfume",
     ]
+
+
+def test_category_rerank_triggers_for_broad_neighbor_dispersion(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Alcoholic beverages",
+            "Non-alcoholic beverages",
+            "Beverage Manufacture and Bottling",
+            "Fast Food and Quickservice Restaurants",
+            "Food Distributors",
+            "Appetizers and Dips",
+        ]
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=6,
+        ):
+            query = str(raw_category or "")
+            if query == "Food & Beverage":
+                return [
+                    ("Alcoholic beverages", 0.8080),
+                    ("Non-alcoholic beverages", 0.7757),
+                    ("Beverage Manufacture and Bottling", 0.7706),
+                    ("Fast Food and Quickservice Restaurants", 0.7505),
+                    ("Food Distributors", 0.7476),
+                ][:top_k]
+            if "Avocados From Mexico" in query or "guac" in query.lower():
+                return [
+                    ("Appetizers and Dips", 0.7920),
+                    ("Food Distributors", 0.7810),
+                    ("Non-alcoholic beverages", 0.6400),
+                ][:top_k]
+            return []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    should_rerank, reason, candidates, _visual_matches = pipeline_module._should_run_category_rerank(
+        result_payload={
+            "brand": "Avocados From Mexico",
+            "category": "Food & Beverage",
+            "reasoning": "The ad promotes avocados and guacamole as a food product.",
+        },
+        category_match={
+            "canonical_category": "Alcoholic beverages",
+            "category_match_method": "embeddings",
+            "category_match_score": 0.8080,
+        },
+        ocr_text="FOOTBALL and GUAC Avocados From Mexico ALWAYS GOOD",
+        sorted_vision={
+            "Appetizers and Dips": 0.62,
+            "Food Distributors": 0.54,
+        },
+    )
+
+    assert should_rerank is True
+    assert "broad_neighbor_dispersion" in reason
+    assert "Appetizers and Dips" in candidates
+
+
+def test_category_rerank_candidates_expand_supported_family_branch(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Healthcare Services",
+            "Mental Healthcare",
+            "Rehabilitation Therapy Practices",
+            "Home Healthcare Services",
+            "Spa Services",
+            "Online Travel Services",
+        ]
+        cat_to_id = {
+            "Healthcare Services": "10",
+            "Mental Healthcare": "11",
+            "Rehabilitation Therapy Practices": "12",
+            "Home Healthcare Services": "13",
+            "Spa Services": "188",
+            "Online Travel Services": "200",
+        }
+        _parent_ids = {
+            "Mental Healthcare": "10",
+            "Rehabilitation Therapy Practices": "10",
+            "Home Healthcare Services": "10",
+        }
+        _path_text = {
+            "Healthcare Services": "Healthcare Services",
+            "Mental Healthcare": "Healthcare Services : Mental Healthcare",
+            "Rehabilitation Therapy Practices": "Healthcare Services : Rehabilitation Therapy Practices",
+            "Home Healthcare Services": "Healthcare Services : Home Healthcare Services",
+            "Spa Services": "Spa Services",
+            "Online Travel Services": "Online Travel Services",
+        }
+
+        @staticmethod
+        def get_category_parent_id(label):
+            return _DummyMapper._parent_ids.get(label, "")
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper._path_text.get(label, label)
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=5,
+        ):
+            query = str(raw_category or "")
+            if query == "Online Therapy Services" and not predicted_brand and not ocr_summary and not reasoning_summary:
+                return [
+                    ("Spa Services", 0.6699),
+                    ("Online Travel Services", 0.6574),
+                    ("Rehabilitation Therapy Practices", 0.6541),
+                    ("Home Healthcare Services", 0.6450),
+                ][:top_k]
+            if query == "Online Therapy Services" and predicted_brand == "betterhelp":
+                return [
+                    ("Spa Services", 0.6699),
+                    ("Rehabilitation Therapy Practices", 0.6541),
+                    ("Home Healthcare Services", 0.6450),
+                    ("Online Travel Services", 0.6420),
+                ][:top_k]
+            if "betterhelp" in query.lower() or "therapy" in query.lower() or "platform" in query.lower():
+                return [
+                    ("Rehabilitation Therapy Practices", 0.6610),
+                    ("Mental Healthcare", 0.6522),
+                    ("Home Healthcare Services", 0.6335),
+                ][:top_k]
+            return []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    candidates, evidence_neighbors, primary_candidates = pipeline_module._build_category_rerank_candidates(
+        raw_category="Online Therapy Services",
+        current_match={
+            "canonical_category": "Spa Services",
+            "category_match_score": 0.6699,
+        },
+        predicted_brand="betterhelp",
+        ocr_text="Discover the power of help on the world's largest online therapy platform. betterhelp.com",
+        reasoning="The ad promotes BetterHelp as an online therapy platform and mental health service.",
+    )
+
+    labels = [label for label, _score in candidates]
+    assert primary_candidates[0][0] == "Spa Services"
+    assert evidence_neighbors[0][0] == "Rehabilitation Therapy Practices"
+    assert "Mental Healthcare" in labels
+    assert labels.index("Rehabilitation Therapy Practices") < labels.index("Spa Services")
+
+
+def test_category_rerank_branch_expansion_does_not_flood_unrelated_siblings(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Pharmaceutical Manufacture and Sale - over the counter",
+            "Birth Control Products",
+            "Painkiller",
+            "Nasal products",
+            "Anti-Snoring",
+            "Anti-Nausea",
+            "Jam/preserves/honey",
+        ]
+        cat_to_id = {
+            "Pharmaceutical Manufacture and Sale - over the counter": "373",
+            "Birth Control Products": "384",
+            "Painkiller": "5344",
+            "Nasal products": "5357",
+            "Anti-Snoring": "5300",
+            "Anti-Nausea": "5301",
+            "Jam/preserves/honey": "6000",
+        }
+        _parent_ids = {
+            "Painkiller": "373",
+            "Nasal products": "373",
+            "Anti-Snoring": "373",
+            "Anti-Nausea": "373",
+        }
+        _path_text = {
+            "Pharmaceutical Manufacture and Sale - over the counter": "Pharmaceutical Manufacture and Sale - over the counter",
+            "Birth Control Products": "Birth Control Products",
+            "Painkiller": "Pharmaceutical Manufacture and Sale - over the counter : Painkiller",
+            "Nasal products": "Pharmaceutical Manufacture and Sale - over the counter : Nasal products",
+            "Anti-Snoring": "Pharmaceutical Manufacture and Sale - over the counter : Anti-Snoring",
+            "Anti-Nausea": "Pharmaceutical Manufacture and Sale - over the counter : Anti-Nausea",
+            "Jam/preserves/honey": "Food - Packaged : Jam/preserves/honey",
+        }
+
+        @staticmethod
+        def get_category_parent_id(label):
+            return _DummyMapper._parent_ids.get(label, "")
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper._path_text.get(label, label)
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=8,
+        ):
+            query = str(raw_category or "")
+            if query == "Over-the-Counter Medication":
+                return [
+                    ("Birth Control Products", 0.7351),
+                    ("Pharmaceutical Manufacture and Sale - over the counter", 0.7239),
+                    ("Painkiller", 0.6670),
+                    ("Nasal products", 0.6610),
+                ][:top_k]
+            if "SORE THROAT" in query or "VapoCOOL" in query:
+                return [
+                    ("Painkiller", 0.5813),
+                    ("Nasal products", 0.5790),
+                    ("Birth Control Products", 0.5684),
+                ][:top_k]
+            if "counter" in query.lower():
+                return [
+                    ("Jam/preserves/honey", 0.6190),
+                    ("Pharmaceutical Manufacture and Sale - over the counter", 0.5475),
+                    ("Birth Control Products", 0.5534),
+                ][:top_k]
+            return []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    candidates, _evidence_neighbors, _primary_candidates = pipeline_module._build_category_rerank_candidates(
+        raw_category="Over-the-Counter Medication",
+        current_match={
+            "canonical_category": "Birth Control Products",
+            "category_match_score": 0.7351,
+        },
+        predicted_brand="Vicks",
+        ocr_text="Vicks VapoCOOL VAPORIZE MAX Honey Lemon Chill SORE THROAT PAIN",
+        reasoning="Over-the-counter Vicks medication for sore throat relief.",
+        visual_matches=[("Nasal products", 0.0846)],
+    )
+
+    labels = [label for label, _score in candidates]
+    assert "Nasal products" in labels
+    assert "Painkiller" in labels
+    assert "Anti-Snoring" not in labels
+    assert "Anti-Nausea" not in labels
+
+
+def test_pipeline_category_rerank_expands_selected_family_before_leaf_choice(monkeypatch):
+    rerank_calls = {"count": 0}
+
+    class _DummyMapper:
+        categories = [
+            "Pharmaceutical Manufacture and Sale - over the counter",
+            "Birth Control Products",
+            "Painkiller",
+            "Nasal products",
+            "Cough Flu-analgesics",
+            "Optical",
+        ]
+        cat_to_id = {
+            "Pharmaceutical Manufacture and Sale - over the counter": "373",
+            "Birth Control Products": "384",
+            "Painkiller": "5357",
+            "Nasal products": "5362",
+            "Cough Flu-analgesics": "5344",
+            "Optical": "5354",
+        }
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(category_id="373", name="Pharmaceutical Manufacture and Sale - over the counter", path_names=("Pharmaceutical Manufacture and Sale - over the counter",), parent_id="0"),
+                types.SimpleNamespace(category_id="384", name="Birth Control Products", path_names=("Birth Control Products",), parent_id="0"),
+                types.SimpleNamespace(category_id="5357", name="Painkiller", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Painkiller"), parent_id="373"),
+                types.SimpleNamespace(category_id="5362", name="Nasal products", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Nasal products"), parent_id="373"),
+                types.SimpleNamespace(category_id="5344", name="Cough Flu-analgesics", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Cough Flu-analgesics"), parent_id="373"),
+                types.SimpleNamespace(category_id="5354", name="Optical", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Optical"), parent_id="373"),
+            )
+        )
+
+        @staticmethod
+        def get_category_parent_id(label):
+            mapping = {
+                "Painkiller": "373",
+                "Nasal products": "373",
+                "Cough Flu-analgesics": "373",
+                "Optical": "373",
+            }
+            return mapping.get(label, "")
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Pharmaceutical Manufacture and Sale - over the counter": "Pharmaceutical Manufacture and Sale - over the counter",
+                "Birth Control Products": "Birth Control Products",
+                "Painkiller": "Pharmaceutical Manufacture and Sale - over the counter : Painkiller",
+                "Nasal products": "Pharmaceutical Manufacture and Sale - over the counter : Nasal products",
+                "Cough Flu-analgesics": "Pharmaceutical Manufacture and Sale - over the counter : Cough Flu-analgesics",
+                "Optical": "Pharmaceutical Manufacture and Sale - over the counter : Optical",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            mapping = {
+                "Over-the-Counter Medication": ("Birth Control Products", "384", 0.7351),
+                "Cough Flu-analgesics": ("Cough Flu-analgesics", "5344", 0.99),
+                "Painkiller": ("Painkiller", "5357", 0.99),
+            }
+            canonical, category_id, score = mapping.get(raw, (raw or "Birth Control Products", "", 0.5))
+            return {
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", reasoning_summary="", top_k=8):
+            query = str(raw_category or "")
+            if query == "Over-the-Counter Medication":
+                return [
+                    ("Birth Control Products", 0.7351),
+                    ("Pharmaceutical Manufacture and Sale - over the counter", 0.7239),
+                    ("Painkiller", 0.6670),
+                    ("Optical", 0.6610),
+                ][:top_k]
+            if "SORE THROAT" in query or "VapoCOOL" in query:
+                return [
+                    ("Painkiller", 0.5813),
+                    ("Nasal products", 0.5790),
+                    ("Cough Flu-analgesics", 0.5775),
+                ][:top_k]
+            return [("Birth Control Products", 0.7351), ("Painkiller", 0.6670), ("Optical", 0.6610)][:top_k]
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "VICKS VapoCOOL MAX Honey Lemon Chill SORE THROAT PAIN"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Vicks",
+                "category": "Over-the-Counter Medication",
+                "confidence": 1.0,
+                "reasoning": "The ad promotes an OTC Vicks sore-throat product.",
+            }
+
+        @staticmethod
+        def query_category_family_selection(*args, **kwargs):
+            return (
+                {
+                    "family": "Pharmaceutical Manufacture and Sale - over the counter",
+                    "family_index": 1,
+                    "confidence": 0.96,
+                    "reasoning": "The ad is clearly for an OTC medication family.",
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls["count"] += 1
+            candidates = list(kwargs.get("candidate_categories") or [])
+            assert "Nasal products" in candidates
+            assert "Cough Flu-analgesics" in candidates
+            return (
+                {
+                    "brand": "Vicks",
+                    "category": "Cough Flu-analgesics",
+                    "confidence": 0.98,
+                    "reasoning": "The product is a cough and flu analgesic within OTC medication.",
+                },
+                "ok",
+            )
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/vicks.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-family-vicks",
+    )
+
+    assert rerank_calls["count"] == 1
+    assert row[2] == "5344"
+    assert row[3] == "Cough Flu-analgesics"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank"
+        and attempt.get("status") == "accepted"
+        and "Selected family 'Pharmaceutical Manufacture and Sale - over the counter'" in str(attempt.get("evidence_note", ""))
+        for attempt in attempts
+    )

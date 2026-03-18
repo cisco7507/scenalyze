@@ -193,6 +193,39 @@ def test_job_artifacts_endpoint_returns_mapper_top_matches(monkeypatch):
     assert payload["artifacts"]["category_mapper"]["top_matches"][1]["category_id"] == "102"
 
 
+def test_job_result_endpoint_returns_lowercase_taxonomy_fields(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with conn:
+        conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, result_json TEXT)")
+        conn.execute(
+            "INSERT INTO jobs (id, result_json) VALUES (?, ?)",
+            (
+                "job-result",
+                '[{"Brand":"Brand X","Category":"Collectibles","Category ID":"5446","Confidence":0.97,"Reasoning":"reason","brand":"Brand X","industry_id":"158","industry_name":"Toy Manufacture","category_id":"5446","category_name":"Collectibles","confidence":0.97,"reasoning":"reason"}]',
+            ),
+        )
+
+    monkeypatch.setattr(main, "get_db", lambda: conn)
+    monkeypatch.setattr(main, "_maybe_proxy", _no_proxy)
+
+    payload = asyncio.run(main.get_job_result(_Req(), "job-result"))
+
+    row = payload["result"][0]
+    assert row["parent_category_id"] == "158"
+    assert row["parent_category"] == "Toy Manufacture"
+    assert row["industry_id"] == "158"
+    assert row["industry_name"] == "Toy Manufacture"
+    assert row["category_id"] == "5446"
+    assert row["category_name"] == "Collectibles"
+    assert row["brand"] == "Brand X"
+    assert "Brand" not in row
+    assert "Category" not in row
+    assert "Category ID" not in row
+    assert "Confidence" not in row
+    assert "Reasoning" not in row
+
+
 def test_job_video_poster_endpoint_returns_jpeg(monkeypatch, tmp_path):
     video_path = tmp_path / "sample.mp4"
     video_path.write_bytes(b"video")

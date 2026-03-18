@@ -30,12 +30,101 @@ LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS", "300"))
 OPENAI_COMPAT_URL = os.environ.get("OPENAI_COMPAT_URL", "http://localhost:1234/v1/chat/completions")
 
 
+def _classification_response_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "brand": {"type": "string"},
+            "category": {"type": "string"},
+            "confidence": {"type": "number"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["brand", "category", "confidence", "reasoning"],
+        "additionalProperties": True,
+    }
+
+
+def _category_index_response_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "category_index": {"type": "integer"},
+            "confidence": {"type": "number"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["category_index", "confidence", "reasoning"],
+        "additionalProperties": True,
+    }
+
+
+def _family_index_response_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "family_index": {"type": "integer"},
+            "confidence": {"type": "number"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["family_index", "confidence", "reasoning"],
+        "additionalProperties": True,
+    }
+
+
+def _entity_grounding_response_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "entity_name": {"type": "string"},
+            "entity_kind": {
+                "type": "string",
+                "enum": [
+                    "film_release",
+                    "stage_production",
+                    "venue_exhibitor",
+                    "tv_program",
+                    "live_event",
+                    "unknown",
+                ],
+            },
+            "genres": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "confidence": {"type": "number"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["entity_name", "entity_kind", "genres", "confidence", "reasoning"],
+        "additionalProperties": True,
+    }
+
+
 class SearchManager:
     def __init__(self):
         self._ensure_ddgs_executor_context()
         self.queue = queue.Queue()
         self.client = DDGS()
         threading.Thread(target=self._worker, daemon=True).start()
+
+    @staticmethod
+    def _normalize_results(results) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        for result in results or []:
+            if not isinstance(result, dict):
+                continue
+            title = " ".join(str(result.get("title", "") or "").split()).strip()
+            body = " ".join(str(result.get("body", "") or "").split()).strip()
+            href = " ".join(
+                str(
+                    result.get("href")
+                    or result.get("url")
+                    or result.get("link")
+                    or ""
+                ).split()
+            ).strip()
+            if not any((title, body, href)):
+                continue
+            normalized.append({"title": title, "body": body, "href": href})
+        return normalized
 
     @staticmethod
     def _ensure_ddgs_executor_context() -> None:
@@ -86,8 +175,7 @@ class SearchManager:
                 while attempt < max_retries and not success:
                     try:
                         results = task()
-                        snippets = " | ".join([r.get("body", "") for r in results if isinstance(r, dict)])
-                        future.set_result(snippets if snippets else None)
+                        future.set_result(results)
                         success = True
                     except Exception as exc:
                         attempt += 1
@@ -104,15 +192,23 @@ class SearchManager:
             if success:
                 time.sleep(random.uniform(0.8, 2.5))
 
-    def search(self, query, timeout=45):
+    def search_results(self, query, timeout=45, max_results=3):
         future = concurrent.futures.Future()
         fallback_context = capture_log_context()
-        task = bind_current_log_context(lambda: self.client.text(query, max_results=3))
+        task = bind_current_log_context(lambda: list(self.client.text(query, max_results=max_results)))
         self.queue.put((task, fallback_context, future))
         try:
-            return future.result(timeout=timeout)
+            results = future.result(timeout=timeout)
+            return self._normalize_results(results)
         except Exception:
+            return []
+
+    def search(self, query, timeout=45):
+        results = self.search_results(query, timeout=timeout, max_results=3)
+        if not results:
             return None
+        snippets = " | ".join(result.get("body", "") for result in results if result.get("body"))
+        return snippets or None
 
 
 search_manager = SearchManager()
@@ -331,6 +427,8 @@ class OpenAICompatibleProvider(BaseProvider):
         **kwargs,
     ) -> dict:
         json_prefix = '{\n  "reasoning": "'
+        response_schema = kwargs.get("response_schema") or _classification_response_schema()
+        schema_name = str(kwargs.get("schema_name") or "ad_classification").strip() or "ad_classification"
         msgs = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -355,20 +453,15 @@ class OpenAICompatibleProvider(BaseProvider):
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "ad_classification",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "brand": {"type": "string"},
-                            "category": {"type": "string"},
-                            "confidence": {"type": "number"},
-                            "reasoning": {"type": "string"},
-                        },
-                        "required": ["brand", "category", "confidence", "reasoning"],
-                    },
+                    "name": schema_name,
+                    "schema": response_schema,
                 },
             }
-            logger.info("JSON schema structured output active (no enum constraint)")
+            logger.info(
+                "JSON schema structured output active schema=%s required=%s",
+                schema_name,
+                response_schema.get("required"),
+            )
         try:
             resp = requests.post(OPENAI_COMPAT_URL, json=payload, timeout=LLM_TIMEOUT_SECONDS)
             resp.raise_for_status()
@@ -1022,6 +1115,94 @@ class HybridLLM:
         query_parts.append("official site")
         return " ".join(dict.fromkeys(part for part in query_parts if part))
 
+    def _build_entity_search_query(
+        self,
+        brand: str,
+        raw_category: str,
+        ocr_text: str,
+    ) -> str:
+        domain, path = self._extract_search_domain(ocr_text)
+        query_parts: list[str] = []
+        brand_clean = (brand or "").strip()
+        if domain:
+            query_parts.append(f"site:{domain}")
+        if brand_clean:
+            query_parts.append(f"\"{brand_clean}\"")
+        if domain:
+            query_parts.append(f"\"{domain}\"")
+        if path:
+            path_tokens = [token for token in re.split(r"[/_-]+", path) if len(token) >= 3]
+            if path_tokens:
+                query_parts.extend(path_tokens[:3])
+        ocr_tokens = [
+            token
+            for token in _ocr_tokens(ocr_text)
+            if token.lower() not in {"online", "platform", "service", "services", "official"}
+        ]
+        if ocr_tokens:
+            query_parts.extend(ocr_tokens[:5])
+        raw_clean = str(raw_category or "").strip()
+        if raw_clean and len(raw_clean.split()) <= 3:
+            query_parts.append(raw_clean)
+        query_parts.append("official")
+        return " ".join(dict.fromkeys(part for part in query_parts if part))
+
+    @staticmethod
+    def _normalize_entity_kind(value: object) -> str:
+        normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized in {
+            "film_release",
+            "stage_production",
+            "venue_exhibitor",
+            "tv_program",
+            "live_event",
+            "unknown",
+        }:
+            return normalized
+        return "unknown"
+
+    @staticmethod
+    def _normalize_entity_genres(value: object) -> list[str]:
+        raw_values: list[str] = []
+        if isinstance(value, (list, tuple)):
+            raw_values = [str(item or "").strip() for item in value]
+        else:
+            text = str(value or "").strip()
+            if text:
+                raw_values = re.split(r"[,/|;]\s*", text)
+        genres: list[str] = []
+        for raw in raw_values:
+            clean = " ".join(str(raw or "").strip().lower().split())
+            if clean and clean not in genres:
+                genres.append(clean)
+        return genres[:5]
+
+    @staticmethod
+    def _format_search_results_for_prompt(results: list[dict[str, str]]) -> str:
+        lines: list[str] = []
+        for idx, result in enumerate(results[:5], start=1):
+            title = str(result.get("title", "") or "").strip()
+            body = str(result.get("body", "") or "").strip()
+            href = str(result.get("href", "") or "").strip()
+            lines.append(f"{idx}. Title: {title or 'None'}")
+            if href:
+                lines.append(f"   URL: {href}")
+            if body:
+                lines.append(f"   Snippet: {body}")
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _summarize_search_results_for_log(results: list[dict[str, str]]) -> list[str]:
+        summarized: list[str] = []
+        for result in results[:5]:
+            title = str(result.get("title", "") or "").strip()
+            href = str(result.get("href", "") or "").strip()
+            body = str(result.get("body", "") or "").strip()
+            entry = " | ".join(part for part in (title, href, body[:120]) if part)
+            if entry:
+                summarized.append(entry)
+        return summarized
+
     def _build_product_focus_guidance(
         self,
         *,
@@ -1121,6 +1302,7 @@ class HybridLLM:
         ocr_text: str,
         reasoning: str,
         candidate_categories: list[str],
+        candidate_category_contexts: dict[str, str] | None = None,
         visual_matches: list[tuple[str, float]] | None = None,
         context_size=8192,
         product_focus_guidance_enabled: bool = True,
@@ -1146,7 +1328,15 @@ class HybridLLM:
 
         ocr_excerpt = " ".join((ocr_text or "").split())[:500]
         reasoning_excerpt = " ".join((reasoning or "").split())[:400]
-        candidate_text = " | ".join(normalized_candidates.values())
+        candidate_lines: list[str] = []
+        for idx, candidate in enumerate(normalized_candidates.values(), start=1):
+            candidate_lines.append(f"{idx}. {candidate}")
+            path_text = ""
+            if candidate_category_contexts:
+                path_text = str(candidate_category_contexts.get(candidate, "") or "").strip()
+            if path_text and path_text != candidate:
+                candidate_lines.append(f"   Parent/Leaf Path: {path_text}")
+        candidate_text = "\n".join(candidate_lines)
         product_focus_guidance = ""
         if product_focus_guidance_enabled:
             product_focus_guidance = self._build_product_focus_guidance(
@@ -1159,6 +1349,8 @@ class HybridLLM:
         system_prompt = (
             "You are resolving a taxonomy mapping ambiguity for a video ad classification system. "
             "Choose exactly one category from the supplied candidate categories only. "
+            "Return the 1-based category_index for the chosen candidate. "
+            "The category_index is authoritative. "
             "Use the brand, OCR evidence, prior category guess, model reasoning, and optional visual hints together. "
             "Prefer the category that best matches the ad's overall product or service domain, not a superficial keyword overlap. "
             + (
@@ -1170,32 +1362,277 @@ class HybridLLM:
             + (
             "Do not invent a label. Do not choose a candidate whose domain contradicts the overall ad evidence. "
             "If the evidence is mixed, choose the safer in-family category from the list. "
-            "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
+            "Output STRICT JSON: {\"category_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
         )
         user_prompt = (
             f"Brand: {brand}\n"
             f"LLM Category Guess: {raw_category}\n"
             f"Current Mapped Category: {mapped_category}\n"
-            f"Candidate Categories: {candidate_text}\n"
+            f"Candidate Categories:\n{candidate_text}\n"
             f"OCR Evidence: {ocr_excerpt or 'None'}\n"
             f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
             f"Visual Hints: {visual_hint_text or 'None'}\n"
             f"Decision Guidance: {product_focus_guidance or 'None'}\n"
             "Return the single best-supported category from the candidate list."
         )
+        ordered_candidates = list(normalized_candidates.values())
+
+        def _resolve_index(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_index = payload.get("category_index")
+            try:
+                candidate_index = int(chosen_index)
+            except (TypeError, ValueError):
+                return None, 0
+            if 1 <= candidate_index <= len(ordered_candidates):
+                return ordered_candidates[candidate_index - 1], candidate_index
+            return None, 0
+
+        def _resolve_exact_candidate_text(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_text = str(payload.get("category", "") or "").strip()
+            if not chosen_text:
+                return None, 0
+            canonical_candidate = normalized_candidates.get(chosen_text.casefold())
+            if canonical_candidate is None:
+                return None, 0
+            for idx, candidate in enumerate(ordered_candidates, start=1):
+                if candidate == canonical_candidate:
+                    return canonical_candidate, idx
+            return None, 0
+
+        original_category_text = ""
         try:
-            res = provider_plugin.generate_json(system_prompt, user_prompt)
+            res = provider_plugin.generate_json(
+                system_prompt,
+                user_prompt,
+                response_schema=_category_index_response_schema(),
+                schema_name="category_rerank",
+            )
         except Exception as exc:
             return None, f"provider_error:{exc}"
-        if not isinstance(res, dict) or "category" not in res:
+        if not isinstance(res, dict):
+            return None, "invalid_llm_response"
+        original_category_text = str(res.get("category", "") or "").strip()
+
+        canonical_candidate, resolved_index = _resolve_index(res)
+        resolution_source = f"category_index:{resolved_index}" if resolved_index else ""
+        if canonical_candidate is None:
+            logger.info(
+                "category_rerank_retry_triggered reason=missing_category_index category_text=%r category_index=%r",
+                str(res.get("category", "") or "").strip(),
+                res.get("category_index"),
+            )
+            retry_system_prompt = (
+                "You must select exactly one category from the numbered candidate list. "
+                "Return STRICT JSON only as {\"category_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}. "
+                "The category_index is required and must be the 1-based number of the chosen candidate. "
+                "Do not return category text. Do not explain alternatives outside the list."
+            )
+            retry_user_prompt = (
+                f"Candidate Categories:\n{candidate_text}\n"
+                f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+                f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
+                f"Visual Hints: {visual_hint_text or 'None'}\n"
+                "Return only the single best category_index from the candidate list."
+            )
+            try:
+                retry_res = provider_plugin.generate_json(
+                    retry_system_prompt,
+                    retry_user_prompt,
+                    response_schema=_category_index_response_schema(),
+                    schema_name="category_rerank_retry",
+                )
+            except Exception as exc:
+                return None, f"provider_error:{exc}"
+            if not isinstance(retry_res, dict):
+                return None, "invalid_llm_response"
+            original_category_text = str(retry_res.get("category", "") or "").strip()
+            canonical_candidate, resolved_index = _resolve_index(retry_res)
+            if canonical_candidate is None:
+                canonical_candidate, resolved_index = _resolve_exact_candidate_text(retry_res)
+                if canonical_candidate is None:
+                    return None, "missing_category_index"
+                resolution_source = f"retry_category_text_exact:{resolved_index}"
+            else:
+                resolution_source = f"retry_category_index:{resolved_index}"
+            res = retry_res
+        res["brand"] = brand
+        res["category"] = canonical_candidate
+        res["category_index"] = resolved_index
+        logger.info(
+            "category_rerank_resolved source=%s chosen=%r category_text=%r category_index=%r",
+            resolution_source or "unknown",
+            canonical_candidate,
+            original_category_text,
+            res.get("category_index"),
+        )
+        return res, "ok"
+
+    def query_category_family_selection(
+        self,
+        provider,
+        backend_model,
+        brand: str,
+        raw_category: str,
+        mapped_category: str,
+        ocr_text: str,
+        reasoning: str,
+        candidate_families: list[str] | None = None,
+        candidate_family_contexts: dict[str, str] | None = None,
+        family_members: dict[str, list[str]] | None = None,
+        visual_matches: list[tuple[str, float]] | None = None,
+        context_size=8192,
+    ) -> tuple[dict | None, str]:
+        try:
+            provider_plugin = create_provider(provider, backend_model, context_size=int(context_size))
+        except ValueError as exc:
+            return None, f"provider_error:{exc}"
+
+        normalized_families = {
+            str(candidate or "").strip().casefold(): str(candidate or "").strip()
+            for candidate in (candidate_families or [])
+            if str(candidate or "").strip()
+        }
+        if len(normalized_families) < 2:
+            return None, "insufficient_families"
+
+        visual_hint_text = ""
+        if visual_matches:
+            visual_hint_text = " | ".join(
+                f"{label} ({score:.4f})" for label, score in visual_matches[:4]
+            )
+
+        ordered_families = list(normalized_families.values())
+        family_lines: list[str] = []
+        for idx, family in enumerate(ordered_families, start=1):
+            family_lines.append(f"{idx}. {family}")
+            path_text = ""
+            if candidate_family_contexts:
+                path_text = str(candidate_family_contexts.get(family, "") or "").strip()
+            if path_text and path_text != family:
+                family_lines.append(f"   Family Path: {path_text}")
+            members = [str(member or "").strip() for member in (family_members or {}).get(family, []) if str(member or "").strip()]
+            if members:
+                family_lines.append(f"   Candidate Labels: {', '.join(members[:6])}")
+        family_text = "\n".join(family_lines)
+        ocr_excerpt = " ".join((ocr_text or "").split())[:500]
+        reasoning_excerpt = " ".join((reasoning or "").split())[:500]
+
+        system_prompt = (
+            "You are selecting the taxonomy family or branch before the final leaf category is chosen. "
+            "Choose exactly one family from the supplied numbered family list only. "
+            "Return the 1-based family_index for the chosen family. "
+            "The family_index is authoritative. "
+            "Prefer the family that best represents what is being advertised overall: the product, service, content, retailer, institution, or venue actually promoted. "
+            "Do not choose an incidental device, channel, or medium unless the ad is primarily about that device, channel, or medium. "
+            "Output STRICT JSON: {\"family_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}"
+        )
+        user_prompt = (
+            f"Brand: {brand}\n"
+            f"LLM Category Guess: {raw_category}\n"
+            f"Current Mapped Category: {mapped_category}\n"
+            f"Candidate Families:\n{family_text}\n"
+            f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+            f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
+            f"Visual Hints: {visual_hint_text or 'None'}\n"
+            "Return the single best-supported family_index from the family list."
+        )
+
+        def _resolve_index(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_index = payload.get("family_index")
+            try:
+                family_index = int(chosen_index)
+            except (TypeError, ValueError):
+                return None, 0
+            if 1 <= family_index <= len(ordered_families):
+                return ordered_families[family_index - 1], family_index
+            return None, 0
+
+        def _resolve_exact_family_text(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_text = str(payload.get("family", "") or payload.get("category", "") or "").strip()
+            if not chosen_text:
+                return None, 0
+            canonical_family = normalized_families.get(chosen_text.casefold())
+            if canonical_family is None:
+                return None, 0
+            for idx, family in enumerate(ordered_families, start=1):
+                if family == canonical_family:
+                    return canonical_family, idx
+            return None, 0
+
+        try:
+            res = provider_plugin.generate_json(
+                system_prompt,
+                user_prompt,
+                response_schema=_family_index_response_schema(),
+                schema_name="category_family_selection",
+            )
+        except Exception as exc:
+            return None, f"provider_error:{exc}"
+        if not isinstance(res, dict):
             return None, "invalid_llm_response"
 
-        chosen = str(res.get("category", "") or "").strip()
-        canonical_candidate = normalized_candidates.get(chosen.casefold())
-        if canonical_candidate is None:
-            return None, f"outside_candidate_set={chosen!r}"
-        res["category"] = canonical_candidate
+        original_family_text = str(res.get("family", "") or res.get("category", "") or "").strip()
+        canonical_family, resolved_index = _resolve_index(res)
+        resolution_source = f"family_index:{resolved_index}" if resolved_index else ""
+        if canonical_family is None:
+            logger.info(
+                "category_family_selection_retry_triggered reason=missing_family_index family_text=%r family_index=%r",
+                original_family_text,
+                res.get("family_index"),
+            )
+            retry_system_prompt = (
+                "You must select exactly one family from the numbered family list. "
+                "Return STRICT JSON only as {\"family_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}. "
+                "The family_index is required and must be the 1-based number of the chosen family. "
+                "Do not return family text. Do not explain alternatives outside the list."
+            )
+            retry_user_prompt = (
+                f"Candidate Families:\n{family_text}\n"
+                f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+                f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
+                f"Visual Hints: {visual_hint_text or 'None'}\n"
+                "Return only the single best family_index from the family list."
+            )
+            try:
+                retry_res = provider_plugin.generate_json(
+                    retry_system_prompt,
+                    retry_user_prompt,
+                    response_schema=_family_index_response_schema(),
+                    schema_name="category_family_selection_retry",
+                )
+            except Exception as exc:
+                return None, f"provider_error:{exc}"
+            if not isinstance(retry_res, dict):
+                return None, "invalid_llm_response"
+            original_family_text = str(retry_res.get("family", "") or retry_res.get("category", "") or "").strip()
+            canonical_family, resolved_index = _resolve_index(retry_res)
+            if canonical_family is None:
+                canonical_family, resolved_index = _resolve_exact_family_text(retry_res)
+                if canonical_family is None:
+                    return None, "missing_family_index"
+                resolution_source = f"retry_family_text_exact:{resolved_index}"
+            else:
+                resolution_source = f"retry_family_index:{resolved_index}"
+            res = retry_res
+
+        res["family"] = canonical_family
+        res["family_index"] = resolved_index
+        logger.info(
+            "category_family_selection_resolved source=%s family=%r family_text=%r family_index=%r",
+            resolution_source or "unknown",
+            canonical_family,
+            original_family_text,
+            res.get("family_index"),
+        )
         return res, "ok"
 
     def query_specificity_rescue(
@@ -1206,6 +1643,7 @@ class HybridLLM:
         current_category: str,
         ocr_text: str,
         candidate_categories: list[str] | None = None,
+        candidate_category_contexts: dict[str, str] | None = None,
         visual_matches: list[tuple[str, float]] | None = None,
         context_size=8192,
     ) -> tuple[dict | None, str]:
@@ -1233,7 +1671,15 @@ class HybridLLM:
             )
         candidate_text = ""
         if candidate_categories:
-            candidate_text = " | ".join(candidate_categories)
+            candidate_lines: list[str] = []
+            for idx, candidate in enumerate(candidate_categories, start=1):
+                candidate_lines.append(f"{idx}. {candidate}")
+                path_text = ""
+                if candidate_category_contexts:
+                    path_text = str(candidate_category_contexts.get(candidate, "") or "").strip()
+                if path_text and path_text != candidate:
+                    candidate_lines.append(f"   Parent/Leaf Path: {path_text}")
+            candidate_text = "\n".join(candidate_lines)
 
         system_prompt = (
             "You are refining a broad video-ad category into the most specific supported product or service category. "
@@ -1246,18 +1692,306 @@ class HybridLLM:
         user_prompt = (
             f"Brand: {brand}\n"
             f"Current Category: {current_category}\n"
-            f"Candidate Categories: {candidate_text or current_category}\n"
+            f"Candidate Categories:\n{candidate_text or current_category}\n"
             f"OCR Evidence: {ocr_text}\n"
             f"Visual Hints: {visual_hint_text or 'None'}\n"
             f"Web Search Snippets: {snippets}\n"
             "Return the most specific supported product or service category from the candidate list."
         )
         try:
-            res = provider_plugin.generate_json(system_prompt, user_prompt)
+            res = provider_plugin.generate_json(
+                system_prompt,
+                user_prompt,
+            )
         except Exception as exc:
             return None, f"provider_error:{exc}"
         if not isinstance(res, dict) or "category" not in res:
             return None, "invalid_llm_response"
+        res["brand"] = brand
+        return res, "ok"
+
+    def query_entity_grounding(
+        self,
+        provider,
+        backend_model,
+        brand: str,
+        raw_category: str,
+        ocr_text: str,
+        visual_matches: list[tuple[str, float]] | None = None,
+        context_size=8192,
+    ) -> tuple[dict | None, str]:
+        try:
+            provider_plugin = create_provider(provider, backend_model, context_size=int(context_size))
+        except ValueError as exc:
+            return None, f"provider_error:{exc}"
+
+        query = self._build_entity_search_query(
+            brand=brand,
+            raw_category=raw_category,
+            ocr_text=ocr_text,
+        )
+        if not query.strip():
+            return None, "no_search_query"
+
+        search_results = search_manager.search_results(query, max_results=5)
+        logger.info(
+            "entity_grounding_query query=%r results=%r",
+            query,
+            self._summarize_search_results_for_log(search_results),
+        )
+        if not search_results:
+            return None, "search_unavailable"
+
+        visual_hint_text = ""
+        if visual_matches:
+            visual_hint_text = " | ".join(
+                f"{label} ({score:.4f})" for label, score in visual_matches[:4]
+            )
+
+        search_text = self._format_search_results_for_prompt(search_results)
+        ocr_excerpt = " ".join((ocr_text or "").split())[:500]
+        raw_excerpt = " ".join((raw_category or "").split())[:120]
+
+        system_prompt = (
+            "You are grounding the real-world entity being advertised before taxonomy mapping. "
+            "Use OCR evidence, visual hints, and web search results to identify the advertised entity independent of the taxonomy. "
+            "Return the entity_name, entity_kind, genres, confidence, and reasoning. "
+            "entity_kind must be one of: film_release, stage_production, venue_exhibitor, tv_program, live_event, unknown. "
+            "genres should be a short list of broad genres like comedy, drama, action, thriller, horror, documentary, musical, family, or sports when supported. "
+            "Do not choose a taxonomy label. "
+            "Output STRICT JSON: {\"entity_name\": \"...\", \"entity_kind\": \"unknown\", \"genres\": [\"...\"], \"confidence\": 0.0, \"reasoning\": \"...\"}"
+        )
+        user_prompt = (
+            f"Brand/Title Guess: {brand}\n"
+            f"Raw Category Guess: {raw_excerpt or 'None'}\n"
+            f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+            f"Visual Hints: {visual_hint_text or 'None'}\n"
+            f"Web Search Results:\n{search_text}\n"
+            "Return the grounded entity information only."
+        )
+
+        try:
+            res = provider_plugin.generate_json(
+                system_prompt,
+                user_prompt,
+                response_schema=_entity_grounding_response_schema(),
+                schema_name="entity_grounding",
+            )
+        except Exception as exc:
+            return None, f"provider_error:{exc}"
+        if not isinstance(res, dict):
+            return None, "invalid_llm_response"
+
+        entity_name = (
+            str(res.get("entity_name", "") or "").strip()
+            or str(res.get("entity_title", "") or "").strip()
+            or str(brand or "").strip()
+        )
+        entity_kind = self._normalize_entity_kind(res.get("entity_kind"))
+        genres = self._normalize_entity_genres(res.get("genres"))
+        res["entity_name"] = entity_name
+        res["entity_kind"] = entity_kind
+        res["genres"] = genres
+        res["_search_query"] = query
+        res["_search_results"] = search_results
+        logger.info(
+            "entity_grounding_resolved entity_name=%r entity_kind=%r genres=%r confidence=%r",
+            entity_name,
+            entity_kind,
+            genres,
+            res.get("confidence"),
+        )
+        return res, "ok"
+
+    def query_entity_search_rescue(
+        self,
+        provider,
+        backend_model,
+        brand: str,
+        raw_category: str,
+        current_category: str,
+        entity_name: str,
+        entity_kind: str,
+        ocr_text: str,
+        genres: list[str] | None = None,
+        branch_label: str = "",
+        search_results: list[dict[str, str]] | None = None,
+        candidate_categories: list[str] | None = None,
+        candidate_category_contexts: dict[str, str] | None = None,
+        visual_matches: list[tuple[str, float]] | None = None,
+        context_size=8192,
+    ) -> tuple[dict | None, str]:
+        try:
+            provider_plugin = create_provider(provider, backend_model, context_size=int(context_size))
+        except ValueError as exc:
+            return None, f"provider_error:{exc}"
+
+        normalized_candidates = {
+            str(candidate or "").strip().casefold(): str(candidate or "").strip()
+            for candidate in (candidate_categories or [])
+            if str(candidate or "").strip()
+        }
+        if not normalized_candidates:
+            return None, "insufficient_candidates"
+
+        normalized_search_results = list(search_results or [])
+        logger.info(
+            "entity_branch_selection entity_name=%r entity_kind=%r branch=%r genres=%r candidates=%r",
+            entity_name,
+            entity_kind,
+            branch_label,
+            list(genres or []),
+            list(normalized_candidates.values())[:8],
+        )
+        if not normalized_search_results:
+            return None, "search_unavailable"
+
+        visual_hint_text = ""
+        if visual_matches:
+            visual_hint_text = " | ".join(
+                f"{label} ({score:.4f})" for label, score in visual_matches[:4]
+            )
+
+        ordered_candidates = list(normalized_candidates.values())
+        candidate_lines: list[str] = []
+        for idx, candidate in enumerate(ordered_candidates, start=1):
+            candidate_lines.append(f"{idx}. {candidate}")
+            path_text = ""
+            if candidate_category_contexts:
+                path_text = str(candidate_category_contexts.get(candidate, "") or "").strip()
+            if path_text and path_text != candidate:
+                candidate_lines.append(f"   Parent/Leaf Path: {path_text}")
+        candidate_text = "\n".join(candidate_lines)
+        search_text = self._format_search_results_for_prompt(normalized_search_results)
+        ocr_excerpt = " ".join((ocr_text or "").split())[:500]
+        genre_text = ", ".join(genres or []) or "None"
+
+        system_prompt = (
+            "You are selecting a taxonomy category after the advertised entity has already been grounded. "
+            "The entity grounding is authoritative context. "
+            "Choose exactly one category from the supplied branch-constrained candidate categories only. "
+            "Return the 1-based category_index for the chosen candidate. "
+            "The category_index is authoritative. "
+            "Do not invent a label. Do not choose a candidate outside the list. "
+            "If the evidence supports the branch but not a specific leaf, choose the broader branch parent candidate instead of forcing the wrong leaf. "
+            "Output STRICT JSON: {\"category_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}"
+        )
+        user_prompt = (
+            f"Brand/Title Guess: {brand}\n"
+            f"Raw Category Guess: {raw_category}\n"
+            f"Current Category: {current_category}\n"
+            f"Grounded Entity Name: {entity_name}\n"
+            f"Grounded Entity Kind: {entity_kind}\n"
+            f"Grounded Genres: {genre_text}\n"
+            f"Selected Taxonomy Branch: {branch_label or 'None'}\n"
+            f"Candidate Categories:\n{candidate_text}\n"
+            f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+            f"Visual Hints: {visual_hint_text or 'None'}\n"
+            f"Web Search Results:\n{search_text}\n"
+            "Return the single best-supported category_index from the candidate list."
+        )
+
+        def _resolve_index(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_index = payload.get("category_index")
+            try:
+                candidate_index = int(chosen_index)
+            except (TypeError, ValueError):
+                return None, 0
+            if 1 <= candidate_index <= len(ordered_candidates):
+                return ordered_candidates[candidate_index - 1], candidate_index
+            return None, 0
+
+        def _resolve_exact_candidate_text(payload: dict | None) -> tuple[str | None, int]:
+            if not isinstance(payload, dict):
+                return None, 0
+            chosen_text = str(payload.get("category", "") or "").strip()
+            if not chosen_text:
+                return None, 0
+            if chosen_text.isdigit():
+                candidate_index = int(chosen_text)
+                if 1 <= candidate_index <= len(ordered_candidates):
+                    return ordered_candidates[candidate_index - 1], candidate_index
+                return None, 0
+            canonical_candidate = normalized_candidates.get(chosen_text.casefold())
+            if canonical_candidate is None:
+                return None, 0
+            for idx, candidate in enumerate(ordered_candidates, start=1):
+                if candidate == canonical_candidate:
+                    return canonical_candidate, idx
+            return None, 0
+
+        try:
+            res = provider_plugin.generate_json(
+                system_prompt,
+                user_prompt,
+                response_schema=_category_index_response_schema(),
+                schema_name="entity_branch_selection",
+            )
+        except Exception as exc:
+            return None, f"provider_error:{exc}"
+        if not isinstance(res, dict):
+            return None, "invalid_llm_response"
+
+        original_category_text = str(res.get("category", "") or "").strip()
+        canonical_candidate, resolved_index = _resolve_index(res)
+        resolution_source = f"category_index:{resolved_index}" if resolved_index else ""
+        if canonical_candidate is None:
+            logger.info(
+                "entity_search_rescue_retry_triggered reason=missing_category_index category_text=%r category_index=%r",
+                original_category_text,
+                res.get("category_index"),
+            )
+            retry_system_prompt = (
+                "You must select exactly one category from the numbered candidate list. "
+                "Return STRICT JSON only as {\"category_index\": 0, \"confidence\": 0.0, \"reasoning\": \"...\"}. "
+                "The category_index is required and must be the 1-based number of the chosen candidate. "
+                "Do not return category text. Do not explain alternatives outside the list."
+            )
+            retry_user_prompt = (
+                f"Candidate Categories:\n{candidate_text}\n"
+                f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+                f"Visual Hints: {visual_hint_text or 'None'}\n"
+                f"Web Search Results:\n{search_text}\n"
+                "Return only the single best category_index from the candidate list."
+            )
+            try:
+                retry_res = provider_plugin.generate_json(
+                    retry_system_prompt,
+                    retry_user_prompt,
+                    response_schema=_category_index_response_schema(),
+                    schema_name="entity_branch_selection_retry",
+                )
+            except Exception as exc:
+                return None, f"provider_error:{exc}"
+            if not isinstance(retry_res, dict):
+                return None, "invalid_llm_response"
+            original_category_text = str(retry_res.get("category", "") or "").strip()
+            canonical_candidate, resolved_index = _resolve_index(retry_res)
+            if canonical_candidate is None:
+                canonical_candidate, resolved_index = _resolve_exact_candidate_text(retry_res)
+                if canonical_candidate is None:
+                    return None, "missing_category_index"
+                resolution_source = f"retry_category_text_exact:{resolved_index}"
+            else:
+                resolution_source = f"retry_category_index:{resolved_index}"
+            res = retry_res
+        res["brand"] = brand
+        res["category"] = canonical_candidate
+        res["category_index"] = resolved_index
+        logger.info(
+            "entity_search_rescue_resolved source=%s chosen=%r category_text=%r category_index=%r entity_type=%r entity_title=%r",
+            resolution_source or "unknown",
+            canonical_candidate,
+            original_category_text,
+            res.get("category_index"),
+            entity_kind,
+            entity_name,
+        )
+        res["entity_name"] = entity_name
+        res["entity_kind"] = entity_kind
+        res["genres"] = list(genres or [])
         return res, "ok"
 
     def query_pipeline(

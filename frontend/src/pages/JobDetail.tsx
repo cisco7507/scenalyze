@@ -730,21 +730,26 @@ function buildLocalExplanation(
     attempts: trace.attempts || [],
     final: {
       brand:
-        (firstRow?.Brand as string | undefined) ||
-        (job.brand as string | undefined) ||
-        "",
+        (firstRow?.brand as string | undefined) || (job.brand as string | undefined) || "",
       category:
-        (firstRow?.Category as string | undefined) ||
+        (firstRow?.category_name as string | undefined) ||
+        (firstRow?.category as string | undefined) ||
         (job.category as string | undefined) ||
         "",
       category_id:
-        (firstRow?.["Category ID"] as string | undefined) ||
-        (job.category_id as string | undefined) ||
+        (firstRow?.category_id as string | undefined) || (job.category_id as string | undefined) || "",
+      parent_category_id:
+        (firstRow?.parent_category_id as string | undefined) ||
+        (job.parent_category_id as string | undefined) ||
         "",
+      parent_category:
+        (firstRow?.parent_category as string | undefined) ||
+        (job.parent_category as string | undefined) ||
+        "",
+      industry_id: (firstRow?.industry_id as string | undefined) || "",
+      industry_name: (firstRow?.industry_name as string | undefined) || "",
       confidence:
-        typeof firstRow?.Confidence === "number"
-          ? firstRow.Confidence
-          : mapper?.confidence ?? null,
+        typeof firstRow?.confidence === "number" ? firstRow.confidence : mapper?.confidence ?? null,
       mapper_method: mapper?.method || "",
       mapper_score:
         typeof mapper?.score === "number" ? mapper.score : null,
@@ -772,19 +777,119 @@ function buildLocalExplanation(
   };
 }
 
+function buildSyntheticBrandReviewAttempt(
+  attempts: ProcessingTraceAttempt[],
+  finalResult: JobExplanation["final"] | null | undefined,
+): ProcessingTraceAttempt | null {
+  if (!finalResult?.brand_ambiguity_flag) return null;
+
+  const acceptedAttempt =
+    [...attempts]
+      .reverse()
+      .find((attempt) => attempt?.status === "accepted" && attempt?.attempt_type !== "brand_review") ||
+    null;
+
+  const confidence =
+    typeof finalResult?.confidence === "number"
+      ? finalResult.confidence
+      : typeof acceptedAttempt?.result?.confidence === "number"
+        ? acceptedAttempt.result.confidence
+        : null;
+
+  const resolved = Boolean(finalResult?.brand_ambiguity_resolved);
+  const detail = resolved
+    ? "web-assisted brand disambiguation"
+    : "brand ambiguity review kept the original brand";
+  const evidenceNote = resolved
+    ? formatBrandDisambiguationReason(
+        finalResult?.brand_disambiguation_reason,
+        finalResult?.brand,
+      )
+    : formatBrandDisambiguationReason(
+        finalResult?.brand_disambiguation_reason,
+        finalResult?.brand,
+      ) || formatBrandAmbiguityReason(finalResult?.brand_ambiguity_reason);
+
+  return {
+    attempt_type: "brand_review",
+    title: "Brand Review",
+    status: resolved ? "accepted" : "rejected",
+    detail,
+    trigger_reason:
+      typeof finalResult?.brand_ambiguity_reason === "string"
+        ? finalResult.brand_ambiguity_reason
+        : "",
+    elapsed_ms: null,
+    frame_count:
+      typeof acceptedAttempt?.frame_count === "number" ? acceptedAttempt.frame_count : 0,
+    frame_times: Array.isArray(acceptedAttempt?.frame_times)
+      ? acceptedAttempt.frame_times
+      : [],
+    ocr_excerpt:
+      typeof acceptedAttempt?.ocr_excerpt === "string" ? acceptedAttempt.ocr_excerpt : "",
+    ocr_signal: acceptedAttempt?.ocr_signal,
+    ocr_mode:
+      typeof acceptedAttempt?.ocr_mode === "string" ? acceptedAttempt.ocr_mode : "",
+    llm_mode:
+      typeof acceptedAttempt?.llm_mode === "string" ? acceptedAttempt.llm_mode : "",
+    evidence_note: evidenceNote,
+    result: {
+      brand: finalResult?.brand || acceptedAttempt?.result?.brand || "",
+      category: finalResult?.category || acceptedAttempt?.result?.category || "",
+      confidence,
+      brand_ambiguity_flag: Boolean(finalResult?.brand_ambiguity_flag),
+      brand_ambiguity_reason:
+        typeof finalResult?.brand_ambiguity_reason === "string"
+          ? finalResult.brand_ambiguity_reason
+          : "",
+      brand_ambiguity_resolved: resolved,
+      brand_disambiguation_reason:
+        typeof finalResult?.brand_disambiguation_reason === "string"
+          ? finalResult.brand_disambiguation_reason
+          : "",
+      brand_evidence_strength:
+        typeof finalResult?.brand_evidence_strength === "string"
+          ? finalResult.brand_evidence_strength
+          : "",
+    },
+    comparison_result: {
+      brand: acceptedAttempt?.result?.brand || finalResult?.brand || "",
+      category: acceptedAttempt?.result?.category || finalResult?.category || "",
+      confidence:
+        typeof acceptedAttempt?.result?.confidence === "number"
+          ? acceptedAttempt.result.confidence
+          : confidence,
+    },
+  };
+}
+
+function appendSyntheticExplainAttempts(
+  attempts: ProcessingTraceAttempt[],
+  finalResult: JobExplanation["final"] | null | undefined,
+): ProcessingTraceAttempt[] {
+  if (!Array.isArray(attempts) || attempts.length === 0) return attempts;
+  if (attempts.some((attempt) => attempt?.attempt_type === "brand_review")) {
+    return attempts;
+  }
+  const brandReviewAttempt = buildSyntheticBrandReviewAttempt(attempts, finalResult);
+  if (!brandReviewAttempt) return attempts;
+  return [...attempts, brandReviewAttempt];
+}
+
 function summarizeAttemptDelta(
   previous: ProcessingTraceAttempt | null,
   current: ProcessingTraceAttempt,
 ): string[] {
-  if (!previous) return [];
+  const baseline = current.comparison_result ? { result: current.comparison_result } : previous;
+  if (!baseline) return [];
   const deltas: string[] = [];
-  const prevBrand = (previous.result?.brand || "").trim();
+  const prevBrand = (baseline.result?.brand || "").trim();
   const currBrand = (current.result?.brand || "").trim();
-  const prevCategory = (previous.result?.category || "").trim();
+  const prevCategory = (baseline.result?.category || "").trim();
   const currCategory = (current.result?.category || "").trim();
   const prevConfidence =
-    typeof previous.result?.confidence === "number"
-      ? previous.result.confidence
+    typeof baseline.result?.confidence === "number"
+      ? baseline.result.confidence
       : null;
   const currConfidence =
     typeof current.result?.confidence === "number"
@@ -797,9 +902,13 @@ function summarizeAttemptDelta(
   if (prevCategory !== currCategory && currCategory) {
     deltas.push(`Category: ${prevCategory || "—"} -> ${currCategory}`);
   }
-  if (prevConfidence !== currConfidence && currConfidence !== null) {
+  if (
+    prevConfidence !== null &&
+    currConfidence !== null &&
+    prevConfidence !== currConfidence
+  ) {
     deltas.push(
-      `Confidence: ${prevConfidence !== null ? prevConfidence.toFixed(2) : "—"} -> ${currConfidence.toFixed(2)}`,
+      `Confidence: ${prevConfidence.toFixed(2)} -> ${currConfidence.toFixed(2)}`,
     );
   }
   return deltas;
@@ -819,7 +928,10 @@ function buildOperatorNotes(
 
   const initialAttempt = attempts[0];
   const acceptedAttempt =
-    [...attempts].reverse().find((attempt) => attempt.status === "accepted") || null;
+    [...attempts]
+      .reverse()
+      .find((attempt) => attempt.status === "accepted" && attempt.attempt_type !== "brand_review") ||
+    null;
   const ambiguityTriggered = Boolean(finalResult?.brand_ambiguity_flag);
   const ambiguityReason = formatBrandAmbiguityReason(finalResult?.brand_ambiguity_reason);
   const disambiguationReason = formatBrandDisambiguationReason(
@@ -982,6 +1094,13 @@ const EXPLAIN_METHOD_GUIDE: ExplainMethodGuideEntry[] = [
     short: "Constrained taxonomy tie-break for weak mappings.",
     detail:
       "When the embedding mapper returns a weak or tightly clustered result for a free-form LLM category, the model gets one extra chance to choose only from a small set of nearby taxonomy candidates.",
+  },
+  {
+    key: "brand_review",
+    label: "Brand Review",
+    short: "Shows whether weak-anchor brand evidence was confirmed or kept.",
+    detail:
+      "This synthetic explain-stage summarizes the brand ambiguity guard. It appears when the classifier flagged the brand as weak or sparse and optionally tried web-assisted confirmation before keeping or confirming the final brand.",
   },
 ];
 
@@ -1438,14 +1557,20 @@ export function JobDetail() {
   const videoPrimedRef = useRef(false);
   const firstRow = result?.[0];
   const brandText =
-    typeof firstRow?.Brand === "string" ? firstRow.Brand.trim() : "";
+    typeof firstRow?.brand === "string" ? firstRow.brand.trim() : "";
   const categoryText =
-    typeof firstRow?.Category === "string" ? firstRow.Category.trim() : "";
-  const reasoningRaw = firstRow
-    ? (firstRow.Reasoning ??
-      (firstRow as any).reasoning ??
-      firstRow["Reasoning"])
-    : "";
+    typeof firstRow?.category_name === "string"
+      ? firstRow.category_name.trim()
+      : typeof firstRow?.category === "string"
+        ? firstRow.category.trim()
+        : "";
+  const parentCategoryText =
+    typeof firstRow?.parent_category === "string" ? firstRow.parent_category.trim() : "";
+  const parentCategoryIdText =
+    typeof firstRow?.parent_category_id === "string"
+      ? firstRow.parent_category_id.trim()
+      : "";
+  const reasoningRaw = firstRow?.reasoning ?? "";
   const reasoningText =
     typeof reasoningRaw === "string" ? reasoningRaw.trim() : "";
   const reasoningNarrativeText = useMemo(
@@ -1929,14 +2054,17 @@ export function JobDetail() {
   const currentStage = (job.stage || "").trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
 
-  const categoryIdRaw =
-    firstRow?.["Category ID"] ?? (firstRow as any)?.category_id;
+  const categoryIdRaw = firstRow?.category_id;
   const categoryIdText =
     typeof categoryIdRaw === "string"
       ? categoryIdRaw.trim()
       : String(categoryIdRaw ?? "").trim();
+  const showParentMeta =
+    Boolean(parentCategoryText) &&
+    parentCategoryText.toLowerCase() !== categoryText.toLowerCase();
+  const taxonomyMetaLabel = showParentMeta ? `Under ${parentCategoryText}` : "Top-level category";
 
-  const confidenceValue = toNumber(firstRow?.Confidence);
+  const confidenceValue = toNumber(firstRow?.confidence);
   const confidenceSummaryDisplay =
     confidenceValue === null ? "—" : confidenceValue.toFixed(2);
   const confidenceSummaryTextColor =
@@ -1975,12 +2103,12 @@ export function JobDetail() {
   const mapperMethodDisplay =
     formatMatchMethod(mapperArtifact?.method || matchMethodRaw) || "—";
   const mapperScoreValue = toNumber(
-    mapperArtifact?.score ?? (firstRow ? (firstRow as any).category_match_score : null),
+    mapperArtifact?.score ?? (firstRow?.category_match_score as number | string | null | undefined) ?? null,
   );
   const mapperScoreDisplay =
     mapperScoreValue === null ? "—" : mapperScoreValue.toFixed(4);
   const mapperConfidenceValue = toNumber(
-    mapperArtifact?.confidence ?? firstRow?.Confidence,
+    mapperArtifact?.confidence ?? firstRow?.confidence,
   );
   const mapperConfidenceDisplay =
     mapperConfidenceValue === null ? "—" : mapperConfidenceValue.toFixed(2);
@@ -2015,16 +2143,19 @@ export function JobDetail() {
       : mapperQueryFragments;
   const vectorPlotOption = buildSignalPlotOption(activeVectorPlot);
   const effectiveExplanation = explanation || localExplanation;
-  const explanationAttempts = Array.isArray(effectiveExplanation?.attempts)
-    ? effectiveExplanation.attempts
-    : [];
-  const explanationSummary = effectiveExplanation?.summary || {};
   const explanationFinal = effectiveExplanation?.final || {};
+  const explanationAttempts = appendSyntheticExplainAttempts(
+    Array.isArray(effectiveExplanation?.attempts) ? effectiveExplanation.attempts : [],
+    explanationFinal,
+  );
+  const explanationSummary = effectiveExplanation?.summary || {};
   const explanationEvidence = effectiveExplanation?.evidence || {};
   const acceptedExplanationAttempt =
     [...explanationAttempts]
       .reverse()
-      .find((attempt) => attempt.status === "accepted") || null;
+      .find(
+        (attempt) => attempt.status === "accepted" && attempt.attempt_type !== "brand_review",
+      ) || null;
   const rawLlmCategory = rawLlmCategoryHint;
   const rawLlmConfidence =
     typeof acceptedExplanationAttempt?.result?.confidence === "number"
@@ -2331,7 +2462,7 @@ export function JobDetail() {
         )}
       </div>
 
-      {job.status === "completed" && firstRow && firstRow.Brand !== "Err" && (
+      {job.status === "completed" && firstRow && brandText !== "Err" && (
         <div className="bell-panel flex flex-col items-start justify-between gap-3 border-primary-200/70 px-6 py-4 md:flex-row md:items-center md:gap-0">
           <div className="flex items-center gap-3 min-w-0">
             <CheckCircledIcon className="w-5 h-5 shrink-0 text-primary-600" />
@@ -2389,8 +2520,24 @@ export function JobDetail() {
           </div>
         </div>
       )}
+      {job.status === "completed" && firstRow && brandText !== "Err" && categoryText && (
+        <div className="-mt-1 mb-4 pl-11">
+          <div
+            className="flex items-center gap-2 text-sm text-slate-500"
+            title={showParentMeta ? parentCategoryText : "Top-level category"}
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Taxonomy
+            </span>
+            <span className="min-w-0 truncate text-slate-600">{taxonomyMetaLabel}</span>
+            {showParentMeta && parentCategoryIdText && (
+              <span className="shrink-0 font-mono text-[10px] text-slate-400">#{parentCategoryIdText}</span>
+            )}
+          </div>
+        </div>
+      )}
 
-      {firstRow && firstRow.Brand !== "Err" && (
+      {firstRow && brandText !== "Err" && (
         <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
           <div className="bell-panel border-l-[3px] border-l-primary-500 p-6">
             <div className="flex items-center justify-between gap-3 mb-3">
@@ -2690,12 +2837,19 @@ export function JobDetail() {
                     {(mapperArtifact?.top_matches || []).map((m, idx) => (
                       <div
                         key={idx}
-                        title={`${m.label} · score ${Number(m.score).toFixed(6)}${m.category_id != null ? ` · category ID ${m.category_id}` : ""}${typeof m.matched_alias === "string" && m.matched_alias.trim().length > 0 ? ` · via alias ${m.matched_alias}` : ""}`}
+                        title={`${m.label} · score ${Number(m.score).toFixed(6)}${m.category_id != null ? ` · category ID ${m.category_id}` : ""}${typeof m.path_text === "string" && m.path_text.trim().length > 0 ? ` · path ${m.path_text}` : ""}${typeof m.matched_alias === "string" && m.matched_alias.trim().length > 0 ? ` · via alias ${m.matched_alias}` : ""}`}
                         className="flex items-center justify-between text-xs bg-white border border-gray-200 rounded px-3 py-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <div className="min-w-0">
                             <div className="text-gray-800 truncate">{m.label}</div>
+                            {typeof m.path_text === "string" &&
+                              m.path_text.trim().length > 0 &&
+                              m.path_text.trim() !== m.label && (
+                                <div className="text-[10px] text-gray-500 truncate">
+                                  {m.path_text}
+                                </div>
+                              )}
                             {typeof m.matched_alias === "string" &&
                               m.matched_alias.trim().length > 0 && (
                                 <div className="text-[10px] text-gray-500 truncate">

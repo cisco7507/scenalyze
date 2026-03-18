@@ -166,6 +166,7 @@ def _humanize_attempt_type(value: str) -> str:
         "express_rescue": "Express Rescue",
         "extended_tail": "Extended Tail",
         "full_video": "Full Video",
+        "entity_search_rescue": "Entity Search Rescue",
         "specificity_search_rescue": "Specificity Search Rescue",
     }
     key = str(value or "").strip().lower()
