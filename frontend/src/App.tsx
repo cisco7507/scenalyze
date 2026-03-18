@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { Overview } from './pages/Overview';
 import { Jobs } from './pages/Jobs';
 import { JobDetail } from './pages/JobDetail';
+import { TaxonomyExplorer } from './pages/TaxonomyExplorer';
 
 const Analytics = lazy(async () => ({ default: (await import('./pages/Analytics')).Analytics }));
 const Benchmark = lazy(async () => ({ default: (await import('./pages/Benchmark')).Benchmark }));
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="benchmark" element={<Benchmark />} />
             <Route path="jobs" element={<Jobs />} />
             <Route path="jobs/:id" element={<JobDetail />} />
+            <Route path="taxonomy" element={<TaxonomyExplorer />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

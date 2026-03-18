@@ -664,6 +664,61 @@ class CategoryMappingState:
         }
 
 
+@dataclass(frozen=True)
+class CategoryExplorerGroupChild:
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class CategoryExplorerGroup:
+    id: str
+    name: str
+    children: tuple[CategoryExplorerGroupChild, ...]
+
+
+@dataclass(frozen=True)
+class CategoryExplorerItem:
+    id: str
+    name: str
+    level: int
+    parent_id: str
+    path_ids: tuple[str, ...]
+    path_names: tuple[str, ...]
+    path_text: str
+    industry_id: str
+    industry_name: str
+
+
+@dataclass(frozen=True)
+class CategoryExplorerState:
+    enabled: bool
+    groups: tuple[CategoryExplorerGroup, ...]
+    items: tuple[CategoryExplorerItem, ...]
+    json_path_used: str
+    last_error: Optional[str]
+
+    def diagnostics(self) -> dict:
+        child_parent_ids = {
+            str(item.parent_id or "").strip()
+            for item in self.items
+            if str(item.parent_id or "").strip() not in {"", "0"}
+        }
+        root_count = sum(1 for item in self.items if str(item.parent_id or "").strip() in {"", "0"})
+        leaf_count = sum(1 for item in self.items if str(item.id or "").strip() not in child_parent_ids)
+        max_level = max((int(item.level or 0) for item in self.items), default=0)
+        return {
+            "taxonomy_explorer_enabled": self.enabled,
+            "group_count": len(self.groups),
+            "item_count": len(self.items),
+            "root_count": root_count,
+            "leaf_count": leaf_count,
+            "max_level": max_level,
+            "json_path_used": self.json_path_used,
+            "last_error": self.last_error,
+        }
+
+
 def resolve_category_json_path(json_path: Optional[str] = None) -> Path:
     env_path = os.environ.get("CATEGORY_JSON_PATH")
     chosen = json_path or env_path or str(DEFAULT_CATEGORY_JSON_PATH)
@@ -889,5 +944,176 @@ def load_category_mapping(json_path: Optional[str] = None) -> CategoryMappingSta
 CATEGORY_MAPPING_STATE = load_category_mapping()
 
 
+def load_category_explorer_state(json_path: Optional[str] = None) -> CategoryExplorerState:
+    path = resolve_category_json_path(json_path)
+    path_str = str(path)
+
+    if not path.exists():
+        error = f"taxonomy explorer disabled: taxonomy JSON not found at '{path_str}'"
+        _log_critical_once(error)
+        return CategoryExplorerState(
+            enabled=False,
+            groups=(),
+            items=(),
+            json_path_used=path_str,
+            last_error=error,
+        )
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        error = f"taxonomy explorer disabled: failed to read taxonomy JSON at '{path_str}': {exc}"
+        _log_critical_once(error)
+        return CategoryExplorerState(
+            enabled=False,
+            groups=(),
+            items=(),
+            json_path_used=path_str,
+            last_error=error,
+        )
+
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        error = f"taxonomy explorer disabled: missing non-empty 'items' array in '{path_str}'"
+        _log_critical_once(error)
+        return CategoryExplorerState(
+            enabled=False,
+            groups=(),
+            items=(),
+            json_path_used=path_str,
+            last_error=error,
+        )
+
+    item_lookup: dict[str, dict[str, object]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        category_id = _normalize_category_id(item.get("id"))
+        category_name = normalize_whitespace(str(item.get("name") or ""))
+        if not category_id or not category_name:
+            continue
+        item_lookup[category_id] = {
+            "id": category_id,
+            "name": category_name,
+            "level": _normalize_category_level(item.get("level")),
+            "parent_id": _normalize_parent_id(item.get("parent_id")),
+        }
+
+    if not item_lookup:
+        error = f"taxonomy explorer disabled: no valid taxonomy items found in '{path_str}'"
+        _log_critical_once(error)
+        return CategoryExplorerState(
+            enabled=False,
+            groups=(),
+            items=(),
+            json_path_used=path_str,
+            last_error=error,
+        )
+
+    normalized_items: list[CategoryExplorerItem] = []
+    for category_id, normalized_item in item_lookup.items():
+        path_ids, path_names = _build_taxonomy_path(category_id, item_lookup)
+        category_name = str(normalized_item["name"])
+        industry_id = path_ids[0] if path_ids else category_id
+        industry_name = path_names[0] if path_names else category_name
+        normalized_items.append(
+            CategoryExplorerItem(
+                id=category_id,
+                name=category_name,
+                level=int(normalized_item["level"]),
+                parent_id=str(normalized_item["parent_id"]),
+                path_ids=path_ids,
+                path_names=path_names,
+                path_text=" : ".join(path_names) if path_names else category_name,
+                industry_id=industry_id,
+                industry_name=industry_name,
+            )
+        )
+
+    groups_payload = payload.get("groups")
+    normalized_groups: list[CategoryExplorerGroup] = []
+    if isinstance(groups_payload, list):
+        for group in groups_payload:
+            if not isinstance(group, dict):
+                continue
+            group_id = _normalize_category_id(group.get("id"))
+            group_name = normalize_whitespace(str(group.get("name") or ""))
+            if not group_name:
+                continue
+            children_payload = group.get("children")
+            children: list[CategoryExplorerGroupChild] = []
+            if isinstance(children_payload, list):
+                for child in children_payload:
+                    if not isinstance(child, dict):
+                        continue
+                    child_id = _normalize_category_id(child.get("id"))
+                    child_name = normalize_whitespace(str(child.get("name") or ""))
+                    if not child_id or not child_name:
+                        continue
+                    children.append(CategoryExplorerGroupChild(id=child_id, name=child_name))
+            normalized_groups.append(
+                CategoryExplorerGroup(
+                    id=group_id,
+                    name=group_name,
+                    children=tuple(children),
+                )
+            )
+
+    return CategoryExplorerState(
+        enabled=True,
+        groups=tuple(normalized_groups),
+        items=tuple(sorted(normalized_items, key=lambda item: (item.level, item.path_text.casefold(), item.id))),
+        json_path_used=path_str,
+        last_error=None,
+    )
+
+
+CATEGORY_EXPLORER_STATE = load_category_explorer_state()
+
+
 def get_category_mapping_diagnostics() -> dict:
     return CATEGORY_MAPPING_STATE.diagnostics()
+
+
+def get_category_explorer_payload() -> dict:
+    diagnostics = CATEGORY_EXPLORER_STATE.diagnostics()
+    return {
+        "enabled": CATEGORY_EXPLORER_STATE.enabled,
+        "json_path_used": CATEGORY_EXPLORER_STATE.json_path_used,
+        "last_error": CATEGORY_EXPLORER_STATE.last_error,
+        "stats": {
+            "group_count": diagnostics["group_count"],
+            "item_count": diagnostics["item_count"],
+            "root_count": diagnostics["root_count"],
+            "leaf_count": diagnostics["leaf_count"],
+            "max_level": diagnostics["max_level"],
+        },
+        "groups": [
+            {
+                "id": group.id,
+                "name": group.name,
+                "children": [
+                    {
+                        "id": child.id,
+                        "name": child.name,
+                    }
+                    for child in group.children
+                ],
+            }
+            for group in CATEGORY_EXPLORER_STATE.groups
+        ],
+        "items": [
+            {
+                "id": item.id,
+                "name": item.name,
+                "level": item.level,
+                "parent_id": item.parent_id,
+                "path_ids": list(item.path_ids),
+                "path_names": list(item.path_names),
+                "path_text": item.path_text,
+                "industry_id": item.industry_id,
+                "industry_name": item.industry_name,
+            }
+            for item in CATEGORY_EXPLORER_STATE.items
+        ],
+    }

@@ -17,6 +17,46 @@ export interface ClusterNode {
   self:   string;
 }
 
+export interface TaxonomyExplorerGroupChild {
+  id: string;
+  name: string;
+}
+
+export interface TaxonomyExplorerGroup {
+  id: string;
+  name: string;
+  children: TaxonomyExplorerGroupChild[];
+}
+
+export interface TaxonomyExplorerItem {
+  id: string;
+  name: string;
+  level: number;
+  parent_id: string;
+  path_ids: string[];
+  path_names: string[];
+  path_text: string;
+  industry_id: string;
+  industry_name: string;
+}
+
+export interface TaxonomyExplorerStats {
+  group_count: number;
+  item_count: number;
+  root_count: number;
+  leaf_count: number;
+  max_level: number;
+}
+
+export interface TaxonomyExplorerResponse {
+  enabled: boolean;
+  json_path_used: string;
+  last_error?: string | null;
+  stats: TaxonomyExplorerStats;
+  groups: TaxonomyExplorerGroup[];
+  items: TaxonomyExplorerItem[];
+}
+
 export interface JobSettings {
   categories:    string;
   provider:      string;
@@ -708,6 +748,7 @@ async function safe<T>(fn: () => Promise<T>): Promise<T> {
 export const getClusterNodes  = () => safe(() => api.get<ClusterNode>('/cluster/nodes').then(r => r.data));
 export const getClusterJobs   = () => safe(() => api.get<JobStatus[]>('/cluster/jobs').then(r => r.data));
 export const getMetrics       = () => safe(() => api.get<Metrics>('/metrics').then(r => r.data));
+export const getTaxonomyExplorer = () => safe(() => api.get<TaxonomyExplorerResponse>('/api/taxonomy/explorer').then(r => r.data));
 export const getAnalytics     = () => safe(() => api.get<AnalyticsData>('/analytics').then(r => r.data));
 export const getSystemProfile = () => safe(() => api.get<SystemProfile>('/api/system/profile').then(r => r.data));
 export const getJob           = (id: string) => safe(() => api.get<JobStatus>(`/jobs/${id}`).then(r => r.data));

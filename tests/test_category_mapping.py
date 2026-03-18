@@ -8,6 +8,7 @@ from video_service.core.category_mapping import (
     CategoryMappingState,
     CategoryTaxonomyRecord,
     build_product_cue_query_text,
+    load_category_explorer_state,
     load_category_mapping,
     select_mapping_input_text,
 )
@@ -55,6 +56,39 @@ def test_load_category_mapping_reconstructs_json_hierarchy_paths(tmp_path: Path)
     assert mapping_state.category_to_level["Hotels"] == 1
     assert mapping_state.records[1].path_names == ("Travel", "Hotels")
     assert mapping_state.last_error is None
+
+
+def test_load_category_explorer_state_preserves_groups_and_item_paths(tmp_path: Path):
+    json_path = tmp_path / "freewheel.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "id": 1,
+                        "name": "Travel group",
+                        "children": [
+                            {"id": 10, "name": "Travel"},
+                        ],
+                    }
+                ],
+                "items": [
+                    {"id": 10, "name": "Travel", "level": 0, "parent_id": 0},
+                    {"id": 11, "name": "Hotels", "level": 1, "parent_id": 10},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    explorer_state = load_category_explorer_state(str(json_path))
+
+    assert explorer_state.enabled is True
+    assert explorer_state.groups[0].name == "Travel group"
+    assert explorer_state.groups[0].children[0].id == "10"
+    assert explorer_state.items[0].industry_name == "Travel"
+    assert any(item.path_text == "Travel : Hotels" for item in explorer_state.items)
+    assert explorer_state.diagnostics()["leaf_count"] == 1
 
 
 def test_load_category_mapping_disables_when_items_missing(tmp_path: Path):

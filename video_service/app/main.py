@@ -64,6 +64,7 @@ from video_service.core.device import get_diagnostics
 from video_service.core.concurrency import get_concurrency_diagnostics
 from video_service.core.cluster import cluster
 from video_service.core.categories import category_mapper
+from video_service.core.category_mapping import get_category_explorer_payload
 from video_service.core.hardware_profiler import get_system_profile
 from video_service.core.benchmarking import (
     evaluate_benchmark_suite,
@@ -816,6 +817,11 @@ def category_mapping_diagnostics():
 @app.get("/diagnostics/categories", tags=["ops"])
 def category_mapping_diagnostics_legacy():
     return _get_category_mapping_diagnostics()
+
+
+@app.get("/api/taxonomy/explorer", tags=["ops"])
+def taxonomy_explorer():
+    return get_category_explorer_payload()
 
 
 @app.get("/api/system/profile", tags=["ops"])

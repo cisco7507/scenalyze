@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayersIcon, BarChartIcon, ComponentInstanceIcon, CodeIcon, ClockIcon, LightningBoltIcon } from '@radix-ui/react-icons';
+import { LayersIcon, BarChartIcon, ComponentInstanceIcon, CodeIcon, ClockIcon, LightningBoltIcon, MagnifyingGlassIcon } from '@radix-ui/react-icons';
 import { DebugConsole } from './DebugConsole';
 import { BrandLogo } from './BrandLogo';
 
@@ -20,6 +20,11 @@ const pageMeta = {
     title: 'Tail-aware analytics for cluster health and execution risk.',
     description: 'See percentile drift, trace-path mix, and the operating signals that show when slow paths are taking over.',
   },
+  '/taxonomy': {
+    eyebrow: 'FreeWheel Taxonomy',
+    title: 'Explore the loaded category hierarchy without leaving the control surface.',
+    description: 'Search groups, inspect canonical paths, and follow how industry bridges connect to the deeper taxonomy used by the mapper.',
+  },
   '/benchmark': {
     eyebrow: 'Controlled Trials',
     title: 'Benchmark suites for repeatable model and OCR comparisons.',
@@ -36,6 +41,7 @@ export function Layout() {
     { name: 'Jobs', path: '/jobs', icon: ComponentInstanceIcon },
     { name: 'Analytics', path: '/analytics', icon: BarChartIcon },
     { name: 'Benchmarking', path: '/benchmark', icon: ClockIcon },
+    { name: 'Taxonomy', path: '/taxonomy', icon: MagnifyingGlassIcon },
   ];
 
   const activeMeta = useMemo(() => {
