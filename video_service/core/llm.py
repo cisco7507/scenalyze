@@ -411,9 +411,11 @@ class OpenAICompatibleProvider(BaseProvider):
         backend_model: str,
         context_size: int = 8192,
         force_json_mode: bool = False,
+        request_context_key: Optional[str] = None,
     ) -> None:
         super().__init__(backend_model=backend_model, context_size=context_size)
         self.force_json_mode = bool(force_json_mode)
+        self.request_context_key = (request_context_key or "").strip() or None
 
     @property
     def supports_vision(self) -> bool:
@@ -448,6 +450,8 @@ class OpenAICompatibleProvider(BaseProvider):
             "top_p": 1.0,
             "presence_penalty": 0.0,
         }
+        if self.request_context_key:
+            payload[self.request_context_key] = int(self.context_size)
 
         if self.force_json_mode:
             payload["response_format"] = {
@@ -504,6 +508,8 @@ class OpenAICompatibleProvider(BaseProvider):
             )
             msgs[1]["content"] = content
         payload = {"model": self.backend_model, "messages": msgs, "temperature": 0.1}
+        if self.request_context_key:
+            payload[self.request_context_key] = int(self.context_size)
         try:
             res = requests.post(OPENAI_COMPAT_URL, json=payload, timeout=LLM_TIMEOUT_SECONDS)
             if res.status_code != 200:
@@ -628,6 +634,7 @@ def create_provider(provider: str, backend_model: str, context_size: int = 8192)
             backend_model=backend_model,
             context_size=context_size,
             force_json_mode=True,
+            request_context_key="n_ctx",
         )
     if provider_name in {"lm studio", "openai compatible", "openai-compatible"}:
         return OpenAICompatibleProvider(

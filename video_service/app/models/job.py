@@ -36,7 +36,7 @@ class JobSettings(BaseModel):
     enable_vision_board: bool = True
     enable_llm_frame: bool = True
     product_focus_guidance_enabled: bool = True
-    context_size: int = 8192
+    context_size: int = 16384
 
     @model_validator(mode="before")
     @classmethod

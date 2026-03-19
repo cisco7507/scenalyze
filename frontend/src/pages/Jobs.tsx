@@ -28,6 +28,7 @@ const CATEGORY_EMBEDDING_MODEL_OPTIONS = [
   'sentence-transformers/all-MiniLM-L6-v2',
   'google/embeddinggemma-300m',
 ] as const;
+const CONTEXT_SIZE_OPTIONS = [8192, 16384, 32768, 65536] as const;
 
 const controlClass =
   'h-10 w-full rounded-[1.15rem] border border-slate-300 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15';
@@ -258,7 +259,7 @@ export function Jobs() {
   const [enableLlmFrame, setEnableLlmFrame] = useState(true);
   const [enableWebSearch, setEnableWebSearch] = useState(true);
   const [productFocusGuidanceEnabled, setProductFocusGuidanceEnabled] = useState(true);
-  const [contextSize, setContextSize] = useState(8192);
+  const [contextSize, setContextSize] = useState(16384);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<QueueFilter>('all');
@@ -731,9 +732,19 @@ export function Jobs() {
               <div className="space-y-1.5">
                 <FieldLabel
                   label="Context Limit"
-                  help="Maximum prompt context passed to the selected model. Higher values can preserve more evidence but use more memory and may slow inference."
+                  help="Maximum prompt context passed to the selected model. Higher values preserve more evidence but use more memory. Use the built-in 8k/16k/32k/64k ladder to stay aligned with provider limits."
                 />
-                <input type="number" min={512} step={512} value={contextSize} onChange={(e) => setContextSize(Number(e.target.value || 8192))} className={monoControlClass} />
+                <select
+                  value={String(contextSize)}
+                  onChange={(e) => setContextSize(Number(e.target.value || 16384))}
+                  className={monoControlClass}
+                >
+                  {CONTEXT_SIZE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option.toLocaleString()}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <FieldLabel
