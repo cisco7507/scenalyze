@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scenalyze Video Ad Classification Architecture: A Technical Masterclass</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    @font-face {
+      font-family: "Bell Slim";
+      src: url("./frontend/src/assets/bell_slim_regular.woff2") format("woff2");
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Bell Slim";
+      src: url("./frontend/src/assets/bell_slim_bold.woff2") format("woff2");
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Bell Slim Display";
+      src: url("./frontend/src/assets/bell_slim_heavy.woff2") format("woff2");
+      font-weight: 800;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      --bell-blue: #0070ce;
+      --bell-blue-dark: #00549a;
+      --bell-blue-deep: #003778;
+      --bell-blue-light: #eef6fc;
+      --accent-secondary: #4e9fd4;
+      --bg: #f7f8f5;
+      --bg-alt: #eef4f8;
+      --fg: #111111;
+      --muted: #5e6772;
+      --border: #d4dde6;
+      --card: rgba(255, 255, 255, 0.9);
+      --shadow-soft: 0 20px 48px rgba(0, 55, 120, 0.08);
+      --shadow-strong: 0 26px 64px rgba(0, 55, 120, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      color-scheme: light;
+      font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 78% 12%, rgba(0, 112, 206, 0.18), transparent 17%),
+        radial-gradient(circle at 88% 34%, rgba(0, 84, 154, 0.1), transparent 14%),
+        linear-gradient(180deg, #f7f8f5 0%, #eef4f8 100%);
+      color: var(--fg);
+      overflow-x: hidden;
+      margin: 0;
+    }
+
+    /* Typography */
+    h1, h2 {
+      font-family: "Bell Slim Display", "Bell Slim", "Helvetica Neue", Arial, sans-serif;
+      font-weight: 800;
+      letter-spacing: -0.032em;
+      color: var(--bell-blue-deep);
+    }
+    h3, h4 {
+      font-family: "Bell Slim", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+      font-weight: 700;
+      color: var(--bell-blue-deep);
+      letter-spacing: -0.018em;
+    }
+
+    /* Layout Utilities */
+    .container-wide { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+    /* Buttons */
+    .btn-primary {
+      background-color: var(--bell-blue);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 9999px;
+      font-weight: 700;
+      transition: all 0.2s ease;
+      border: 2px solid var(--bell-blue);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 16px 30px rgba(0, 112, 206, 0.24);
+    }
+    .btn-primary:hover { background-color: var(--bell-blue-dark); border-color: var(--bell-blue-dark); transform: translateY(-1px); }
+    
+    .btn-secondary {
+      background-color: rgba(255, 255, 255, 0.9);
+      color: var(--bell-blue);
+      padding: 12px 24px;
+      border-radius: 9999px;
+      font-weight: 700;
+      transition: all 0.2s ease;
+      border: 1px solid rgba(212, 221, 230, 0.95);
+      backdrop-filter: blur(12px);
+    }
+    .btn-secondary:hover { background-color: var(--bell-blue-light); border-color: rgba(0, 112, 206, 0.25); }
+
+    /* Navigation */
+    .nav-link {
+      color: rgba(255, 255, 255, 0.82);
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 9999px;
+      transition: all 0.2s ease;
+    }
+    .nav-link:hover { background: rgba(255, 255, 255, 0.12); color: white; }
+
+    /* Hero Section */
+    .hero-gradient {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #f5f4ef 0%, #ffffff 52%, #eef6fc 100%);
+      border-bottom: 1px solid rgba(212, 221, 230, 0.9);
+    }
+    .hero-gradient::before {
+      content: "";
+      position: absolute;
+      right: -96px;
+      bottom: -132px;
+      width: 360px;
+      height: 360px;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at center, rgba(0, 112, 206, 0.98) 0%, rgba(0, 112, 206, 0.92) 42%, rgba(0, 112, 206, 0.18) 65%, rgba(0, 112, 206, 0) 76%);
+      opacity: 0.94;
+      pointer-events: none;
+    }
+    .hero-gradient::after {
+      content: "";
+      position: absolute;
+      right: 168px;
+      bottom: 44px;
+      width: 132px;
+      height: 132px;
+      border-radius: 28px;
+      background: linear-gradient(180deg, rgba(0, 84, 154, 0.96) 0%, rgba(0, 112, 206, 0.84) 100%);
+      transform: rotate(26deg);
+      opacity: 0.92;
+      pointer-events: none;
+    }
+
+    /* Cards */
+    .info-card {
+      background: var(--card);
+      border: 1px solid rgba(212, 221, 230, 0.9);
+      border-radius: 32px;
+      padding: 24px;
+      transition: box-shadow 0.3s ease, transform 0.3s ease;
+      height: 100%;
+      backdrop-filter: blur(16px);
+      box-shadow: var(--shadow-soft);
+    }
+    .info-card:hover {
+      box-shadow: var(--shadow-strong);
+      transform: translateY(-4px);
+      border-color: var(--bell-blue);
+    }
+
+    /* Module Sections */
+    .module-section {
+      position: relative;
+      padding: 80px 0;
+      border-bottom: 1px solid rgba(212, 221, 230, 0.65);
+    }
+    .module-section:nth-child(even) {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(238, 244, 248, 0.66) 100%);
+    }
+
+    /* Tabs */
+    .tab-pill {
+      padding: 8px 20px;
+      font-weight: 600;
+      color: var(--muted);
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(212, 221, 230, 0.85);
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(0, 55, 120, 0.05);
+    }
+    .tab-pill.active {
+      background: var(--bell-blue);
+      color: white;
+    }
+    .tab-pill:hover:not(.active) { background: rgba(255, 255, 255, 0.92); }
+
+    /* Tooltips */
+    #global-tooltip {
+      position: fixed; width: 260px; padding: 16px; background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(212, 221, 230, 0.95); border-radius: 20px; font-size: 13px;
+      box-shadow: var(--shadow-soft); z-index: 9999;
+      backdrop-filter: blur(14px);
+      pointer-events: none; opacity: 0; transition: opacity 0.2s;
+      top: 0; left: 0;
+    }
+    #global-tooltip.visible { opacity: 1; }
+    .tooltip-title { font-weight: 700; color: var(--bell-blue); margin-bottom: 4px; }
+    .tooltip-text { color: var(--muted); line-height: 1.4; }
+
+    /* Pipeline */
+    .pipeline-step { opacity: 0; transform: translateY(10px); transition: all 0.3s ease; }
+    .pipeline-step.active { opacity: 1; transform: translateY(0); }
+    .step-circle {
+      width: 60px; height: 60px; border-radius: 50%; background: rgba(255, 255, 255, 0.86);
+      border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 12px; transition: all 0.3s; position: relative; z-index: 2;
+      box-shadow: 0 12px 28px rgba(0, 55, 120, 0.08);
+      backdrop-filter: blur(12px);
+    }
+    .pipeline-step.active .step-circle { border-color: var(--bell-blue); background: var(--bell-blue-light); }
+    .pipeline-step.active .step-circle svg { color: var(--bell-blue); }
+    
+    .pipeline-connector {
+      position: absolute; top: 30px; left: 50%; width: 100%; height: 2px;
+      background: rgba(212, 221, 230, 0.9); z-index: 1;
+    }
+    .pipeline-connector::after {
+      content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 0;
+      background: var(--bell-blue); transition: width 0.5s ease;
+    }
+    .pipeline-connector.active::after { width: 100%; }
+
+    /* Canvas Styling */
+    .demo-box {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(247, 249, 251, 0.98) 100%);
+      border: 1px solid rgba(212, 221, 230, 0.9);
+      border-radius: 32px;
+      padding: 20px;
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(16px);
+    }
+    .demo-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+      border-bottom: 1px solid rgba(212, 221, 230, 0.85); padding-bottom: 12px;
+    }
+    canvas {
+      border-radius: 20px;
+    }
+    .effect-canvas {
+      background:
+        radial-gradient(circle at 18% 14%, rgba(78, 159, 212, 0.18), transparent 22%),
+        linear-gradient(180deg, #002a5c 0%, #001f44 100%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 0 0 1px rgba(0, 112, 206, 0.08);
+    }
+
+    /* Inputs */
+    input[type="range"] {
+      -webkit-appearance: none; width: 100%; height: 4px; background: rgba(212, 221, 230, 0.95); border-radius: 2px; outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 16px; height: 16px; background: var(--bell-blue); border-radius: 50%; cursor: pointer;
+    }
+    
+    /* Reveal Animation */
+    .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+  <!-- Global Tooltip -->
+  <div id="global-tooltip">
+    <div class="tooltip-title"></div>
+    <div class="tooltip-text"></div>
+  </div>
+
+  <!-- Navigation -->
+  <nav class="sticky top-0 z-50 border-b border-white/10 bg-[linear-gradient(90deg,#004a8a_0%,#00549a_55%,#0070ce_100%)] shadow-[0_12px_30px_rgba(0,55,120,0.18)] backdrop-blur">
+    <div class="container-wide flex items-center justify-between h-16">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full border border-white/25 bg-white/12 flex items-center justify-center text-white font-bold text-sm shadow-[0_8px_20px_rgba(0,0,0,0.12)]">
+          SZ
+        </div>
+        <span class="font-bold text-lg text-white">Scenalyze Architecture</span>
+      </div>
+      <div class="hidden md:flex items-center gap-2">
+        <a href="#philosophy" class="nav-link">Philosophy</a>
+        <a href="#dsp" class="nav-link">Frames</a>
+        <a href="#pipeline" class="nav-link">Pipeline</a>
+        <a href="#prompting" class="nav-link">Prompting</a>
+        <a href="#taxonomy" class="nav-link">Taxonomy</a>
+        <a href="#search" class="nav-link">Search</a>
+        <a href="#rescue" class="btn-primary text-sm py-2 px-4">Rescue Ladder</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="hero-gradient py-24 md:py-32">
+    <div class="container-wide">
+      <div class="grid lg:grid-cols-2 gap-12 items-center">
+        <div class="reveal">
+          <span class="inline-block bg-[#005AAF] text-white text-xs font-bold px-3 py-1 rounded mb-4 uppercase tracking-wide">Scenalyze Masterclass</span>
+          <h1 class="text-4xl md:text-5xl font-bold mb-4 leading-tight">
+            Scenalyze Video Ad<br>Classification Architecture
+          </h1>
+          <p class="text-lg text-[#555] mb-8 max-w-xl">
+            Learn how Scenalyze combines OCR, multimodal prompts, taxonomy-constrained selection, reranking, and bounded web evidence to classify video ads accurately without turning the system into a black box.
+          </p>
+          <div class="flex gap-4">
+            <a href="#pipeline" class="btn-primary">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path></svg>
+              Start Course
+            </a>
+            <a href="#philosophy" class="btn-secondary">Learn More</a>
+          </div>
+        </div>
+        <div class="reveal demo-box">
+           <div class="demo-header">
+             <span class="text-xs font-bold text-[#555] uppercase">Live Simulation</span>
+             <span class="text-xs text-[#005AAF] font-mono">Evidence -&gt; Decision</span>
+           </div>
+           <canvas id="heroCanvas" class="effect-canvas w-full h-48 rounded"></canvas>
+           <div class="grid grid-cols-3 gap-4 text-center mt-4 border-t pt-4">
+             <div>
+               <div class="text-2xl font-bold text-[#005AAF]" id="frameCount">0</div>
+               <div class="text-xs text-[#666]">Frames</div>
+             </div>
+             <div>
+               <div class="text-2xl font-bold text-[#00A9E0]" id="brightnessVal">0</div>
+               <div class="text-xs text-[#666]">Brightness</div>
+             </div>
+             <div>
+               <div class="text-2xl font-bold text-[#333]" id="sharpnessVal">0</div>
+               <div class="text-xs text-[#666]">Sharpness</div>
+             </div>
+           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 0: Philosophy -->
+  <section id="philosophy" class="module-section">
+    <div class="container-wide">
+      <div class="text-center mb-12 reveal">
+        <span class="text-[#00A9E0] font-bold text-sm uppercase">Module 0</span>
+        <h2 class="text-3xl font-bold mt-2">Core Philosophy</h2>
+        <p class="text-[#666] mt-2 max-w-2xl mx-auto">Designed for the common case: fast on the likely path, bounded on the hard path, and explainable all the way through.</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-8">
+        <div class="info-card reveal">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-[#005AAF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          </div>
+          <h3 class="font-bold mb-2 text-[#333]">Evidence First</h3>
+          <p class="text-sm text-[#666]">OCR, vision scores, recent frames, and search snippets are gathered as evidence before the system commits to a narrow taxonomy leaf.</p>
+        </div>
+        <div class="info-card reveal">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-[#005AAF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          </div>
+          <h3 class="font-bold mb-2 text-[#333]">Bounded Decisions</h3>
+          <p class="text-sm text-[#666]">Each stage asks a smaller question: broad classification, family selection, leaf rerank, or search-backed correction. That keeps later repairs controlled.</p>
+        </div>
+        <div class="info-card reveal">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-[#005AAF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+          </div>
+          <h3 class="font-bold mb-2 text-[#333]">Observable</h3>
+          <p class="text-sm text-[#666]">Stages, attempts, artifacts, and reasoning are persisted so operators can inspect what ran, what was rejected, and what actually became final.</p>
+        </div>
+      </div>
+      <div class="mt-10 bg-white rounded-lg border p-6 reveal">
+        <h3 class="font-bold text-xl text-[#333] mb-4">System Shape</h3>
+        <div class="grid md:grid-cols-5 gap-4 text-center">
+          <div class="bg-[#f5f5f5] rounded p-4">
+            <div class="text-xs font-bold text-[#005AAF] uppercase mb-2">Frontend</div>
+            <div class="font-semibold text-[#333]">Dashboard</div>
+            <p class="text-xs text-[#666] mt-2">Submit jobs, inspect traces, review results.</p>
+          </div>
+          <div class="bg-[#f5f5f5] rounded p-4">
+            <div class="text-xs font-bold text-[#005AAF] uppercase mb-2">API</div>
+            <div class="font-semibold text-[#333]">FastAPI Node</div>
+            <p class="text-xs text-[#666] mt-2">Submission, retrieval, diagnostics, cluster fan-out.</p>
+          </div>
+          <div class="bg-[#f5f5f5] rounded p-4">
+            <div class="text-xs font-bold text-[#005AAF] uppercase mb-2">Persistence</div>
+            <div class="font-semibold text-[#333]">DB Queue</div>
+            <p class="text-xs text-[#666] mt-2">Job rows, WAL-backed claims, stage updates, artifacts.</p>
+          </div>
+          <div class="bg-[#f5f5f5] rounded p-4">
+            <div class="text-xs font-bold text-[#005AAF] uppercase mb-2">Execution</div>
+            <div class="font-semibold text-[#333]">Worker</div>
+            <p class="text-xs text-[#666] mt-2">Frame extraction, OCR, LLM calls, mapping, rescues.</p>
+          </div>
+          <div class="bg-[#f5f5f5] rounded p-4">
+            <div class="text-xs font-bold text-[#005AAF] uppercase mb-2">Explainability</div>
+            <div class="font-semibold text-[#333]">Processing Trace</div>
+            <p class="text-xs text-[#666] mt-2">Accepted attempt, rejected attempts, evidence, and final state.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 2: DSP -->
+  <section id="dsp" class="module-section bg-[#f9f9f9]">
+    <div class="container-wide">
+      <div class="text-center mb-12 reveal">
+        <span class="text-[#00A9E0] font-bold text-sm uppercase">Module 1</span>
+        <h2 class="text-3xl font-bold mt-2">Frame Filtering and OCR Evidence</h2>
+        <p class="text-[#666] mt-2 max-w-2xl mx-auto">Low-cost heuristics trim visually useless frames before OCR or multimodal review. The goal is not to classify here; it is to keep the evidence set clean.</p>
+      </div>
+      
+      <div class="bg-white rounded-lg shadow-sm border p-6 reveal">
+        <div class="flex flex-wrap gap-2 mb-6 border-b pb-4">
+          <button class="tab-pill active" data-tab="brightness">Brightness Gate</button>
+          <button class="tab-pill" data-tab="sharpness">Sharpness</button>
+          <button class="tab-pill" data-tab="histogram">Histogram</button>
+        </div>
+        
+        <div id="brightness" class="tab-content grid md:grid-cols-2 gap-8 items-center">
+          <div>
+            <h3 class="font-bold text-xl text-[#333] mb-4">Grayscale Mean Brightness</h3>
+            <p class="text-sm text-[#666] mb-4">Calculates the average luminance of a frame. If the value drops below 5.0, the frame is near-black and is skipped to save compute.</p>
+            <div class="bg-[#f5f5f5] p-4 rounded">
+              <div class="flex justify-between mb-2 font-bold text-sm">
+                <span>Brightness</span>
+                <span id="brightnessLevel" class="text-[#005AAF]">128</span>
+              </div>
+              <input type="range" id="brightnessSlider" min="0" max="255" value="128">
+              <div class="mt-4 text-center">
+                <span id="brightnessStatus" class="bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full">PASS</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <canvas id="brightnessCanvas" class="effect-canvas w-full h-40 rounded border"></canvas>
+          </div>
+        </div>
+
+        <div id="sharpness" class="tab-content hidden grid md:grid-cols-2 gap-8 items-center">
+          <div>
+            <h3 class="font-bold text-xl text-[#333] mb-4">Laplacian Variance</h3>
+            <p class="text-sm text-[#666] mb-4">Measures the spread of edge intensities. High variance = sharp text. Low variance = motion blur.</p>
+            <div class="bg-[#f5f5f5] p-4 rounded">
+              <div class="flex justify-between mb-2 font-bold text-sm">
+                <span>Blur Amount</span>
+                <span id="blurAmount" class="text-[#005AAF]">0</span>
+              </div>
+              <input type="range" id="sharpnessSlider" min="0" max="100" value="0">
+              <div class="mt-4 text-center">
+                <span id="sharpnessValue" class="text-sm font-mono text-[#333]">Score: 100</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <canvas id="sharpnessCanvas" class="effect-canvas w-full h-40 rounded border"></canvas>
+          </div>
+        </div>
+
+        <div id="histogram" class="tab-content hidden grid md:grid-cols-2 gap-8 items-center">
+          <div>
+            <h3 class="font-bold text-xl text-[#333] mb-4">HSV Histogram Correlation</h3>
+            <p class="text-sm text-[#666] mb-4">Compares color distribution between frames. If correlation > 0.97, frames are identical (static). We collapse them.</p>
+            <div class="flex items-center gap-4 mb-4">
+              <div class="flex-1 text-center">
+                <span class="block text-xs mb-1 font-bold text-[#555]">Frame A</span>
+                <canvas id="histogramA" class="effect-canvas w-full h-20 rounded border"></canvas>
+              </div>
+              <div class="flex-1 text-center">
+                <span class="block text-xs mb-1 font-bold text-[#555]">Frame B</span>
+                <canvas id="histogramB" class="effect-canvas w-full h-20 rounded border"></canvas>
+              </div>
+            </div>
+            <button id="toggleStatic" class="w-full text-sm bg-[#f0f0f0] hover:bg-[#e0e0e0] py-2 rounded font-bold transition">Toggle Variation</button>
+          </div>
+          <div class="flex flex-col items-center justify-center">
+            <span class="text-xs font-bold mb-2 text-[#555]">Correlation Score</span>
+            <span id="correlationValue" class="text-4xl font-bold text-[#005AAF]">0.97</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 3: Pipeline -->
+  <section id="pipeline" class="module-section">
+    <div class="container-wide">
+      <div class="text-center mb-12 reveal">
+        <span class="text-[#00A9E0] font-bold text-sm uppercase">Module 2</span>
+        <h2 class="text-3xl font-bold mt-2">Evidence Preparation Pipeline</h2>
+        <p class="text-[#666] mt-2 max-w-2xl mx-auto">This computer vision sub-pipeline prepares OCR-ready text regions and multimodal evidence. It is one stage of the classifier, not the whole classifier.</p>
+      </div>
+
+      <div class="reveal">
+        <div class="flex justify-center gap-4 mb-8">
+          <button id="playPipeline" class="btn-primary text-sm py-2 px-6">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path></svg>
+            Play Animation
+          </button>
+          <button id="resetPipeline" class="btn-secondary text-sm py-2 px-6">Reset</button>
+        </div>
+
+        <div class="relative flex justify-between pt-8" id="pipelineContainer">
+          <!-- Steps generated by JS, but styling is defined here -->
+          
+          <!-- Step 1 -->
+          <div class="pipeline-step w-1/7 text-center relative" data-step="0" data-tooltip-title="Input" data-tooltip-text="1080p Raw Frame.">
+            <div class="pipeline-connector"></div>
+            <div class="step-circle"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></div>
+            <div class="font-bold text-xs text-[#555]">Original</div>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="pipeline-step w-1/7 text-center relative" data-step="1" data-tooltip-title="Optimization" data-tooltip-text="Downscale to 480p & Grayscale.">
+            <div class="pipeline-connector"></div>
+            <div class="step-circle"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg></div>
+            <div class="font-bold text-xs text-[#555]">Downscale</div>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="pipeline-step w-1/7 text-center relative" data-step="2" data-tooltip-title="Edge Detection" data-tooltip-text="Sobel-X filter for vertical strokes.">
+            <div class="pipeline-connector"></div>
+            <div class="step-circle"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg></div>
+            <div class="font-bold text-xs text-[#555]">Sobel-X</div>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="pipeline-step w-1/7 text-center relative" data-step="3" data-tooltip-title="Noise Filter" data-tooltip-text="Gaussian Blur to smooth artifacts.">
+            <div class="pipeline-connector"></div>
+            <div class="step-circle"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path></svg></div>
+            <div class="font-bold text-xs text-[#555]">Blur</div>
+          </div>
+
+          <!-- Step 5 -->
+          <div class="pipeline-step w-1/7 text-center relative" data-step="4" data-tooltip-title="Threshold" data-tooltip-text="Otsu's method for binarization.">
+            <div class="pipeline-connector"></div>
+            <div class="step-circle"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg></div>
+            <div class="font-bold text-xs text-[#555]">Otsu</div>
+          </div>
+
+          <!-- Step 6 -->
+          <div class="pipeline-step w-1/7 text-center relative" data-step="5" data-tooltip-title="Morphology" data-tooltip-text="Dilate/Closing to fuse letters.">
+            <div class="pipeline-connector"></div>
+            <div class="step-circle"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z"></path></svg></div>
+            <div class="font-bold text-xs text-[#555]">Morph</div>
+          </div>
+
+          <!-- Step 7 -->
+          <div class="pipeline-step w-1/7 text-center relative" data-step="6" data-tooltip-title="Output" data-tooltip-text="Extract Regions of Interest.">
+            <div class="step-circle"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></div>
+            <div class="font-bold text-xs text-[#555]">ROI</div>
+          </div>
+        </div>
+
+        <div class="mt-8 demo-box">
+           <canvas id="pipelineCanvas" class="effect-canvas w-full h-48 rounded"></canvas>
+        </div>
+        <div class="mt-6 bg-[#f5f5f5] border rounded-lg p-5 text-sm text-[#555]">
+          <span class="font-bold text-[#333]">Teaching note:</span> this visual pipeline explains how frames become OCR evidence. Final taxonomy decisions happen later through prompting, taxonomy family selection, leaf reranking, and bounded rescues.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 3.5: SigLIP -->
+  <section id="siglip" class="module-section bg-[#005AAF] text-white">
+    <div class="container-wide">
+      <div class="grid lg:grid-cols-2 gap-12 items-center">
+        <div class="reveal">
+          <span class="inline-block bg-white/20 text-white text-xs font-bold px-3 py-1 rounded mb-4 uppercase">Module 3</span>
+          <h2 class="text-3xl font-bold text-white mt-2">Vision Board Semantic Layer</h2>
+          <p class="text-white/80 mt-4">
+            Vision similarity gives the pipeline a lightweight semantic read on the frame. It complements OCR and can support or contradict the textual story before the system commits to a category.
+          </p>
+          <div class="mt-8 bg-white/10 p-6 rounded-lg">
+            <h4 class="font-bold text-lg mb-2">Vector Space Search</h4>
+            <p class="text-sm text-white/70">Click a concept to see how the frame embedding aligns with the target. These scores are evidence hints, not final taxonomy outputs.</p>
+            <div class="flex flex-wrap gap-2 mt-4">
+              <button class="siglip-btn bg-white/20 hover:bg-white/30 px-4 py-2 rounded text-sm font-bold" data-label="Automotive">Automotive</button>
+              <button class="siglip-btn bg-white/20 hover:bg-white/30 px-4 py-2 rounded text-sm font-bold" data-label="Tech">Tech</button>
+              <button class="siglip-btn bg-white/20 hover:bg-white/30 px-4 py-2 rounded text-sm font-bold" data-label="Fashion">Fashion</button>
+            </div>
+          </div>
+        </div>
+        <div class="reveal demo-box bg-white text-[#333]">
+          <div class="demo-header">
+            <span class="text-xs font-bold text-[#555] uppercase">Vector Space</span>
+            <span id="siglipScore" class="text-xs font-mono text-[#005AAF] font-bold">0.00</span>
+          </div>
+          <canvas id="siglipCanvas" class="effect-canvas w-full h-48 rounded"></canvas>
+          <div class="text-center mt-2 text-xs text-[#999]">Pink = Current Frame | Blue = Target Concept</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 4: Prompting -->
+  <section id="prompting" class="module-section">
+    <div class="container-wide">
+      <div class="text-center mb-12 reveal">
+        <span class="text-[#00A9E0] font-bold text-sm uppercase">Module 4</span>
+        <h2 class="text-3xl font-bold mt-2">Prompting and LLM Contracts</h2>
+        <p class="text-[#666] mt-2 max-w-3xl mx-auto">Scenalyze does not use one giant vague prompt. It uses task-specific prompts and task-specific JSON schemas so each model call answers one bounded question.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-8">
+        <div class="info-card reveal">
+          <h3 class="font-bold text-xl text-[#333] mb-4">Base Classification Prompt</h3>
+          <p class="text-sm text-[#666] mb-4">The initial classifier combines noisy OCR text with recent evidence frames. The prompt teaches the model to treat OCR as hints, not ground truth, and to avoid over-weighting isolated logo-only end cards.</p>
+          <div class="space-y-3 text-sm text-[#555]">
+            <div class="bg-[#f5f5f5] rounded p-3"><span class="font-bold text-[#333]">OCR stance:</span> extracted text is machine-generated evidence and can be incomplete, corrupted, or duplicated.</div>
+            <div class="bg-[#f5f5f5] rounded p-3"><span class="font-bold text-[#333]">Image stance:</span> recent frames are attached in chronological order so earlier product shots can outweigh later carrier or partner logos.</div>
+            <div class="bg-[#f5f5f5] rounded p-3"><span class="font-bold text-[#333]">Output contract:</span> the model must return strict JSON with <code>brand</code>, <code>category</code>, <code>confidence</code>, and <code>reasoning</code>.</div>
+          </div>
+        </div>
+
+        <div class="info-card reveal">
+          <h3 class="font-bold text-xl text-[#333] mb-4">Why Separate Contracts Matter</h3>
+          <p class="text-sm text-[#666] mb-4">Once the pipeline starts reranking taxonomy leaves or selecting a family, freeform outputs become dangerous. Scenalyze narrows the schema along with the question.</p>
+          <div class="grid sm:grid-cols-2 gap-4 text-sm">
+            <div class="bg-[#f5f5f5] rounded p-4">
+              <div class="font-bold text-[#333] mb-2">Initial Classification</div>
+              <code>brand</code>, <code>category</code>, <code>confidence</code>, <code>reasoning</code>
+            </div>
+            <div class="bg-[#f5f5f5] rounded p-4">
+              <div class="font-bold text-[#333] mb-2">Family Selection</div>
+              <code>family_index</code>, <code>confidence</code>, <code>reasoning</code>
+            </div>
+            <div class="bg-[#f5f5f5] rounded p-4">
+              <div class="font-bold text-[#333] mb-2">Category Rerank</div>
+              <code>category_index</code>, <code>confidence</code>, <code>reasoning</code>
+            </div>
+            <div class="bg-[#f5f5f5] rounded p-4">
+              <div class="font-bold text-[#333] mb-2">Entity Grounding</div>
+              <code>entity_name</code>, <code>entity_kind</code>, <code>genres</code>, <code>confidence</code>, <code>reasoning</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 5: Taxonomy -->
+  <section id="taxonomy" class="module-section bg-[#f9f9f9]">
+    <div class="container-wide">
+      <div class="text-center mb-12 reveal">
+        <span class="text-[#00A9E0] font-bold text-sm uppercase">Module 5</span>
+        <h2 class="text-3xl font-bold mt-2">Taxonomy Selection and Reranking</h2>
+        <p class="text-[#666] mt-2 max-w-3xl mx-auto">The raw category from the first LLM pass is not yet the final taxonomy answer. Scenalyze narrows broad guesses into the canonical tree using retrieval, branch selection, and leaf reranking.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-5 gap-5">
+        <div class="info-card reveal">
+          <div class="text-xs font-bold text-[#005AAF] uppercase mb-3">Step 1</div>
+          <h3 class="font-bold mb-2 text-[#333]">Raw Category</h3>
+          <p class="text-sm text-[#666]">The initial model may say something broad like <code>Banking</code>, <code>Movie</code>, or <code>Food &amp; Beverage</code>.</p>
+        </div>
+        <div class="info-card reveal">
+          <div class="text-xs font-bold text-[#005AAF] uppercase mb-3">Step 2</div>
+          <h3 class="font-bold mb-2 text-[#333]">Embedding Retrieval</h3>
+          <p class="text-sm text-[#666]">The mapper pulls nearby canonical candidates from the taxonomy rather than trusting the broad phrase directly.</p>
+        </div>
+        <div class="info-card reveal">
+          <div class="text-xs font-bold text-[#005AAF] uppercase mb-3">Step 3</div>
+          <h3 class="font-bold mb-2 text-[#333]">Broadness Check</h3>
+          <p class="text-sm text-[#666]">If neighbors scatter across unrelated families, the system treats the input as structurally broad instead of pretending it already has a leaf.</p>
+        </div>
+        <div class="info-card reveal">
+          <div class="text-xs font-bold text-[#005AAF] uppercase mb-3">Step 4</div>
+          <h3 class="font-bold mb-2 text-[#333]">Family Selection</h3>
+          <p class="text-sm text-[#666]">The model sees a bounded numbered menu of families and returns <code>family_index</code>. This picks the branch before the leaf.</p>
+        </div>
+        <div class="info-card reveal">
+          <div class="text-xs font-bold text-[#005AAF] uppercase mb-3">Step 5</div>
+          <h3 class="font-bold mb-2 text-[#333]">Leaf Rerank</h3>
+          <p class="text-sm text-[#666]">Inside the chosen family, the model reranks a constrained candidate set and returns <code>category_index</code> instead of inventing a new label.</p>
+        </div>
+      </div>
+
+      <div class="mt-8 bg-white rounded-lg border p-6 reveal">
+        <h3 class="font-bold text-xl text-[#333] mb-4">Why Branch Before Leaf?</h3>
+        <p class="text-sm text-[#666] mb-3">This is the main defense against specificity jumps. Without a branch-first stage, a broad phrase like <code>Movie</code> can fall into a wrong leaf such as <code>Movie Theatres</code>, and a broad phrase like <code>Food &amp; Beverage</code> can jump straight to <code>Alcoholic beverages</code>.</p>
+        <p class="text-sm text-[#666]">The key teaching idea is simple: first prove the right branch, then prove the right leaf within that branch.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 6: Search -->
+  <section id="search" class="module-section">
+    <div class="container-wide">
+      <div class="text-center mb-12 reveal">
+        <span class="text-[#00A9E0] font-bold text-sm uppercase">Module 6</span>
+        <h2 class="text-3xl font-bold mt-2">Web Search, Brand Review, and Grounding</h2>
+        <p class="text-[#666] mt-2 max-w-3xl mx-auto">Search is evidence enrichment, not direct taxonomy selection. It is used when the system needs help confirming a brand, grounding a media title, or narrowing an overly broad category.</p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-8">
+        <div class="info-card reveal">
+          <h3 class="font-bold mb-3 text-[#333]">Brand Review</h3>
+          <p class="text-sm text-[#666]">If the predicted brand looks weakly anchored, the pipeline can trigger a bounded web confirmation pass. The result keeps ambiguity metadata so operators can see what was resolved and why.</p>
+        </div>
+        <div class="info-card reveal">
+          <h3 class="font-bold mb-3 text-[#333]">Entity Grounding</h3>
+          <p class="text-sm text-[#666]">Media-like ads can trigger title-oriented grounding so the system figures out what the advertised thing is before choosing the taxonomy branch.</p>
+        </div>
+        <div class="info-card reveal">
+          <h3 class="font-bold mb-3 text-[#333]">Specificity Rescue</h3>
+          <p class="text-sm text-[#666]">If a result stays too broad after mapping, search snippets can add discriminative evidence that helps the system choose a narrower but still supported taxonomy label.</p>
+        </div>
+      </div>
+
+      <div class="mt-8 bg-[#f5f5f5] border rounded-lg p-6 reveal">
+        <h3 class="font-bold text-xl text-[#333] mb-3">Important Boundary</h3>
+        <p class="text-sm text-[#666]">Search snippets are stored with source-aware structure like title, body, and URL. They are treated as evidence alongside OCR and frames. They do not get to bypass the bounded selection steps and directly invent a final category.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Module 4: Rescue -->
+  <section id="rescue" class="module-section">
+    <div class="container-wide">
+      <div class="text-center mb-12 reveal">
+        <span class="text-[#00A9E0] font-bold text-sm uppercase">Module 7</span>
+        <h2 class="text-3xl font-bold mt-2">The Rescue Ladder</h2>
+        <p class="text-[#666] mt-2 max-w-2xl mx-auto">When the fast path fails, Scenalyze escalates through bounded fallback stages instead of jumping straight to an unrestricted retry.</p>
+      </div>
+
+      <div class="max-w-3xl mx-auto space-y-6 reveal">
+        <!-- Step 1 -->
+        <div class="flex items-center gap-4 p-4 bg-[#f9f9f9] rounded-lg border-l-4 border-[#005AAF] hover:shadow-md transition cursor-pointer" onclick="this.querySelector('.ladder-content').classList.toggle('hidden')">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] text-[#005AAF] flex items-center justify-center font-bold">1</div>
+          <div class="flex-1">
+            <h3 class="font-bold">Initial Tail Pass</h3>
+            <p class="text-xs text-[#666] hidden ladder-content">Recent tail frames, OCR evidence, and multimodal classification. This is the normal path, not a rescue.</p>
+          </div>
+          <span class="text-xs font-bold text-[#005AAF] bg-[#E6F2FF] px-2 py-1 rounded">fast path</span>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="flex items-center gap-4 p-4 bg-[#f9f9f9] rounded-lg border-l-4 border-[#00A9E0] hover:shadow-md transition cursor-pointer" onclick="this.querySelector('.ladder-content').classList.toggle('hidden')">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] text-[#00A9E0] flex items-center justify-center font-bold">2</div>
+          <div class="flex-1">
+            <h3 class="font-bold">OCR Rescue</h3>
+            <p class="text-xs text-[#666] hidden ladder-content">Expands the evidence window and retries with a denser OCR profile when the initial pass lacks usable text anchors.</p>
+          </div>
+          <span class="text-xs font-bold text-[#00A9E0] bg-[#E6F2FF] px-2 py-1 rounded">bounded retry</span>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="flex items-center gap-4 p-4 bg-[#f9f9f9] rounded-lg border-l-4 border-[#005AAF] hover:shadow-md transition cursor-pointer" onclick="this.querySelector('.ladder-content').classList.toggle('hidden')">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] text-[#005AAF] flex items-center justify-center font-bold">3</div>
+          <div class="flex-1">
+            <h3 class="font-bold">Express Rescue (Vision)</h3>
+            <p class="text-xs text-[#666] hidden ladder-content">A vision-heavier fallback when text evidence is weak but visual cues may still support the brand or category story.</p>
+          </div>
+          <span class="text-xs font-bold text-[#005AAF] bg-[#E6F2FF] px-2 py-1 rounded">vision rescue</span>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="flex items-center gap-4 p-4 bg-[#f9f9f9] rounded-lg border-l-4 border-[#00A9E0] hover:shadow-md transition cursor-pointer" onclick="this.querySelector('.ladder-content').classList.toggle('hidden')">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] text-[#00A9E0] flex items-center justify-center font-bold">4</div>
+          <div class="flex-1">
+            <h3 class="font-bold">Family Selection and Leaf Rerank</h3>
+            <p class="text-xs text-[#666] hidden ladder-content">Used when the broad answer is plausible but the final taxonomy leaf still needs a constrained branch-first correction.</p>
+          </div>
+          <span class="text-xs font-bold text-[#00A9E0] bg-[#E6F2FF] px-2 py-1 rounded">taxonomy repair</span>
+        </div>
+
+        <!-- Step 5 -->
+        <div class="flex items-center gap-4 p-4 bg-[#f9f9f9] rounded-lg border-l-4 border-[#005AAF] hover:shadow-md transition cursor-pointer" onclick="this.querySelector('.ladder-content').classList.toggle('hidden')">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] text-[#005AAF] flex items-center justify-center font-bold">5</div>
+          <div class="flex-1">
+            <h3 class="font-bold">Search-Backed Specificity Rescue</h3>
+            <p class="text-xs text-[#666] hidden ladder-content">Adds external evidence only when the current category is too broad or the brand/entity interpretation still looks under-grounded.</p>
+          </div>
+          <span class="text-xs font-bold text-[#005AAF] bg-[#E6F2FF] px-2 py-1 rounded">evidence enrichment</span>
+        </div>
+
+        <!-- Step 6 -->
+        <div class="flex items-center gap-4 p-4 bg-[#f9f9f9] rounded-lg border-l-4 border-[#00A9E0] hover:shadow-md transition cursor-pointer" onclick="this.querySelector('.ladder-content').classList.toggle('hidden')">
+          <div class="w-10 h-10 rounded-full bg-[#E6F2FF] text-[#00A9E0] flex items-center justify-center font-bold">6</div>
+          <div class="flex-1">
+            <h3 class="font-bold">Extended Tail or Full Video</h3>
+            <p class="text-xs text-[#666] hidden ladder-content">The expensive option. The system widens temporal coverage only after the cheaper and more targeted corrections fail.</p>
+          </div>
+          <span class="text-xs font-bold text-[#00A9E0] bg-[#E6F2FF] px-2 py-1 rounded">last resort</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-8 border-t border-[#e0e0e0] text-center">
+    <p class="text-sm text-[#666]">Scenalyze Video Ad Classification Architecture Masterclass. Designed for bounded decisions, observability, and scale.</p>
+  </footer>
+
+  <script>
+    // ============================================
+    // UTILS
+    // ============================================
+    function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+
+    // ============================================
+    // HERO CANVAS
+    // ============================================
+    const heroCanvas = document.getElementById('heroCanvas');
+    const heroCtx = heroCanvas.getContext('2d');
+    let heroTime = 0;
+
+    function resizeHeroCanvas() { heroCanvas.width = heroCanvas.parentElement.clientWidth; heroCanvas.height = 192; }
+    
+    function drawHero() {
+      const w = heroCanvas.width, h = heroCanvas.height;
+      heroCtx.clearRect(0, 0, w, h);
+      const heroBg = heroCtx.createLinearGradient(0, 0, 0, h);
+      heroBg.addColorStop(0, '#002a5c');
+      heroBg.addColorStop(1, '#001f44');
+      heroCtx.fillStyle = heroBg;
+      heroCtx.fillRect(0, 0, w, h);
+      
+      // Draw background grid
+      heroCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+      heroCtx.lineWidth = 1;
+      for(let i=0; i<w; i+=20) { heroCtx.beginPath(); heroCtx.moveTo(i, 0); heroCtx.lineTo(i, h); heroCtx.stroke(); }
+
+      // Draw frames
+      const frameWidth = Math.max(10, w / 6 - 10);
+      for (let i = 0; i < 5; i++) {
+        const x = 10 + i * (frameWidth + 10);
+        heroCtx.fillStyle = `rgba(125, 211, 252, ${0.12 + i * 0.07})`;
+        heroCtx.fillRect(x, 20, frameWidth, h - 40);
+
+        // Scan line
+        const scanY = (heroTime * 100 + i * 20) % (h - 40);
+        heroCtx.shadowBlur = 10;
+        heroCtx.shadowColor = 'rgba(125, 211, 252, 0.8)';
+        heroCtx.fillStyle = '#7dd3fc';
+        heroCtx.fillRect(x, 20 + scanY, frameWidth, 2);
+        heroCtx.shadowBlur = 0;
+      }
+
+      document.getElementById('frameCount').textContent = Math.floor(heroTime * 10) % 1000;
+      document.getElementById('brightnessVal').textContent = Math.floor(Math.sin(heroTime) * 30 + 128);
+      document.getElementById('sharpnessVal').textContent = Math.floor(Math.abs(Math.sin(heroTime * 0.7)) * 80 + 20);
+
+      heroTime += 0.05;
+      requestAnimationFrame(drawHero);
+    }
+    resizeHeroCanvas(); window.addEventListener('resize', resizeHeroCanvas); drawHero();
+
+    // ============================================
+    // SCROLL REVEAL
+    // ============================================
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('visible'); });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+    // ============================================
+    // TOOLTIP
+    // ============================================
+    const globalTooltip = document.getElementById('global-tooltip');
+    const tooltipTitle = globalTooltip.querySelector('.tooltip-title');
+    const tooltipText = globalTooltip.querySelector('.tooltip-text');
+
+    document.querySelectorAll('.pipeline-step').forEach(step => {
+      step.addEventListener('mouseenter', e => {
+        tooltipTitle.textContent = step.dataset.tooltipTitle;
+        tooltipText.textContent = step.dataset.tooltipText;
+        const rect = step.getBoundingClientRect();
+        globalTooltip.style.left = `${rect.left + rect.width/2 - 130}px`;
+        globalTooltip.style.top = `${rect.bottom + 10}px`;
+        globalTooltip.classList.add('visible');
+      });
+      step.addEventListener('mouseleave', () => globalTooltip.classList.remove('visible'));
+    });
+
+    // ============================================
+    // TABS
+    // ============================================
+    document.querySelectorAll('.tab-pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-pill').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.remove('hidden');
+        if(btn.dataset.tab === 'brightness') initBrightness();
+        if(btn.dataset.tab === 'sharpness') initSharpness();
+        if(btn.dataset.tab === 'histogram') initHistogram();
+      });
+    });
+
+    // ============================================
+    // DSP DEMOS
+    // ============================================
+    let bCanvas, bCtx;
+    function initBrightness() {
+      if(!bCanvas) {
+        bCanvas = document.getElementById('brightnessCanvas');
+        bCtx = bCanvas.getContext('2d');
+        bCanvas.width = bCanvas.parentElement.clientWidth;
+        bCanvas.height = 160;
+        document.getElementById('brightnessSlider').addEventListener('input', updateBrightness);
+      }
+      updateBrightness();
+    }
+    function updateBrightness() {
+      const val = parseInt(document.getElementById('brightnessSlider').value);
+      const brightGrad = bCtx.createLinearGradient(0, 0, 0, bCanvas.height);
+      brightGrad.addColorStop(0, '#002a5c');
+      brightGrad.addColorStop(1, '#001f44');
+      bCtx.fillStyle = brightGrad;
+      bCtx.fillRect(0, 0, bCanvas.width, bCanvas.height);
+      bCtx.fillStyle = `rgb(${val},${val},${val})`;
+      bCtx.fillRect(24, 24, bCanvas.width - 48, bCanvas.height - 48);
+      document.getElementById('brightnessLevel').textContent = val;
+      const status = document.getElementById('brightnessStatus');
+      if(val < 5) { status.textContent = 'SKIP'; status.className = 'bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full'; }
+      else if(val < 20) { status.textContent = 'RESCUE'; status.className = 'bg-yellow-100 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full'; }
+      else { status.textContent = 'PASS'; status.className = 'bg-green-100 text-green-800 text-xs font-bold px-3 py-1 rounded-full'; }
+    }
+
+    let sCanvas, sCtx;
+    function initSharpness() {
+      if(!sCanvas) {
+        sCanvas = document.getElementById('sharpnessCanvas');
+        sCtx = sCanvas.getContext('2d');
+        sCanvas.width = sCanvas.parentElement.clientWidth;
+        sCanvas.height = 160;
+        document.getElementById('sharpnessSlider').addEventListener('input', updateSharpness);
+      }
+      updateSharpness();
+    }
+    function updateSharpness() {
+      const blur = parseInt(document.getElementById('sharpnessSlider').value);
+      sCtx.clearRect(0, 0, sCanvas.width, sCanvas.height);
+      const sharpGrad = sCtx.createLinearGradient(0, 0, 0, sCanvas.height);
+      sharpGrad.addColorStop(0, '#002a5c');
+      sharpGrad.addColorStop(1, '#001f44');
+      sCtx.fillStyle = sharpGrad;
+      sCtx.fillRect(0, 0, sCanvas.width, sCanvas.height);
+      sCtx.filter = `blur(${blur}px)`;
+      sCtx.fillStyle = '#f8fbff';
+      sCtx.font = 'bold 32px Open Sans';
+      sCtx.textAlign = 'center';
+      sCtx.fillText('TEXT SAMPLE', sCanvas.width/2, sCanvas.height/2);
+      sCtx.filter = 'none';
+      document.getElementById('blurAmount').textContent = blur;
+      document.getElementById('sharpnessValue').textContent = `Score: ${Math.max(0, 100-blur)}`;
+    }
+
+    let hCtxA, hCtxB, isStatic = true;
+    function initHistogram() {
+      hCtxA = document.getElementById('histogramA').getContext('2d');
+      hCtxB = document.getElementById('histogramB').getContext('2d');
+      hCtxA.canvas.width = hCtxA.canvas.parentElement.clientWidth;
+      hCtxA.canvas.height = 80;
+      hCtxB.canvas.width = hCtxB.canvas.parentElement.clientWidth;
+      hCtxB.canvas.height = 80;
+      document.getElementById('toggleStatic').addEventListener('click', () => { isStatic = !isStatic; updateHistogram(); });
+      updateHistogram();
+    }
+    function updateHistogram() {
+      drawHist(hCtxA, 0);
+      drawHist(hCtxB, isStatic ? 0 : 50);
+      document.getElementById('correlationValue').textContent = isStatic ? '0.97' : '0.65';
+    }
+    function drawHist(ctx, offset) {
+      const w = ctx.canvas.width, h = ctx.canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      const histGrad = ctx.createLinearGradient(0, 0, 0, h);
+      histGrad.addColorStop(0, '#002a5c');
+      histGrad.addColorStop(1, '#001f44');
+      ctx.fillStyle = histGrad;
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#7dd3fc';
+      for(let x=0; x<w; x+=4) ctx.fillRect(x, h/2, 3, Math.sin(x*0.1+offset*0.1)*20);
+    }
+
+    // ============================================
+    // PIPELINE ANIMATION
+    // ============================================
+    let pCanvas, pCtx, pAnim = false;
+    function initPipeline() {
+      pCanvas = document.getElementById('pipelineCanvas');
+      pCtx = pCanvas.getContext('2d');
+      pCanvas.width = pCanvas.parentElement.clientWidth;
+      pCanvas.height = 192;
+      drawPipeline(0);
+    }
+    function drawPipeline(step) {
+      const w = pCanvas.width, h = pCanvas.height;
+      pCtx.clearRect(0, 0, w, h);
+      const pipeGrad = pCtx.createLinearGradient(0, 0, 0, h);
+      pipeGrad.addColorStop(0, '#002a5c');
+      pipeGrad.addColorStop(1, '#001f44');
+      pCtx.fillStyle = pipeGrad;
+      pCtx.fillRect(0, 0, w, h);
+      pCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+      pCtx.beginPath(); pCtx.moveTo(0, h/2); pCtx.lineTo(w, h/2); pCtx.stroke();
+
+      // Draw checkmarks or progress
+      if(step > 0) {
+         pCtx.fillStyle = '#7dd3fc';
+         pCtx.font = 'bold 24px Open Sans';
+         pCtx.textAlign = 'center';
+         pCtx.fillText('Step ' + step + ' Complete', w/2, h/2 + 60);
+      }
+    }
+    function runPipeline() {
+      if(pAnim) return; pAnim = true;
+      let step = 0;
+      const steps = document.querySelectorAll('.pipeline-step');
+      const conns = document.querySelectorAll('.pipeline-connector');
+      
+      steps.forEach(s => s.classList.remove('active'));
+      conns.forEach(c => c.classList.remove('active'));
+
+      const interval = setInterval(() => {
+        if(step < steps.length) {
+          steps[step].classList.add('active');
+          if(step > 0) conns[step-1].classList.add('active');
+          drawPipeline(step);
+          step++;
+        } else {
+          clearInterval(interval);
+          pAnim = false;
+        }
+      }, 400);
+    }
+    function resetPipeline() {
+      pAnim = false;
+      document.querySelectorAll('.pipeline-step').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.pipeline-connector').forEach(c => c.classList.remove('active'));
+      drawPipeline(0);
+    }
+    document.getElementById('playPipeline').addEventListener('click', runPipeline);
+    document.getElementById('resetPipeline').addEventListener('click', resetPipeline);
+    setTimeout(initPipeline, 100); window.addEventListener('resize', initPipeline);
+
+    // ============================================
+    // SIGLIP DEMO
+    // ============================================
+    const sigCanvas = document.getElementById('siglipCanvas');
+    const sigCtx = sigCanvas.getContext('2d');
+    let concept = { x: 0.8, y: 0.6 }; // Automotive
+    let frame = { x: 0.1, y: 0.1, tx: 0.8, ty: 0.6 };
+
+    function initSig() {
+      sigCanvas.width = sigCanvas.parentElement.clientWidth;
+      sigCanvas.height = 192;
+      animateSig();
+    }
+    function animateSig() {
+      const w = sigCanvas.width, h = sigCanvas.height;
+      sigCtx.clearRect(0, 0, w, h);
+      const sigGrad = sigCtx.createLinearGradient(0, 0, 0, h);
+      sigGrad.addColorStop(0, '#002a5c');
+      sigGrad.addColorStop(1, '#001f44');
+      sigCtx.fillStyle = sigGrad;
+      sigCtx.fillRect(0, 0, w, h);
+
+      // Grid
+      sigCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+      for(let i=0; i<w; i+=20) { sigCtx.beginPath(); sigCtx.moveTo(i, 0); sigCtx.lineTo(i, h); sigCtx.stroke(); }
+      
+      // Target Concept (Blue)
+      sigCtx.beginPath(); sigCtx.arc(concept.x*w, concept.y*h, 8, 0, Math.PI*2);
+      sigCtx.shadowBlur = 16;
+      sigCtx.shadowColor = 'rgba(125, 211, 252, 0.75)';
+      sigCtx.fillStyle = '#7dd3fc'; sigCtx.fill();
+      
+      // Frame (Pink)
+      frame.x += (frame.tx - frame.x) * 0.1;
+      frame.y += (frame.ty - frame.y) * 0.1;
+      sigCtx.beginPath(); sigCtx.arc(frame.x*w, frame.y*h, 6, 0, Math.PI*2);
+      sigCtx.shadowColor = 'rgba(244, 114, 182, 0.7)';
+      sigCtx.fillStyle = '#f472b6'; sigCtx.fill();
+      sigCtx.shadowBlur = 0;
+
+      // Line
+      sigCtx.beginPath(); sigCtx.moveTo(frame.x*w, frame.y*h); sigCtx.lineTo(concept.x*w, concept.y*h);
+      sigCtx.strokeStyle = 'rgba(255,255,255,0.14)'; sigCtx.stroke();
+
+      // Score
+      const dist = Math.sqrt(Math.pow(frame.x-concept.x,2) + Math.pow(frame.y-concept.y,2));
+      const score = Math.max(0, 1 - dist);
+      document.getElementById('siglipScore').textContent = score.toFixed(2);
+
+      requestAnimationFrame(animateSig);
+    }
+    document.querySelectorAll('.siglip-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const labels = { 'Automotive': {x:0.8, y:0.6}, 'Tech': {x:0.6, y:0.2}, 'Fashion': {x:0.2, y:0.7} };
+        const t = labels[btn.dataset.label];
+        concept = t;
+        frame.tx = t.x + (Math.random()*0.1-0.05);
+        frame.ty = t.y + (Math.random()*0.1-0.05);
+      });
+    });
+    initSig(); window.addEventListener('resize', initSig);
+
+  </script>
+</body>
+</html>
