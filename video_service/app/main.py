@@ -31,7 +31,7 @@ import time as _time
 from datetime import datetime, timezone
 from collections import defaultdict
 from contextlib import asynccontextmanager, closing
-from typing import List, Optional, AsyncGenerator
+from typing import Any, List, Optional, AsyncGenerator
 from pathlib import Path
 
 import cv2
@@ -55,6 +55,7 @@ from video_service.db.database import get_db, init_db
 from video_service.app.models.job import (
     JobResponse, JobStatus, JobSettings,
     UrlBatchRequest, FolderRequest, FilePathRequest, BulkDeleteRequest, JobMode,
+    ClusterNodesResponse, NodeMaintenanceRequest, NodeMaintenanceResponse,
     BenchmarkTruthCreateRequest,
     BenchmarkRunRequest,
     BenchmarkSuiteUpdateRequest,
@@ -645,17 +646,75 @@ def health_check():
 
     status = "ok" if db_ok else "degraded"
     code   = 200  if db_ok else 503
-    return JSONResponse({"status": status, "node": NODE_NAME, "db": db_ok}, status_code=code)
+    return JSONResponse(
+        {
+            "status": status,
+            "node": NODE_NAME,
+            "db": db_ok,
+            "maintenance_mode": cluster.maintenance_mode,
+            "accepting_new_jobs": cluster.is_accepting_new_jobs(NODE_NAME),
+        },
+        status_code=code,
+    )
 
 
-@app.get("/cluster/nodes", tags=["ops"])
+@app.get("/cluster/nodes", response_model=ClusterNodesResponse, tags=["ops"])
 async def cluster_nodes():
     """Returns all configured nodes + their last-known health state."""
     return {
         "nodes": cluster.nodes,
         "status": cluster.node_status,
+        "maintenance": cluster.node_maintenance,
+        "accepting_new_jobs": {
+            node: cluster.is_accepting_new_jobs(node)
+            for node in cluster.nodes
+        },
         "self": cluster.self_name,
     }
+
+
+def _node_maintenance_payload(node_name: str) -> NodeMaintenanceResponse:
+    return NodeMaintenanceResponse(
+        node=node_name,
+        maintenance_mode=bool(cluster.node_maintenance.get(node_name, False)),
+        accepting_new_jobs=cluster.is_accepting_new_jobs(node_name),
+    )
+
+
+@app.post("/admin/node/maintenance", response_model=NodeMaintenanceResponse, tags=["admin"])
+def set_local_node_maintenance(body: NodeMaintenanceRequest):
+    cluster.set_maintenance_mode(body.enabled)
+    return _node_maintenance_payload(cluster.self_name)
+
+
+@app.post("/cluster/nodes/{node_name}/maintenance", response_model=NodeMaintenanceResponse, tags=["ops"])
+async def set_cluster_node_maintenance(node_name: str, body: NodeMaintenanceRequest):
+    target_url = cluster.get_node_url(node_name)
+    if not target_url:
+        raise HTTPException(status_code=404, detail=f"Unknown node: {node_name}")
+
+    if node_name == cluster.self_name:
+        cluster.set_maintenance_mode(body.enabled)
+        return _node_maintenance_payload(node_name)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"{target_url}/admin/node/maintenance?internal=1",
+                json=body.model_dump(),
+                timeout=cluster.internal_timeout,
+            )
+    except Exception as exc:
+        logger.error("cluster_node_maintenance_proxy_error node=%s error=%s", node_name, exc)
+        raise HTTPException(status_code=503, detail=f"Node {node_name} unreachable: {exc}")
+
+    if res.status_code >= 400:
+        detail = res.text or f"Failed to update node {node_name}"
+        raise HTTPException(status_code=res.status_code, detail=detail)
+
+    payload = res.json() if res.content else {}
+    cluster.node_maintenance[node_name] = bool(payload.get("maintenance_mode", False))
+    return NodeMaintenanceResponse.model_validate(payload)
 
 
 @app.get("/ollama/models", tags=["ops"])
@@ -1720,6 +1779,11 @@ def _create_job(
     benchmark_truth_id: str | None = None,
     benchmark_params: dict | None = None,
 ) -> str:
+    if not cluster.is_accepting_new_jobs(cluster.self_name):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Node {NODE_NAME} is in maintenance mode and not accepting new jobs",
+        )
     job_id = f"{NODE_NAME}-{uuid.uuid4()}"
     benchmark_params_json = json.dumps(benchmark_params or {})
     with closing(get_db()) as conn:
@@ -2029,6 +2093,58 @@ async def _proxy_request(request: Request, target_url: str) -> Response:
             raise HTTPException(status_code=503, detail=f"Proxy error: {exc}")
 
 
+async def _post_internal_json(target_node: str, path: str, payload: dict) -> Any:
+    target_url = cluster.get_node_url(target_node)
+    if not target_url:
+        raise HTTPException(status_code=503, detail=f"Unknown target node: {target_node}")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"{target_url}{path}?internal=1",
+                json=payload,
+                timeout=cluster.internal_timeout,
+            )
+    except Exception as exc:
+        logger.error("cluster_submit_proxy_error node=%s path=%s error=%s", target_node, path, exc)
+        raise HTTPException(status_code=503, detail=f"Proxy error: {exc}")
+
+    if res.status_code >= 400:
+        detail = res.text or f"Failed forwarding request to {target_node}"
+        raise HTTPException(status_code=res.status_code, detail=detail)
+    return res.json() if res.content else None
+
+
+async def _enqueue_url_job(target_node: str, mode: str, settings: JobSettings, safe_url: str) -> JobResponse:
+    if target_node == cluster.self_name:
+        job_id = _create_job(mode, settings, url=safe_url)
+        return JobResponse(job_id=job_id, status="queued")
+
+    payload = {
+        "mode": mode,
+        "urls": [safe_url],
+        "settings": settings.model_dump(mode="json"),
+    }
+    result = await _post_internal_json(target_node, "/jobs/by-urls", payload)
+    if not isinstance(result, list) or not result:
+        raise HTTPException(status_code=503, detail=f"Invalid response from node {target_node}")
+    return JobResponse.model_validate(result[0])
+
+
+async def _enqueue_filepath_job(target_node: str, mode: str, settings: JobSettings, file_path: str) -> JobResponse:
+    if target_node == cluster.self_name:
+        job_id = _create_job(mode, settings, url=file_path)
+        return JobResponse(job_id=job_id, status="queued")
+
+    payload = {
+        "mode": mode,
+        "file_path": file_path,
+        "settings": settings.model_dump(mode="json"),
+    }
+    result = await _post_internal_json(target_node, "/jobs/by-filepath", payload)
+    return JobResponse.model_validate(result)
+
+
 async def _maybe_proxy(req: Request, job_id: str) -> Response | None:
     """If the job belongs to another node, proxy the request there."""
     if req.query_params.get("internal"):
@@ -2045,53 +2161,94 @@ async def _maybe_proxy(req: Request, job_id: str) -> Response | None:
     return None
 
 
-def _rr_or_raise() -> str:
-    """Select a node via round-robin or raise 503."""
+@app.post("/admin/cluster/rr-target", tags=["admin"])
+def cluster_rr_target(request: Request):
+    if not request.query_params.get("internal"):
+        raise HTTPException(status_code=403, detail="internal only")
     node = cluster.select_rr_node()
     if not node:
+        if cluster.get_healthy_nodes():
+            raise HTTPException(503, "No nodes accepting new jobs")
         raise HTTPException(503, "No healthy nodes available")
-    return node
+    return {"target": node, "coordinator": cluster.self_name}
+
+
+async def _rr_or_raise() -> str:
+    """Select a node via round-robin or raise 503."""
+    coordinator = cluster.get_rr_coordinator()
+    if not coordinator:
+        if cluster.get_healthy_nodes():
+            raise HTTPException(503, "No nodes accepting new jobs")
+        raise HTTPException(503, "No healthy nodes available")
+
+    if coordinator == cluster.self_name:
+        node = cluster.select_rr_node()
+        if not node:
+            if cluster.get_healthy_nodes():
+                raise HTTPException(503, "No nodes accepting new jobs")
+            raise HTTPException(503, "No healthy nodes available")
+        return node
+
+    coordinator_url = cluster.get_node_url(coordinator)
+    if not coordinator_url:
+        raise HTTPException(status_code=503, detail=f"Coordinator {coordinator} has no configured URL")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"{coordinator_url}/admin/cluster/rr-target?internal=1",
+                timeout=cluster.internal_timeout,
+            )
+    except Exception as exc:
+        logger.error("cluster_rr_proxy_error coordinator=%s error=%s", coordinator, exc)
+        raise HTTPException(status_code=503, detail=f"Cluster coordinator {coordinator} unreachable: {exc}")
+
+    if res.status_code >= 400:
+        detail = res.text or f"Failed to fetch RR target from {coordinator}"
+        raise HTTPException(status_code=res.status_code, detail=detail)
+
+    payload = res.json() if res.content else {}
+    node = payload.get("target")
+    if not node:
+        raise HTTPException(status_code=503, detail="Cluster coordinator returned no target")
+    return str(node)
 
 
 # ── Job submission endpoints ─────────────────────────────────────────────────
 
 @app.post("/jobs/by-urls", response_model=List[JobResponse], tags=["jobs"])
 async def create_job_urls(request: Request, body: UrlBatchRequest):
-    if not request.query_params.get("internal"):
-        target = _rr_or_raise()
-        if target != cluster.self_name:
-            return await _proxy_request(request, cluster.get_node_url(target))
-
     responses = []
     for url in body.urls:
         safe_url = validate_url(url)
-        job_id = _create_job(body.mode.value, body.settings, url=safe_url)
-        responses.append(JobResponse(job_id=job_id, status="queued"))
+        if request.query_params.get("internal"):
+            target = cluster.self_name
+        else:
+            target = await _rr_or_raise()
+        responses.append(await _enqueue_url_job(target, body.mode.value, body.settings, safe_url))
     return responses
 
 
 @app.post("/jobs/by-folder", response_model=List[JobResponse], tags=["jobs"])
 async def create_job_folder(req: Request, request: FolderRequest):
-    if not req.query_params.get("internal"):
-        target = _rr_or_raise()
-        if target != cluster.self_name:
-            return await _proxy_request(req, cluster.get_node_url(target))
-
     safe_dir = safe_folder_path(request.folder_path)
     responses = []
     for fname in os.listdir(safe_dir):
         ext = os.path.splitext(fname)[1].lower()
         if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}:
             full_path = os.path.join(safe_dir, fname)
-            job_id = _create_job(request.mode.value, request.settings, url=full_path)
-            responses.append(JobResponse(job_id=job_id, status="queued"))
+            if req.query_params.get("internal"):
+                target = cluster.self_name
+            else:
+                target = await _rr_or_raise()
+            responses.append(await _enqueue_filepath_job(target, request.mode.value, request.settings, full_path))
     return responses
 
 
 @app.post("/jobs/by-filepath", response_model=JobResponse, tags=["jobs"])
 async def create_job_filepath(req: Request, request: FilePathRequest):
     if not req.query_params.get("internal"):
-        target = _rr_or_raise()
+        target = await _rr_or_raise()
         if target != cluster.self_name:
             return await _proxy_request(req, cluster.get_node_url(target))
 
@@ -2157,6 +2314,12 @@ async def create_job_upload(
     Clients should POST directly to the node they want to own the job
     (or always use ?internal=1 to skip routing).
     """
+    if not cluster.is_accepting_new_jobs(cluster.self_name):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Node {NODE_NAME} is in maintenance mode and not accepting new jobs",
+        )
+
     # Enforce upload size
     content_length = req.headers.get("content-length")
     check_upload_size(int(content_length) if content_length else None)

@@ -14,7 +14,15 @@ export const api = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
 export interface ClusterNode {
   nodes:  Record<string, string>;
   status: Record<string, boolean>;
+  maintenance: Record<string, boolean>;
+  accepting_new_jobs: Record<string, boolean>;
   self:   string;
+}
+
+export interface NodeMaintenanceResponse {
+  node: string;
+  maintenance_mode: boolean;
+  accepting_new_jobs: boolean;
 }
 
 export interface TaxonomyExplorerGroupChild {
@@ -748,6 +756,12 @@ async function safe<T>(fn: () => Promise<T>): Promise<T> {
 export const getClusterNodes  = () => safe(() => api.get<ClusterNode>('/cluster/nodes').then(r => r.data));
 export const getClusterJobs   = () => safe(() => api.get<JobStatus[]>('/cluster/jobs').then(r => r.data));
 export const getMetrics       = () => safe(() => api.get<Metrics>('/metrics').then(r => r.data));
+export const setClusterNodeMaintenance = (nodeName: string, enabled: boolean) =>
+  safe(() =>
+    api
+      .post<NodeMaintenanceResponse>(`/cluster/nodes/${encodeURIComponent(nodeName)}/maintenance`, { enabled })
+      .then((r) => r.data),
+  );
 export const getTaxonomyExplorer = () => safe(() => api.get<TaxonomyExplorerResponse>('/api/taxonomy/explorer').then(r => r.data));
 export const getAnalytics     = () => safe(() => api.get<AnalyticsData>('/analytics').then(r => r.data));
 export const getSystemProfile = () => safe(() => api.get<SystemProfile>('/api/system/profile').then(r => r.data));

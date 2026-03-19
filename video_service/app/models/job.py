@@ -1,4 +1,4 @@
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 from video_service.core.embedding_models import (
@@ -107,6 +107,25 @@ class FilePathRequest(BaseModel):
 class JobResponse(BaseModel):
     job_id: str
     status: str
+
+
+class NodeMaintenanceRequest(BaseModel):
+    enabled: bool
+
+
+class NodeMaintenanceResponse(BaseModel):
+    node: str
+    maintenance_mode: bool
+    accepting_new_jobs: bool
+
+
+class ClusterNodesResponse(BaseModel):
+    nodes: Dict[str, str]
+    status: Dict[str, bool]
+    maintenance: Dict[str, bool]
+    accepting_new_jobs: Dict[str, bool]
+    self: str
+
 
 class BulkDeleteRequest(BaseModel):
     job_ids: List[str]

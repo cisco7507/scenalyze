@@ -38,6 +38,10 @@ except Exception as exc:  # pragma: no cover - dependent on environment
     _WATCHDOG_IMPORT_ERROR = exc
 
 
+class _WatcherMaintenancePause(RuntimeError):
+    pass
+
+
 def _parse_watch_folders(raw: str) -> list[str]:
     return [folder.strip() for folder in (raw or "").split(",") if folder.strip()]
 
@@ -134,6 +138,9 @@ def _resolve_watch_mode() -> str:
 
 def _submit_watch_job(file_path: str) -> str:
     """Insert a queued job for a stabilized watch-folder file."""
+    if not cluster.is_accepting_new_jobs(cluster.self_name):
+        raise _WatcherMaintenancePause("node in maintenance mode")
+
     job_id = f"{cluster.self_name}-{uuid.uuid4()}"
     settings = _build_watch_job_settings()
     mode = _resolve_watch_mode()
@@ -237,6 +244,9 @@ def start_watcher() -> Optional[Observer]:
             for path in tracker.check_ready():
                 try:
                     _submit_watch_job(path)
+                except _WatcherMaintenancePause:
+                    logger.debug("watcher: deferred %s while node is in maintenance mode", path)
+                    tracker.register(path)
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.error("watcher: submit failed for %s: %s", path, exc)
             _shutdown_event.wait(timeout=1.0)

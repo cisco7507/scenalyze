@@ -1,4 +1,11 @@
-from video_service.core.watcher import _is_safe_watch_path, get_watcher_diagnostics
+import pytest
+
+from video_service.core.watcher import (
+    _WatcherMaintenancePause,
+    _is_safe_watch_path,
+    _submit_watch_job,
+    get_watcher_diagnostics,
+)
 
 
 def test_is_safe_watch_path_accepts_child(tmp_path):
@@ -32,3 +39,13 @@ def test_watcher_diagnostics_reads_env(monkeypatch):
     assert info["output_dir"] == "/tmp/outbox"
     assert info["default_mode"] == "pipeline"
     assert info["stabilize_seconds"] == 5.0
+
+
+def test_submit_watch_job_rejects_when_node_in_maintenance(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "video_service.core.watcher.cluster.is_accepting_new_jobs",
+        lambda node=None: False,
+    )
+
+    with pytest.raises(_WatcherMaintenancePause):
+        _submit_watch_job(str(tmp_path / "incoming.mp4"))

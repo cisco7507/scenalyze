@@ -1,9 +1,29 @@
 import { useEffect, useState } from 'react';
-import { getClusterNodes, getClusterJobs, getMetrics } from '../lib/api';
+import { getClusterNodes, getClusterJobs, getMetrics, setClusterNodeMaintenance } from '../lib/api';
 import type { ClusterNode, JobStatus, Metrics } from '../lib/api';
 import { Share1Icon, ExclamationTriangleIcon, UpdateIcon, LightningBoltIcon } from '@radix-ui/react-icons';
 
-function NodeBadge({ name, url, isUp, isSelf }: { name: string; url: string; isUp: boolean; isSelf: boolean }) {
+function NodeBadge({
+  name,
+  url,
+  isUp,
+  isSelf,
+  isMaintenance,
+  isAccepting,
+  controlsAvailable,
+  busy,
+  onToggleMaintenance,
+}: {
+  name: string;
+  url: string;
+  isUp: boolean;
+  isSelf: boolean;
+  isMaintenance: boolean;
+  isAccepting: boolean;
+  controlsAvailable: boolean;
+  busy: boolean;
+  onToggleMaintenance: () => void;
+}) {
   return (
     <tr className="transition-colors hover:bg-primary-50/50">
       <td className="px-6 py-4 font-semibold text-slate-800">
@@ -17,7 +37,8 @@ function NodeBadge({ name, url, isUp, isSelf }: { name: string; url: string; isU
         </div>
       </td>
       <td className="px-6 py-4 text-xs font-mono text-slate-500">{url}</td>
-      <td className="px-6 py-4 text-right">
+      <td className="px-6 py-4">
+        <div className="flex flex-wrap items-center justify-end gap-2">
         {isUp ? (
           <span className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary-700">
             <span className="relative flex h-2.5 w-2.5">
@@ -32,6 +53,36 @@ function NodeBadge({ name, url, isUp, isSelf }: { name: string; url: string; isU
             Unreachable
           </span>
         )}
+        {isUp ? (
+          isAccepting ? (
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-700">
+              Accepting
+            </span>
+          ) : isMaintenance ? (
+            <span className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700">
+              Maintenance
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600">
+              Admission paused
+            </span>
+          )
+        ) : null}
+        {!isUp || !controlsAvailable ? null : (
+          <button
+            type="button"
+            onClick={onToggleMaintenance}
+            disabled={busy}
+            className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] transition-colors ${
+              isMaintenance
+                ? 'border-primary-200 bg-white text-primary-700 hover:border-primary-300 hover:bg-primary-50'
+                : 'border-amber-200 bg-white text-amber-700 hover:border-amber-300 hover:bg-amber-50'
+            } disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            {busy ? 'Updating…' : isMaintenance ? 'Return to production' : 'Enter maintenance'}
+          </button>
+        )}
+        </div>
       </td>
     </tr>
   );
@@ -60,6 +111,7 @@ export function Overview() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [error, setError] = useState('');
   const [nodeErr, setNodeErr] = useState('');
+  const [maintenanceBusy, setMaintenanceBusy] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let unmounted = false;
@@ -106,6 +158,40 @@ export function Overview() {
   const offlineNodes = nodes ? Object.values(nodes.status).filter((v) => !v).length : 0;
   const onlineNodes = nodes ? Object.values(nodes.status).filter(Boolean).length : 0;
   const totalNodes = nodes ? Object.keys(nodes.status).length : 0;
+  const maintenanceApiAvailable = Boolean(
+    nodes &&
+      Object.keys(nodes.maintenance || {}).length > 0 &&
+      Object.keys(nodes.accepting_new_jobs || {}).length > 0,
+  );
+  const maintenanceNodes = nodes && maintenanceApiAvailable ? Object.values(nodes.maintenance || {}).filter(Boolean).length : 0;
+
+  const refreshCluster = async () => {
+    const [n, j, m] = await Promise.all([
+      getClusterNodes(),
+      getClusterJobs(),
+      getMetrics().catch(() => null),
+    ]);
+    setNodes(n);
+    setJobs(j);
+    if (m) setMetrics(m);
+  };
+
+  const toggleMaintenance = async (nodeName: string, nextEnabled: boolean) => {
+    setMaintenanceBusy((current) => ({ ...current, [nodeName]: true }));
+    try {
+      await setClusterNodeMaintenance(nodeName, nextEnabled);
+      await refreshCluster();
+    } catch (err: any) {
+      const message = String(err?.message || `Failed to update maintenance mode for ${nodeName}`);
+      if (/not found/i.test(message)) {
+        setNodeErr('Maintenance controls require restarting the API nodes so the new maintenance endpoints are loaded.');
+      } else {
+        setNodeErr(message);
+      }
+    } finally {
+      setMaintenanceBusy((current) => ({ ...current, [nodeName]: false }));
+    }
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -196,15 +282,20 @@ export function Overview() {
         <div className="flex items-center justify-between border-b border-slate-200/80 bg-primary-50/75 px-6 py-4">
           <div>
             <h3 className="text-lg font-bold text-slate-900">Worker fleet</h3>
-            <p className="mt-1 text-sm text-slate-500">Each node is a claim-capable executor with deterministic owner routing.</p>
+            <p className="mt-1 text-sm text-slate-500">Each node is a claim-capable executor with deterministic owner routing. Maintenance mode drains local work while blocking new admissions.</p>
           </div>
           <div className="bell-data-pill">
             <LightningBoltIcon className="h-3.5 w-3.5 text-primary-500" />
-            {onlineNodes}/{totalNodes || '—'} online
+            {onlineNodes}/{totalNodes || '—'} online{maintenanceApiAvailable ? ` · ${maintenanceNodes} in maintenance` : ''}
           </div>
         </div>
+        {!maintenanceApiAvailable ? (
+          <div className="border-t border-slate-200/80 bg-amber-50/80 px-6 py-3 text-sm text-amber-800">
+            Restart the API nodes to enable maintenance controls on this fleet view.
+          </div>
+        ) : null}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[880px] text-left text-sm">
             <thead className="bg-slate-50/80 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
               <tr>
                 <th className="px-6 py-4">Node</th>
@@ -215,13 +306,26 @@ export function Overview() {
             <tbody className="divide-y divide-slate-100">
               {nodes ? (
                 Object.entries(nodes.nodes).map(([name, url]) => (
+                  (() => {
+                    const hasMaintenanceState = Object.prototype.hasOwnProperty.call(nodes.maintenance || {}, name);
+                    const hasAcceptingState = Object.prototype.hasOwnProperty.call(nodes.accepting_new_jobs || {}, name);
+                    const isMaintenance = hasMaintenanceState ? Boolean(nodes.maintenance?.[name]) : false;
+                    const isAccepting = hasAcceptingState ? Boolean(nodes.accepting_new_jobs?.[name]) : Boolean(nodes.status[name]);
+                    return (
                   <NodeBadge
                     key={name}
                     name={name}
                     url={url as string}
                     isUp={nodes.status[name]}
                     isSelf={name === nodes.self}
+                    isMaintenance={isMaintenance}
+                    isAccepting={isAccepting}
+                    controlsAvailable={maintenanceApiAvailable}
+                    busy={Boolean(maintenanceBusy[name])}
+                    onToggleMaintenance={() => toggleMaintenance(name, !isMaintenance)}
                   />
+                    );
+                  })()
                 ))
               ) : (
                 <tr>
