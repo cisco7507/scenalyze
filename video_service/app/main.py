@@ -2274,7 +2274,7 @@ def _parse_settings(
     enable_vision_board: Optional[bool] = Form(None),
     enable_llm_frame: Optional[bool] = Form(None),
     enable_vision: Optional[bool] = Form(None),  # Deprecated alias
-    context_size: int = Form(8192),
+    context_size: int = Form(16384),
 ) -> JobSettings:
     resolved_search = _resolve_enable_web_search(
         enable_search=enable_search,

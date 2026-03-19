@@ -431,6 +431,7 @@ def test_lm_studio_pipeline_uses_structure_only_json_schema(monkeypatch):
     assert call["json"]["temperature"] == 0.0
     assert call["json"]["top_p"] == 1.0
     assert call["json"]["presence_penalty"] == 0.0
+    assert "n_ctx" not in call["json"]
     assert call["json"]["response_format"]["type"] == "json_schema"
     category_schema = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]
     assert category_schema == {"type": "string"}
@@ -469,8 +470,33 @@ def test_llama_server_pipeline_omits_prompt_categories_and_uses_structure_only_s
     assert call["url"].endswith("/v1/chat/completions")
     assert "Categories:" not in call["json"]["messages"][1]["content"]
     assert 'OCR Text: "sample"' in call["json"]["messages"][1]["content"]
+    assert call["json"]["n_ctx"] == 8192
     category_schema = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]
     assert category_schema == {"type": "string"}
+
+
+def test_llama_server_agent_passes_request_context_limit(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse({"choices": [{"message": {"content": "[TOOL: FINAL | reason=\"ok\"]"}}]})
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    llm = HybridLLM()
+    result = llm.query_agent(
+        provider="llama-server",
+        backend_model="unsloth/Qwen3.5-4B-GGUF",
+        prompt="test prompt",
+        context_size=16384,
+    )
+
+    assert result == '[TOOL: FINAL | reason="ok"]'
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["url"].endswith("/v1/chat/completions")
+    assert call["json"]["n_ctx"] == 16384
 
 
 def test_lm_studio_category_rerank_uses_category_index_schema(monkeypatch):
