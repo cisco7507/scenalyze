@@ -31,6 +31,37 @@ Useful URLs:
 - Dashboard: `http://localhost:5173`
 - API docs: `http://localhost:8000/docs`
 
+## MCP Server
+
+Scenalyze now includes a first-party MCP server in [/Users/gsp/Projects/scenalyze/video_service/mcp](/Users/gsp/Projects/scenalyze/video_service/mcp).
+
+Local `stdio` transport:
+
+```bash
+python -m video_service.mcp --transport stdio
+```
+
+Remote Streamable HTTP transport:
+
+```bash
+python -m video_service.mcp --transport streamable-http --host 127.0.0.1 --port 8766 --path /mcp
+```
+
+This transport defaults to stateless HTTP, so clients do not need to manage `Mcp-Session-Id` headers. If you explicitly want session-based Streamable HTTP, add `--stateful-http`.
+
+Default behavior uses local in-process access to the Scenalyze DB, taxonomy, and diagnostics. To proxy through an already-running Scenalyze API instead, switch to HTTP service mode:
+
+```bash
+python -m video_service.mcp --transport streamable-http --service-mode http --api-base-url http://127.0.0.1:8000
+```
+
+The MCP server exposes:
+
+- job submission tools for local file paths and remote URLs
+- job status, result, artifact, event, and explanation tools/resources
+- taxonomy explorer and taxonomy match tools
+- cluster, device, concurrency, system profile, and provider model diagnostics
+
 ## Repo Landmarks
 
 - API: [/Users/gsp/Projects/scenalyze/video_service/app/main.py](/Users/gsp/Projects/scenalyze/video_service/app/main.py)
